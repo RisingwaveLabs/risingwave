@@ -140,7 +140,7 @@ pub struct ConfigMap {
     streaming_enable_bushy_join: bool,
 
     /// Enable arrangement backfill for streaming queries. Defaults to false.
-    #[parameter(default = false)]
+    #[parameter(default = true)]
     streaming_enable_arrangement_backfill: bool,
 
     /// Allow `jsonb` in stream key

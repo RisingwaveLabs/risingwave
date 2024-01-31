@@ -210,6 +210,9 @@ impl BackfillState {
             committed_state,
             current_state,
         } = self.inner.get_mut(&vnode).unwrap();
+        if vnode == VirtualNode::from_scalar(0) {
+            tracing::info!("mark_committed: vnode=0");
+        }
 
         assert!(matches!(
             current_state,
@@ -522,6 +525,10 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
                         },
                     )
                 } else {
+                    if vnode == VirtualNode::from_scalar(0) {
+                        tracing::info!("recovered progress for vnode=0");
+                    }
+
                     BackfillStatePerVnode::new(
                         BackfillProgressPerVnode::InProgress {
                             current_pos: current_pos.clone(),

@@ -427,6 +427,7 @@ where
                 );
 
                 // Persist state on barrier
+                tracing::trace!("Persisting state on barrier at epoch {:#?}", barrier.epoch);
                 persist_state_per_vnode(
                     barrier.epoch,
                     &mut self.state_table,
@@ -481,6 +482,7 @@ where
                                 .finish_progress(vnode, upstream_table.pk_indices().len());
                         }
 
+                        tracing::trace!("Persisting state finally at epoch {:#?}", barrier.epoch);
                         persist_state_per_vnode(
                             barrier.epoch,
                             &mut self.state_table,
