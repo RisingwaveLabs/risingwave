@@ -81,6 +81,25 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "end-to-end test (rate limited)"
+    command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe-with-rate-limit"
+    if: |
+      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-test"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 30
+    retry: *auto-retry
+
   - label: "end-to-end test"
     command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: |

@@ -794,6 +794,59 @@ profile:
         health-check-port: 6788
       - use: compactor
 
+  ci-3streaming-2serving-3fe-with-rate-limit:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        api-requests-max: 20
+        api-requests-deadline: 2s
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+        role: streaming
+        parallelism: 4
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+        role: streaming
+        parallelism: 4
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+        role: streaming
+        parallelism: 4
+      - use: compute-node
+        port: 5685
+        exporter-port: 1225
+        enable-tiered-cache: true
+        role: serving
+        parallelism: 4
+      - use: compute-node
+        port: 5686
+        exporter-port: 1226
+        enable-tiered-cache: true
+        role: serving
+        parallelism: 8
+      - use: frontend
+        port: 4565
+        exporter-port: 2222
+        health-check-port: 6786
+      - use: frontend
+        port: 4566
+        exporter-port: 2223
+        health-check-port: 6787
+      - use: frontend
+        port: 4567
+        exporter-port: 2224
+        health-check-port: 6788
+      - use: compactor
+
   ci-pubsub:
     config-path: src/config/ci.toml
     steps:
