@@ -70,6 +70,7 @@ wait_all_process_exit() {
 # So we duplicate the definition here.
 kill_cluster() {
   # Kill other components
+  echo "kill risingwave nodes"
   tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
   | grep -v 'kafka' \
   | grep -v 'zookeeper' \
@@ -90,6 +91,7 @@ kill_cluster() {
   fi
   set -e
 
+  echo "kill risedev"
   tmux kill-session -t risedev
   test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
   wait_all_process_exit
