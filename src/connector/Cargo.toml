@@ -128,7 +128,7 @@ rustls-native-certs = "0.7"
 rustls-pemfile = "2"
 rustls-pki-types = "1"
 rw_futures_util = { workspace = true }
-sea-schema = { version = "0.15", default-features = false, features = [
+sea-schema = { version = "0.16", default-features = false, features = [
     "discovery",
     "sqlx-postgres",
     "sqlx-mysql",
