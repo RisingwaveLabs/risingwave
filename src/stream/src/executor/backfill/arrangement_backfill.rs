@@ -15,8 +15,9 @@
 use std::collections::HashMap;
 
 use either::Either;
+use futures::stream;
 use futures::stream::{select_all, select_with_strategy};
-use futures::{stream, TryStreamExt};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
@@ -30,8 +31,9 @@ use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
     compute_bounds, create_builder, create_limiter, get_progress_per_vnode, mapping_chunk,
-    mapping_message, mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode,
+    mapping_message, mark_chunk_ref_by_vnode, owned_row_iter_with_vnode, persist_state_per_vnode,
     update_pos_by_vnode, BackfillProgressPerVnode, BackfillRateLimiter, BackfillState,
+    RowAndVnodeStreamItem,
 };
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgressReporter;
@@ -311,7 +313,7 @@ where
                                             .inc_by(cur_barrier_upstream_processed_rows);
                                         break 'backfill_loop;
                                     }
-                                    Some((vnode, row)) => {
+                                    Some(RowAndVnodeStreamItem::Record { vnode, row }) => {
                                         let builder = builders.get_mut(&vnode).unwrap();
                                         if let Some(chunk) = builder.append_one_row(row) {
                                             yield Message::Chunk(Self::handle_snapshot_chunk(
@@ -324,6 +326,26 @@ where
                                                 &self.output_indices,
                                             )?);
                                         }
+                                    }
+                                    Some(RowAndVnodeStreamItem::Finished { vnode }) => {
+                                        // Consume remaining rows in the builder.
+                                        let builder = builders.get_mut(&vnode).unwrap();
+                                        if let Some(data_chunk) = builder.consume_all() {
+                                            yield Message::Chunk(Self::handle_snapshot_chunk(
+                                                data_chunk,
+                                                vnode,
+                                                &pk_in_output_indices,
+                                                &mut backfill_state,
+                                                &mut cur_barrier_snapshot_processed_rows,
+                                                &mut total_snapshot_processed_rows,
+                                                &self.output_indices,
+                                            )?);
+                                        }
+                                        // Update state for that vnode to finished.
+                                        backfill_state.finish_progress(
+                                            vnode,
+                                            upstream_table.pk_indices().len(),
+                                        );
                                     }
                                 }
                             }
@@ -356,10 +378,13 @@ where
                                     // End of the snapshot read stream.
                                     // We let the barrier handling logic take care of upstream updates.
                                     // But we still want to exit backfill loop, so we mark snapshot read complete.
+                                    // Note that we don't have to drain builders here,
+                                    // since we did not do snapshot read at all,
+                                    // so there should be no rows in the builders.
                                     snapshot_read_complete = true;
                                     break;
                                 }
-                                Some((vnode, row)) => {
+                                Some(RowAndVnodeStreamItem::Record { vnode, row }) => {
                                     let builder = builders.get_mut(&vnode).unwrap();
                                     if let Some(chunk) = builder.append_one_row(row) {
                                         yield Message::Chunk(Self::handle_snapshot_chunk(
@@ -374,6 +399,13 @@ where
                                     }
 
                                     break;
+                                }
+                                Some(RowAndVnodeStreamItem::Finished { vnode }) => {
+                                    // Update state for that vnode to finished.
+                                    backfill_state
+                                        .finish_progress(vnode, upstream_table.pk_indices().len());
+                                    // But some other vnodes may not be finished yet.
+                                    continue;
                                 }
                             }
                         }
@@ -607,7 +639,7 @@ where
         }
     }
 
-    #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
+    #[try_stream(ok = Option<RowAndVnodeStreamItem>, error = StreamExecutorError)]
     async fn make_snapshot_stream<'a>(
         upstream_table: &'a ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
@@ -684,7 +716,7 @@ where
     /// remaining data in `builder` must be flushed manually.
     /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be
     /// present, Then when we flush we contain duplicate rows.
-    #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
+    #[try_stream(ok = Option<RowAndVnodeStreamItem>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode(
         upstream_table: &ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
@@ -694,8 +726,11 @@ where
             let backfill_progress = backfill_state.get_progress(&vnode)?;
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::NotStarted => None,
-                BackfillProgressPerVnode::Completed { current_pos, .. }
-                | BackfillProgressPerVnode::InProgress { current_pos, .. } => {
+                BackfillProgressPerVnode::Completed { .. } => {
+                    // If completed, we don't need to continue reading snapshot.
+                    continue;
+                }
+                BackfillProgressPerVnode::InProgress { current_pos, .. } => {
                     Some(current_pos.clone())
                 }
             };
@@ -720,12 +755,7 @@ where
                 )
                 .await?;
 
-            let vnode_row_iter = Box::pin(owned_row_iter(vnode_row_iter));
-
-            let vnode_row_iter = vnode_row_iter.map_ok(move |row| (vnode, row));
-
-            let vnode_row_iter = Box::pin(vnode_row_iter);
-
+            let vnode_row_iter = Box::pin(owned_row_iter_with_vnode(vnode, vnode_row_iter));
             iterators.push(vnode_row_iter);
         }
 

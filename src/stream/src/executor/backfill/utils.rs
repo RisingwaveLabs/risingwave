@@ -666,6 +666,28 @@ pub(crate) fn compute_bounds(
     }
 }
 
+pub(crate) enum RowAndVnodeStreamItem {
+    Finished { vnode: VirtualNode },
+    Record { vnode: VirtualNode, row: OwnedRow },
+}
+
+#[try_stream(ok = RowAndVnodeStreamItem, error = StreamExecutorError)]
+pub(crate) async fn owned_row_iter_with_vnode<S, E>(vnode: VirtualNode, storage_iter: S)
+where
+    StreamExecutorError: From<E>,
+    S: Stream<Item = Result<KeyedRow<Bytes>, E>>,
+{
+    pin_mut!(storage_iter);
+    while let Some(row) = storage_iter.next().await {
+        let row = row?;
+        yield RowAndVnodeStreamItem::Record {
+            vnode,
+            row: row.into_owned_row(),
+        }
+    }
+    yield RowAndVnodeStreamItem::Finished { vnode }
+}
+
 #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
 pub(crate) async fn owned_row_iter<S, E>(storage_iter: S)
 where
