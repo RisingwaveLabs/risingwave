@@ -79,27 +79,27 @@ ALTER TABLE t RENAME TO t2;
 query TT
 SHOW CREATE TABLE t2;
 ----
-public.t2 CREATE TABLE t2 (v1 INT PRIMARY KEY, v2 STRUCT<v1 INT, v2 STRUCT<v1 INT, v2 INT>>)
+public.t2 CREATE TABLE "t2" (v1 INT PRIMARY KEY, v2 STRUCT<v1 INT, v2 STRUCT<v1 INT, v2 INT>>)
 
 query TT
 SHOW CREATE VIEW v2;
 ----
-public.v2 CREATE VIEW v2 AS (SELECT COUNT(*) FROM t2 AS t, t2 AS t2 WHERE t.v1 = t2.v1)
+public.v2 CREATE VIEW v2 AS (SELECT COUNT(*) FROM "t2" AS "t", "t2" AS t2 WHERE t.v1 = t2.v1)
 
 query TT
 SHOW CREATE VIEW v3;
 ----
-public.v3 CREATE VIEW v3 AS (SELECT MAX((t.v2).v1) FROM t2 AS t)
+public.v3 CREATE VIEW v3 AS (SELECT MAX((t.v2).v1) FROM "t2" AS t)
 
 query TT
 SHOW CREATE VIEW v4;
 ----
-public.v4 CREATE VIEW v4 AS (SELECT * FROM t2 AS t JOIN t2 AS t2 ON (t.v1 = t2.v1) ORDER BY t.v1, t2.v1)
+public.v4 CREATE VIEW v4 AS (SELECT * FROM "t2" AS "t" JOIN "t2" AS t2 ON (t.v1 = t2.v1) ORDER BY t.v1, t2.v1)
 
 query TT
 SHOW CREATE MATERIALIZED VIEW mv;
 ----
-public.mv CREATE MATERIALIZED VIEW mv AS SELECT v1, (t.v2).v1 AS v21 FROM t2 AS t
+public.mv CREATE MATERIALIZED VIEW mv AS SELECT v1, (t.v2).v1 AS v21 FROM "t2" AS "t"
 
 # alter mview rename
 statement ok
@@ -108,7 +108,7 @@ ALTER MATERIALIZED VIEW mv RENAME TO mv2;
 query TT
 SHOW CREATE MATERIALIZED VIEW mv2;
 ----
-public.mv2 CREATE MATERIALIZED VIEW mv2 AS SELECT v1, (t.v2).v1 AS v21 FROM t2 AS t
+public.mv2 CREATE MATERIALIZED VIEW "mv2" AS SELECT v1, (t.v2).v1 AS v21 FROM "t2" AS "t"
 
 statement ok
 ALTER SINK sink RENAME TO sink1;
@@ -116,7 +116,7 @@ ALTER SINK sink RENAME TO sink1;
 query TT
 SHOW CREATE SINK sink1;
 ----
-public.sink1 CREATE SINK sink1 AS SELECT mv3.v1 AS v1, mv3.v21 AS v2 FROM mv2 AS mv3 WITH (connector = 'blackhole')
+public.sink1 CREATE SINK "sink1" AS SELECT mv3.v1 AS v1, mv3.v21 AS v2 FROM "mv2" AS mv3 WITH (connector = 'blackhole')
 
 statement ok
 ALTER SUBSCRIPTION subscription RENAME TO subscription1;
@@ -124,7 +124,7 @@ ALTER SUBSCRIPTION subscription RENAME TO subscription1;
 query TT
 SHOW CREATE SUBSCRIPTION subscription1;
 ----
-public.subscription1 CREATE SUBSCRIPTION subscription1 FROM mv2 WITH (retention = '1D')
+public.subscription1 CREATE SUBSCRIPTION "subscription1" FROM "mv2" WITH (retention = '1D')
 
 # alter mview rename with alias conflict, used by sink1
 statement ok
@@ -140,12 +140,12 @@ ALTER VIEW v1 RENAME TO v5;
 query TT
 SHOW CREATE VIEW v5;
 ----
-public.v5 CREATE VIEW v5 AS (SELECT * FROM t_as_1 AS t_as WHERE id = 1)
+public.v5 CREATE VIEW v5 AS (SELECT * FROM "t_as_1" AS "t_as" WHERE id = 1)
 
 query TT
 SHOW CREATE MATERIALIZED VIEW mv_on_v1;
 ----
-public.mv_on_v1 CREATE MATERIALIZED VIEW mv_on_v1 AS SELECT * FROM v5 AS v1
+public.mv_on_v1 CREATE MATERIALIZED VIEW mv_on_v1 AS SELECT * FROM "v5" AS "v1"
 
 statement ok
 ALTER INDEX idx RENAME TO idx1;
@@ -153,7 +153,7 @@ ALTER INDEX idx RENAME TO idx1;
 query TT
 SHOW CREATE INDEX idx1;
 ----
-public.idx1 CREATE INDEX idx1 ON t2(v1)
+public.idx1 CREATE INDEX "idx1" ON "t2"(v1)
 
 statement ok
 INSERT INTO t2 VALUES(1,(1,(1,2)));
@@ -192,12 +192,12 @@ ALTER SOURCE src RENAME TO src1;
 query TT
 SHOW CREATE SOURCE src1;
 ----
-public.src1 CREATE SOURCE src1 (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '1', fields.v.end = '10', datagen.rows.per.second = '15', datagen.split.num = '1') FORMAT PLAIN ENCODE JSON
+public.src1 CREATE SOURCE "src1" (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '1', fields.v.end = '10', datagen.rows.per.second = '15', datagen.split.num = '1') FORMAT PLAIN ENCODE JSON
 
 query TT
 SHOW CREATE MATERIALIZED VIEW mv4;
 ----
-public.mv4 CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM src1 AS src
+public.mv4 CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM "src1" AS "src"
 
 # should use `ALTER TABLE` to alter a table with connector
 statement error ALTER TABLE
@@ -209,7 +209,7 @@ ALTER TABLE msrc RENAME TO msrc1;
 query TT
 SHOW CREATE TABLE msrc1;
 ----
-public.msrc1 CREATE TABLE msrc1 (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '1', fields.v.end = '10', datagen.rows.per.second = '15', datagen.split.num = '1') FORMAT PLAIN ENCODE JSON
+public.msrc1 CREATE TABLE "msrc1" (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '1', fields.v.end = '10', datagen.rows.per.second = '15', datagen.split.num = '1') FORMAT PLAIN ENCODE JSON
 
 # the underlying source cannot have the same name with other sources
 statement error source .+ exists
@@ -280,6 +280,35 @@ DROP TABLE t2;
 
 statement ok
 DROP TABLE t_as_1;
+
+# BEGIN uppercase
+
+statement ok
+CREATE TABLE "aBc" (f1 int);
+
+statement ok
+CREATE MATERIALIZED VIEW mv AS SELECT "aBc".f1 FROM "aBc";
+
+statement ok
+ALTER TABLE "aBc" RENAME TO "dEf";
+
+query TT
+SHOW CREATE TABLE "dEf";
+----
+public.dEf CREATE TABLE "dEf" (f1 INT)
+
+query TT
+SHOW CREATE MATERIALIZED VIEW mv;
+----
+public.mv CREATE MATERIALIZED VIEW mv AS SELECT "aBc".f1 FROM "dEf" AS "aBc"
+
+statement ok
+DROP MATERIALIZED VIEW mv;
+
+statement ok
+DROP TABLE "dEf";
+
+# END uppercase
 
 # BEGIN references in changelog
 

@@ -183,7 +183,7 @@ impl Binder {
                     .indices_of
                     .iter()
                     .filter(|(_, idxs)| idxs.iter().all(|i| !self.context.columns[*i].is_hidden))
-                    .map(|(s, idxes)| (Ident::new_unchecked(s.to_owned()), idxes))
+                    .map(|(s, idxes)| (Ident::with_real_value(s), idxes))
                     .collect::<Vec<_>>();
                 columns.sort_by(|a, b| a.0.real_value().cmp(&b.0.real_value()));
 
@@ -266,14 +266,14 @@ impl Binder {
         column: Ident,
     ) -> Result<Expr> {
         if indices.len() == 1 {
-            let right_table = context.columns[indices[0]].table_name.clone();
+            let right_table = context.columns[indices[0]].table_name.as_ref();
             Ok(Expr::CompoundIdentifier(vec![
-                Ident::new_unchecked(right_table),
+                Ident::with_real_value(right_table),
                 column,
             ]))
         } else if let Some(group_id) = context.column_group_context.mapping.get(&indices[0]) {
             Ok(Expr::CompoundIdentifier(vec![
-                Ident::new_unchecked(format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
+                Ident::with_real_value(&format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
                 column,
             ]))
         } else {

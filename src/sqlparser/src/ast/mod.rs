@@ -167,6 +167,10 @@ impl Ident {
         })
     }
 
+    pub fn with_real_value(real_value: &str) -> Self {
+        Self::with_quote_unchecked('"', real_value)
+    }
+
     /// Value after considering quote style
     /// In certain places, double quotes can force case-sensitive, but not always
     /// e.g. session variables.

@@ -3827,7 +3827,7 @@ mod tests {
         assert_eq!(source.name, "s2");
         assert_eq!(
             source.definition,
-            "CREATE SOURCE s2 (v1 INT) WITH (\
+            "CREATE SOURCE \"s2\" (v1 INT) WITH (\
   connector = 'kafka', \
   topic = 'kafka_alter', \
   properties.bootstrap.server = 'message_queue:29092', \
@@ -3841,7 +3841,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             view.definition,
-            "CREATE VIEW view_1 AS SELECT v1 FROM s2 AS s1"
+            "CREATE VIEW view_1 AS SELECT v1 FROM \"s2\" AS \"s1\""
         );
 
         mgr.drop_relation(ObjectType::Source, source_id, DropMode::Cascade)

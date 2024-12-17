@@ -423,8 +423,8 @@ pub async fn handle_create_index(
         let (schema_name, table, index_table_name) =
             resolve_index_schema(&session, index_name, table_name)?;
         let qualified_index_name = ObjectName(vec![
-            Ident::with_quote_unchecked('"', &schema_name),
-            Ident::with_quote_unchecked('"', &index_table_name),
+            Ident::with_real_value(&schema_name),
+            Ident::with_real_value(&index_table_name),
         ]);
         if let Either::Right(resp) = session.check_relation_name_duplicated(
             qualified_index_name,

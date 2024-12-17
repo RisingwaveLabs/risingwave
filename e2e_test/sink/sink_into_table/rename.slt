@@ -19,7 +19,7 @@ ALTER SINK s RENAME TO s1;
 query TT
 SELECT name, definition from rw_sinks;
 ----
-s1 CREATE SINK s1 INTO target AS SELECT * FROM source WITH (type = 'append-only')
+s1 CREATE SINK "s1" INTO target AS SELECT * FROM source WITH (type = 'append-only')
 
 statement ok
 ALTER TABLE source RENAME TO src;
@@ -30,13 +30,13 @@ ALTER TABLE target RENAME TO tar;
 query TT rowsort
 SELECT name, definition from rw_tables;
 ----
-src	CREATE TABLE src (v INT) APPEND ONLY
-tar	CREATE TABLE tar (v INT)
+src	CREATE TABLE "src" (v INT) APPEND ONLY
+tar	CREATE TABLE "tar" (v INT)
 
 query TT
 SELECT name, definition from rw_sinks;
 ----
-s1 CREATE SINK s1 INTO tar AS SELECT * FROM src AS source WITH (type = 'append-only')
+s1 CREATE SINK "s1" INTO "tar" AS SELECT * FROM "src" AS "source" WITH (type = 'append-only')
 
 statement ok
 drop sink s1;
