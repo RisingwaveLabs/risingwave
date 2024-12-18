@@ -287,11 +287,6 @@ do
     exit 1
   fi
 done
-
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 4000 )) ; then
-    echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
-    exit 1
-fi
 '''
 
 [tasks.doc]

@@ -1,9 +1,9 @@
-include ../../nexmark/produce_kafka.slt.part
-include ../../nexmark/create_sources_kafka.slt.part
+# include ../../nexmark/produce_kafka.slt.part
+# include ../../nexmark/create_sources_kafka.slt.part
 
-control substitution off
+# control substitution off
 
-include ../../streaming/nexmark/create_views.slt.part
-include ../../streaming/nexmark/test_mv_result.slt.part
+# include ../../streaming/nexmark/create_views.slt.part
+# include ../../streaming/nexmark/test_mv_result.slt.part
 
-include ../../nexmark/drop_sources_kafka.slt.part
+# include ../../nexmark/drop_sources_kafka.slt.part

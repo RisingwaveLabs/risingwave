@@ -289,15 +289,15 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             });
 
         let fmt_layer = match deployment {
-            Deployment::Ci => fmt_layer
-                .compact()
-                .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
-                .boxed(),
+            // Deployment::Ci => fmt_layer
+            //     .compact()
+            //     .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
+            //     .boxed(),
             Deployment::Cloud => fmt_layer
                 .json()
                 .map_event_format(|e| e.with_current_span(false)) // avoid duplication as there's a span list field
                 .boxed(),
-            Deployment::Other => {
+            Deployment::Ci | Deployment::Other => {
                 if env_var_is_true("ENABLE_PRETTY_LOG") {
                     fmt_layer.pretty().boxed()
                 } else {

@@ -171,7 +171,8 @@ impl DiagnoseCommand {
                 &mut row,
                 worker_node.get_state().ok().map(|s| s.as_str_name()),
             );
-            row.add_cell(worker_node.parallelism().into());
+            // FIXME:
+            // row.add_cell(worker_node.parallelism().into());
             try_add_cell(
                 &mut row,
                 worker_node.property.as_ref().map(|p| p.is_streaming),

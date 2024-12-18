@@ -36,7 +36,7 @@ python3 -m pip install --break-system-packages requests protobuf fastavro conflu
 apt-get -y install jq
 
 echo "--- e2e, inline test"
-RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
+RUST_LOG="debug,risingwave_stream=debug,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info,events::stream::message::chunk=trace" \
 risedev ci-start ci-inline-source-test
 risedev slt './e2e_test/source_inline/**/*.slt' --keep-db-on-failure -j16
 risedev slt './e2e_test/source_inline/**/*.slt.serial'

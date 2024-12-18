@@ -46,9 +46,9 @@ select array_length(upstream_fragment_ids) from rw_fragments where array_contain
 ----
 3
 
-# XXX: wait until source reader is ready. then produce data.
-# This is a temporary workaround for a data loss bug https://github.com/risingwavelabs/risingwave/issues/19681#issuecomment-2532183002
-sleep 2s
+# # XXX: wait until source reader is ready. then produce data.
+# # This is a temporary workaround for a data loss bug https://github.com/risingwavelabs/risingwave/issues/19681#issuecomment-2532183002
+# sleep 2s
 
 system ok
 cat <<EOF | rpk topic produce test-topic-19563

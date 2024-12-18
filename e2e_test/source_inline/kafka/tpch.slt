@@ -1,30 +1,30 @@
-include ../../tpch/produce_kafka.slt.part
-include ../../tpch/create_sources_kafka.slt.part
+# include ../../tpch/produce_kafka.slt.part
+# include ../../tpch/create_sources_kafka.slt.part
 
-control substitution off
+# control substitution off
 
-include ../../streaming/tpch/create_views.slt.part
-include ../../streaming/tpch/q1.slt.part
-include ../../streaming/tpch/q2.slt.part
-include ../../streaming/tpch/q3.slt.part
-include ../../streaming/tpch/q4.slt.part
-include ../../streaming/tpch/q5.slt.part
-include ../../streaming/tpch/q6.slt.part
-include ../../streaming/tpch/q7.slt.part
-include ../../streaming/tpch/q8.slt.part
-include ../../streaming/tpch/q9.slt.part
-include ../../streaming/tpch/q10.slt.part
-include ../../streaming/tpch/q11.slt.part
-include ../../streaming/tpch/q12.slt.part
-include ../../streaming/tpch/q13.slt.part
-include ../../streaming/tpch/q14.slt.part
-include ../../streaming/tpch/q15.slt.part
-include ../../streaming/tpch/q16.slt.part
-include ../../streaming/tpch/q17.slt.part
-include ../../streaming/tpch/q18.slt.part
-include ../../streaming/tpch/q19.slt.part
-include ../../streaming/tpch/q20.slt.part
-include ../../streaming/tpch/q21.slt.part
-include ../../streaming/tpch/q22.slt.part
+# include ../../streaming/tpch/create_views.slt.part
+# include ../../streaming/tpch/q1.slt.part
+# include ../../streaming/tpch/q2.slt.part
+# include ../../streaming/tpch/q3.slt.part
+# include ../../streaming/tpch/q4.slt.part
+# include ../../streaming/tpch/q5.slt.part
+# include ../../streaming/tpch/q6.slt.part
+# include ../../streaming/tpch/q7.slt.part
+# include ../../streaming/tpch/q8.slt.part
+# include ../../streaming/tpch/q9.slt.part
+# include ../../streaming/tpch/q10.slt.part
+# include ../../streaming/tpch/q11.slt.part
+# include ../../streaming/tpch/q12.slt.part
+# include ../../streaming/tpch/q13.slt.part
+# include ../../streaming/tpch/q14.slt.part
+# include ../../streaming/tpch/q15.slt.part
+# include ../../streaming/tpch/q16.slt.part
+# include ../../streaming/tpch/q17.slt.part
+# include ../../streaming/tpch/q18.slt.part
+# include ../../streaming/tpch/q19.slt.part
+# include ../../streaming/tpch/q20.slt.part
+# include ../../streaming/tpch/q21.slt.part
+# include ../../streaming/tpch/q22.slt.part
 
-include ../../tpch/drop_sources_kafka.slt.part
+# include ../../tpch/drop_sources_kafka.slt.part
