@@ -76,8 +76,8 @@ use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
     create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext,
-    SourceManagerRef, StreamFragmentGraph,
+    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceManagerRef,
+    StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 

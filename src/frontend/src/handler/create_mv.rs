@@ -38,6 +38,8 @@ use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::ordinal;
 
+pub const RESOURCE_GROUP_KEY: &str = "resource_group";
+
 pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
     if columns.is_empty() {
         None
@@ -203,9 +205,22 @@ pub async fn handle_create_mv_bound(
         return Ok(resp);
     }
 
-    let (table, graph, dependencies) = {
+    let (table, graph, dependencies, resource_group) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        if !context.with_options().is_empty() {
+        let mut with_options = context.with_options().clone();
+
+        let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
+
+        if resource_group.is_some()
+            && !context
+                .session_ctx()
+                .config()
+                .streaming_use_arrangement_backfill()
+        {
+            return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
+        }
+
+        if !with_options.is_empty() {
             // get other useful fields by `remove`, the logic here is to reject unknown options.
             return Err(RwError::from(ProtocolError(format!(
                 "unexpected options in WITH clause: {:?}",
@@ -238,7 +253,7 @@ It only indicates the physical clustering of the data, which may improve the per
 
         let graph = build_graph(plan)?;
 
-        (table, graph, dependencies)
+        (table, graph, dependencies, resource_group)
     };
 
     // Ensure writes to `StreamJobTracker` are atomic.
@@ -256,7 +271,7 @@ It only indicates the physical clustering of the data, which may improve the per
     let session = session.clone();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_materialized_view(table, graph, dependencies, None)
+        .create_materialized_view(table, graph, dependencies, resource_group)
         .await?;
 
     Ok(PgResponse::empty_result(
