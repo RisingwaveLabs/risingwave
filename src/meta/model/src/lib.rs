@@ -63,6 +63,7 @@ pub mod user_privilege;
 pub mod view;
 pub mod worker;
 pub mod worker_property;
+mod fragment_relation;
 
 pub type WorkerId = i32;
 
