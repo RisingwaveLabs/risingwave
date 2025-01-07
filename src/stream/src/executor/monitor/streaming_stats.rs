@@ -160,6 +160,7 @@ pub struct StreamingMetrics {
     pub barrier_inflight_latency: Histogram,
     /// The duration of sync to storage.
     pub barrier_sync_latency: Histogram,
+    pub barrier_batch_size: Histogram,
     /// The progress made by the earliest in-flight barriers in the local barrier manager.
     pub barrier_manager_progress: IntCounter,
 
@@ -847,6 +848,13 @@ impl StreamingMetrics {
         );
         let barrier_sync_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let opts = histogram_opts!(
+            "stream_barrier_batch_size",
+            "barrier_batch_size",
+            exponential_buckets(1.0, 2.0, 8).unwrap()
+        );
+        let barrier_batch_size = register_histogram_with_registry!(opts, registry).unwrap();
+
         let barrier_manager_progress = register_int_counter_with_registry!(
             "stream_barrier_manager_progress",
             "The number of actors that have processed the earliest in-flight barriers",
@@ -1129,6 +1137,7 @@ impl StreamingMetrics {
             over_window_same_output_count,
             barrier_inflight_latency,
             barrier_sync_latency,
+            barrier_batch_size,
             barrier_manager_progress,
             kv_log_store_storage_write_count,
             kv_log_store_storage_write_size,

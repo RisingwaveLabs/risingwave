@@ -1150,6 +1150,10 @@ pub struct StreamingDeveloperConfig {
     /// When true, all jdbc sinks with connector='jdbc' and jdbc.url="jdbc:postgresql://..."
     /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
     pub switch_jdbc_pg_to_native: bool,
+
+    /// The maximum number of consecutive barriers allowed in a message when sent between actors.
+    #[serde(default = "default::developer::stream_max_barrier_batch_size")]
+    pub max_barrier_batch_size: u32,
 }
 
 /// The subsections `[batch.developer]`.
@@ -2011,6 +2015,10 @@ pub mod default {
 
         pub fn stream_dml_channel_initial_permits() -> usize {
             32768
+        }
+
+        pub fn stream_max_barrier_batch_size() -> u32 {
+            1024
         }
 
         pub fn stream_hash_agg_max_dirty_groups_heap_size() -> usize {

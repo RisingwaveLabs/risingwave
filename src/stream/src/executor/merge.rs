@@ -673,7 +673,6 @@ mod tests {
     use futures::FutureExt;
     use risingwave_common::array::Op;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_pb::stream_plan::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
@@ -706,24 +705,33 @@ mod tests {
         let mut buffer = BufferChunks::new(input, 100, Schema::new(vec![]));
 
         // Send a chunk
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
             assert_eq!(chunk.ops().len() as u64, 10);
         });
 
         // Send 2 chunks and expect them to be merged.
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
             assert_eq!(chunk.ops().len() as u64, 20);
         });
 
         // Send a watermark.
-        tx.send(Message::Watermark(Watermark {
-            col_idx: 0,
-            data_type: DataType::Int64,
-            val: ScalarImpl::Int64(233),
-        }))
+        tx.send(
+            Message::Watermark(Watermark {
+                col_idx: 0,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(233),
+            })
+            .into(),
+        )
         .await
         .unwrap();
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Watermark(watermark) => {
@@ -731,13 +739,20 @@ mod tests {
         });
 
         // Send 2 chunks before a watermark. Expect the 2 chunks to be merged and the watermark to be emitted.
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
-        tx.send(Message::Watermark(Watermark {
-            col_idx: 0,
-            data_type: DataType::Int64,
-            val: ScalarImpl::Int64(233),
-        }))
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
+        tx.send(
+            Message::Watermark(Watermark {
+                col_idx: 0,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(233),
+            })
+            .into(),
+        )
         .await
         .unwrap();
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
@@ -750,7 +765,7 @@ mod tests {
         // Send a barrier.
         let barrier = Barrier::new_test_barrier(test_epoch(1));
         test_env.inject_barrier(&barrier, [2]);
-        tx.send(Message::Barrier(barrier.clone().into_dispatcher()))
+        tx.send(Message::Barrier(barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
@@ -758,11 +773,15 @@ mod tests {
         });
 
         // Send 2 chunks before a barrier. Expect the 2 chunks to be merged and the barrier to be emitted.
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
         let barrier = Barrier::new_test_barrier(test_epoch(2));
         test_env.inject_barrier(&barrier, [2]);
-        tx.send(Message::Barrier(barrier.clone().into_dispatcher()))
+        tx.send(Message::Barrier(barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
@@ -814,22 +833,27 @@ mod tests {
             let handle = tokio::spawn(async move {
                 for (idx, epoch) in epochs {
                     if idx % 20 == 0 {
-                        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+                        tx.send(Message::Chunk(build_test_chunk(10)).into())
+                            .await
+                            .unwrap();
                     } else {
-                        tx.send(Message::Watermark(Watermark {
-                            col_idx: (idx as usize / 20 + tx_id) % CHANNEL_NUMBER,
-                            data_type: DataType::Int64,
-                            val: ScalarImpl::Int64(idx as i64),
-                        }))
+                        tx.send(
+                            Message::Watermark(Watermark {
+                                col_idx: (idx as usize / 20 + tx_id) % CHANNEL_NUMBER,
+                                data_type: DataType::Int64,
+                                val: ScalarImpl::Int64(idx as i64),
+                            })
+                            .into(),
+                        )
                         .await
                         .unwrap();
                     }
-                    tx.send(Message::Barrier(barriers[&epoch].clone().into_dispatcher()))
+                    tx.send(Message::Barrier(barriers[&epoch].clone().into_dispatcher()).into())
                         .await
                         .unwrap();
                     sleep(Duration::from_millis(1)).await;
                 }
-                tx.send(Message::Barrier(b2.clone().into_dispatcher()))
+                tx.send(Message::Barrier(b2.clone().into_dispatcher()).into())
                     .await
                     .unwrap();
             });
@@ -989,21 +1013,21 @@ mod tests {
         }
 
         // 3. Send a chunk.
-        send!([untouched, old], Message::Chunk(build_test_chunk(1)));
+        send!([untouched, old], Message::Chunk(build_test_chunk(1)).into());
         assert_eq!(2, recv!().unwrap().as_chunk().unwrap().cardinality()); // We should be able to receive the chunk twice.
         assert_recv_pending!();
 
         send!(
             [untouched, old],
-            Message::Barrier(b1.clone().into_dispatcher())
+            Message::Barrier(b1.clone().into_dispatcher()).into()
         );
         assert_recv_pending!(); // We should not receive the barrier, since merger is waiting for the new upstream new.
 
-        send!([new], Message::Barrier(b1.clone().into_dispatcher()));
+        send!([new], Message::Barrier(b1.clone().into_dispatcher()).into());
         recv!().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
 
         // 5. Send a chunk.
-        send!([untouched, new], Message::Chunk(build_test_chunk(1)));
+        send!([untouched, new], Message::Chunk(build_test_chunk(1)).into());
         assert_eq!(2, recv!().unwrap().as_chunk().unwrap().cardinality()); // We should be able to receive the chunk twice.
         assert_recv_pending!();
     }
@@ -1037,9 +1061,9 @@ mod tests {
             // send stream_chunk
             let stream_chunk = StreamChunk::default().to_protobuf();
             tx.send(Ok(GetStreamResponse {
-                message: Some(StreamMessage {
-                    stream_message: Some(
-                        risingwave_pb::stream_plan::stream_message::StreamMessage::StreamChunk(
+                message: Some(PbStreamMessageBatch {
+                    stream_message_batch: Some(
+                        risingwave_pb::stream_plan::stream_message_batch::StreamMessageBatch::StreamChunk(
                             stream_chunk,
                         ),
                     ),
@@ -1051,10 +1075,12 @@ mod tests {
             // send barrier
             let barrier = exchange_client_test_barrier();
             tx.send(Ok(GetStreamResponse {
-                message: Some(StreamMessage {
-                    stream_message: Some(
-                        risingwave_pb::stream_plan::stream_message::StreamMessage::Barrier(
-                            barrier.to_protobuf(),
+                message: Some(PbStreamMessageBatch {
+                    stream_message_batch: Some(
+                        risingwave_pb::stream_plan::stream_message_batch::StreamMessageBatch::BarrierBatch(
+                            BarrierBatch {
+                                barriers: vec![barrier.to_protobuf()],
+                            },
                         ),
                     ),
                 }),

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use risingwave_pb::task_service::permits;
 use tokio::sync::{mpsc, AcquireError, Semaphore, SemaphorePermit};
 
-use crate::executor::DispatcherMessage as Message;
+use crate::executor::DispatcherMessageBatch as Message;
 
 /// Message with its required permits.
 ///
@@ -132,7 +132,7 @@ impl Sender {
                 }
                 Some(permits::Value::Record(card as _))
             }
-            Message::Barrier(_) => Some(permits::Value::Barrier(1)),
+            Message::BarrierBatch(_) => Some(permits::Value::Barrier(1)),
             Message::Watermark(_) => None,
         };
 
@@ -221,13 +221,16 @@ mod tests {
         let (tx, mut rx) = channel(0, 0, 1);
 
         let send = || {
-            tx.send(Message::Barrier(Barrier::with_prev_epoch_for_test(
-                514, 114,
-            )))
+            tx.send(Message::BarrierBatch(vec![
+                Barrier::with_prev_epoch_for_test(514, 114),
+            ]))
         };
 
         assert_matches!(send().now_or_never(), Some(Ok(_))); // send successfully
-        assert_matches!(rx.recv().now_or_never(), Some(Some(Message::Barrier(_)))); // recv successfully
+        assert_matches!(
+            rx.recv().now_or_never(),
+            Some(Some(Message::BarrierBatch(_)))
+        ); // recv successfully
 
         assert_matches!(send().now_or_never(), Some(Ok(_))); // send successfully
                                                              // do not recv, so that the channel is full
