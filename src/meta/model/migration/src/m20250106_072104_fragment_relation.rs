@@ -75,23 +75,33 @@ impl MigrationTrait for Migration {
     }
 }
 
-// Set worker parallelism based on the number of parallel unit ids
+// Fulfill the FragmentRelation table with data from the Actor and ActorDispatcher tables
 async fn fulfill_fragment_relation(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let connection = manager.get_connection();
 
     let database_backend = connection.get_database_backend();
 
     let (sql, values) = Query::select()
-        .columns([(Actor::Table, Actor::FragmentId)])
+        .distinct_on([
+            FragmentRelation::SourceFragmentId,
+            FragmentRelation::TargetFragmentId,
+        ])
+        .expr_as(
+            Expr::col((Actor::Table, Actor::FragmentId)),
+            FragmentRelation::SourceFragmentId,
+        )
+        .expr_as(
+            Expr::col((ActorDispatcher::Table, ActorDispatcher::DispatcherId)),
+            FragmentRelation::TargetFragmentId,
+        )
         .columns([
-            (ActorDispatcher::Table, ActorDispatcher::DispatcherId),
             (ActorDispatcher::Table, ActorDispatcher::DispatcherType),
             (ActorDispatcher::Table, ActorDispatcher::DistKeyIndices),
             (ActorDispatcher::Table, ActorDispatcher::OutputIndices),
         ])
         .from(Actor::Table)
         .join(
-            JoinType::LeftJoin,
+            JoinType::InnerJoin,
             ActorDispatcher::Table,
             Expr::col((Actor::Table, Actor::ActorId))
                 .equals((ActorDispatcher::Table, ActorDispatcher::ActorId)),
@@ -99,18 +109,23 @@ async fn fulfill_fragment_relation(manager: &SchemaManager<'_>) -> Result<(), Db
         .to_owned()
         .build_any(&*database_backend.get_query_builder());
 
-    let stmt = Statement::from_sql_and_values(database_backend, sql, values);
+    let rows = connection
+        .query_all(Statement::from_sql_and_values(
+            database_backend,
+            sql,
+            values,
+        ))
+        .await?;
 
-    for FragmentRelationEntity {
-        source_fragment_id,
-        target_fragment_id,
-        dispatcher_type,
-        dist_key_indices,
-        output_indices,
-    } in FragmentRelationEntity::find_by_statement(stmt)
-        .all(connection)
-        .await?
-    {
+    for row in rows {
+        let FragmentRelationEntity {
+            source_fragment_id,
+            target_fragment_id,
+            dispatcher_type,
+            dist_key_indices,
+            output_indices,
+        } = FragmentRelationEntity::from_query_result(&row, "")?;
+
         manager
             .exec_stmt(
                 Query::insert()
@@ -133,6 +148,7 @@ async fn fulfill_fragment_relation(manager: &SchemaManager<'_>) -> Result<(), Db
             )
             .await?;
     }
+
     Ok(())
 }
 
@@ -140,6 +156,7 @@ async fn fulfill_fragment_relation(manager: &SchemaManager<'_>) -> Result<(), Db
 pub struct I32Array(pub Vec<i32>);
 
 #[derive(Debug, FromQueryResult)]
+#[sea_orm(entity = "FragmentRelation")]
 pub struct FragmentRelationEntity {
     source_fragment_id: i32,
     target_fragment_id: i32,
