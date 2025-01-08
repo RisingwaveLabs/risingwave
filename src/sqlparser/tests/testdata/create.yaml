@@ -93,9 +93,9 @@
   formatted_sql: CREATE TABLE T (a STRUCT<v1 INT>)
 - input: CREATE TABLE T (FULL INT)
   error_msg: |-
-    sql parser error: syntax error at or near FULL
+    sql parser error: syntax error at or near FULL at line 1, column 17
     LINE 1: CREATE TABLE T (FULL INT)
-                                 ^
+                            ^
 - input: CREATE TABLE T ("FULL" INT)
   formatted_sql: CREATE TABLE T ("FULL" INT)
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN("FULL")
@@ -109,9 +109,9 @@
                                                                                       ^
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN(FULL
   error_msg: |-
-    sql parser error: syntax error at or near FULL
+    sql parser error: syntax error at or near FULL at line 1, column 76
     LINE 1: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN(FULL
-                                                                                           ^
+                                                                                       ^
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMNFULL)
   error_msg: |-
     sql parser error: expected (, found: VERSION

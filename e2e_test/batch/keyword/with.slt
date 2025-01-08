@@ -1,0 +1,9 @@
+query T
+SELECT (WITH a AS (SELECT 1) SELECT 1);
+----
+1
+
+query T
+SELECT (WITH a AS (SELECT 1), b AS (SELECT 2) SELECT 3);
+----
+3

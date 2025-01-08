@@ -85,12 +85,12 @@
   error_msg: |-
     sql parser error: syntax error at or near FROM at line 1, column 11
     LINE 1: SELECT 1, FROM t
-                           ^
+                      ^
 - input: SELECT 1, WHERE true
   error_msg: |-
     sql parser error: syntax error at or near WHERE at line 1, column 11
     LINE 1: SELECT 1, WHERE true
-                            ^
+                      ^
 - input: SELECT timestamp with time zone '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_sql: SELECT TIMESTAMP WITH TIME ZONE '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(AtTimeZone { timestamp: TypedString { data_type: Timestamp(true), value: "2022-10-01 12:00:00Z" }, time_zone: Value(SingleQuotedString("US/Pacific")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
@@ -237,3 +237,16 @@
     SELECT a0 + b0 FROM a_log, "B_log"
   formatted_sql: WITH a_log AS changelog from a, "B_log" AS changelog from public."B" SELECT a0 + b0 FROM a_log, "B_log"
   formatted_ast: 'Query(Query { with: Some(With { recursive: false, cte_tables: [Cte { alias: TableAlias { name: Ident { value: "a_log", quote_style: None }, columns: [] }, cte_inner: ChangeLog(ObjectName([Ident { value: "a", quote_style: None }])) }, Cte { alias: TableAlias { name: Ident { value: "B_log", quote_style: Some(''"'') }, columns: [] }, cte_inner: ChangeLog(ObjectName([Ident { value: "public", quote_style: None }, Ident { value: "B", quote_style: Some(''"'') }])) }] }), body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Identifier(Ident { value: "a0", quote_style: None }), op: Plus, right: Identifier(Ident { value: "b0", quote_style: None }) })], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "a_log", quote_style: None }]), alias: None, as_of: None }, joins: [] }, TableWithJoins { relation: Table { name: ObjectName([Ident { value: "B_log", quote_style: Some(''"'') }]), alias: None, as_of: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: WITH WITH AS (SELECT 1) SELECT * FROM WITH;
+  error_msg: |-
+    sql parser error: syntax error at or near WITH at line 1, column 6
+    LINE 1: WITH WITH AS (SELECT 1) SELECT * FROM WITH;
+                 ^
+- input: |-
+    WITH a AS (SELECT 1),
+      WITH AS (SELECT 2)
+    SELECT * from a, WITH;
+  error_msg: |-
+    sql parser error: syntax error at or near WITH at line 2, column 3
+    LINE 2:   WITH AS (SELECT 2)
+              ^
