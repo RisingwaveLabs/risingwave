@@ -73,13 +73,12 @@ system ok
 
 # Test delete consumer group on drop
 
-# my_group: 1 source fragment, 1 backfill fragment, 1 batch query
-# TODO: drop backfill fragment on backfill finish
+# my_group: 1 source fragment, 1 batch query, (1 backfill fragment's group is already dropped after backfill finished)
 # We only check my_group to avoid interfering with other tests.
 system ok retry 3 backoff 5s
 ./e2e_test/source_inline/kafka/consumer_group.mjs count-groups | grep my_group
 ----
-my_group: 3
+my_group: 2
 
 
 statement ok
@@ -90,7 +89,7 @@ sleep 1s
 system ok retry 3 backoff 5s
 ./e2e_test/source_inline/kafka/consumer_group.mjs count-groups | grep my_group
 ----
-my_group: 2
+my_group: 1
 
 
 system ok
