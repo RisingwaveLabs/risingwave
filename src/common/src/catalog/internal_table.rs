@@ -35,6 +35,19 @@ pub fn generate_internal_table_name_with_type(
     )
 }
 
+pub fn internal_table_name_to_parts(table_name: &str) -> Option<(&str, u32, &str, u32)> {
+    let parts: Vec<&str> = table_name.split('_').collect();
+    if parts.len() == 5 && parts[0] == "__internal" {
+        let job_name = parts[1];
+        let fragment_id = parts[2].parse().ok()?;
+        let table_type = parts[3];
+        let table_id = parts[4].parse().ok()?;
+        Some((job_name, fragment_id, table_type, table_id))
+    } else {
+        None
+    }
+}
+
 pub fn get_dist_key_in_pk_indices<I: Eq + Copy + Debug, O: TryFrom<usize>>(
     dist_key_indices: &[I],
     pk_indices: &[I],

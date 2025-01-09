@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{
+    internal_table_name_to_parts, Field, Schema, StreamJobStatus, TableId,
+};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqDebug;
 
@@ -40,15 +42,28 @@ impl Rule for TableFunctionToInternalBackfillProgressRule {
         };
         let reader = plan.ctx().session_ctx().env().catalog_reader().read_guard();
         // TODO(kwannoel): Make sure it reads from source, snapshot backfill tables as well.
-        let backfilling_table_names = get_backfilling_tables(reader);
+        let backfilling_table_id_and_name = get_backfilling_tables(reader);
+
         todo!()
     }
 }
 
-fn get_backfilling_tables(reader: CatalogReadGuard) -> Vec<TableCatalog> {
-    todo!()
-    // reader
-    //     .get_creating_tables()
+fn get_backfilling_tables(reader: CatalogReadGuard) -> Vec<(TableId, String)> {
+    reader
+        .iter_tables()
+        .filter(|table| {
+            let name = &table.name;
+            match internal_table_name_to_parts(&name) {
+                None => false,
+                Some((_job_name, _fragment_id, table_type, _table_id)) => {
+                    let is_backfill = table_type == "backfill";
+                    let is_creating = table.stream_job_status == StreamJobStatus::Creating;
+                    is_backfill && is_creating
+                }
+            }
+        })
+        .map(|table| (table.id, table.name.to_string()))
+        .collect_vec()
 }
 
 impl TableFunctionToInternalBackfillProgressRule {
