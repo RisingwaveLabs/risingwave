@@ -134,9 +134,3 @@ impl Rule for TableFunctionToFileScanRule {
         }
     }
 }
-
-impl TableFunctionToFileScanRule {
-    pub fn create() -> BoxedRule {
-        Box::new(TableFunctionToFileScanRule {})
-    }
-}

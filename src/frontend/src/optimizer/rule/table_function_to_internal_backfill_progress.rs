@@ -22,7 +22,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use super::{ApplyResult, BoxedRule, FallibleRule};
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::table_catalog::TableType;
-use crate::expr::{Expr, ExprImpl, InputRef, Literal, TableFunctionType};
+use crate::expr::{ExprImpl, InputRef, Literal, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
