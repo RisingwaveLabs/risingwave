@@ -43,6 +43,7 @@ impl LogicalProject {
         Self::new(input, exprs).into()
     }
 
+    // TODO(kwannoel): We only need create/new don't keep both.
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
         let core = generic::Project::new(exprs, input);
         Self::with_core(core)
