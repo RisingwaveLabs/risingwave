@@ -690,6 +690,18 @@ impl Catalog {
         Err(CatalogError::NotFound("table id", table_id.to_string()))
     }
 
+    pub fn iter_table_names_with_filter(
+        &self,
+        filter: impl Fn(&TableCatalog) -> bool,
+    ) -> impl Iterator<Item = &str> {
+        self.table_by_id
+            .values()
+            .filter(|table| filter(table))
+            .map(|table| table.name.as_str())
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
     pub fn get_schema_by_table_id(
         &self,
         db_name: &str,
