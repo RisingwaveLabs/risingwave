@@ -76,12 +76,10 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
             );
             let project = LogicalProject::new(
                 scan.into(),
-                vec![
-                    ExprImpl::InputRef(Box::new(InputRef {
-                        index: 1,
-                        data_type: DataType::Int64,
-                    })), // NOTE(kwannoel): This is specific to snapshot backfill schema.
-                ],
+                vec![ExprImpl::InputRef(Box::new(InputRef {
+                    index: row_count_column_index,
+                    data_type: DataType::Int64,
+                }))],
             );
             let select_exprs = vec![ExprImpl::Literal(Box::new(Literal::new(
                 Some(ScalarImpl::Int32(table_id)),
