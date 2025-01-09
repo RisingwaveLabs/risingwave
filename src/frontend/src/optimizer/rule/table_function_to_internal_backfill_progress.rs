@@ -21,6 +21,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::{ApplyResult, BoxedRule, FallibleRule};
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::table_catalog::TableType;
 use crate::expr::{Expr, ExprImpl, InputRef, Literal, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -42,7 +43,7 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
         }
 
         let fields = vec![
-            Field::new("backfill_state_table_id", DataType::Int32),
+            Field::new("job_id", DataType::Int32),
             Field::new("row_count", DataType::Int64),
         ];
 
@@ -58,12 +59,16 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
 
         let mut counts = Vec::with_capacity(backfilling_tables.len());
         for table in backfilling_tables {
-            let table_id = table.id.table_id as i32;
+            let Some(job_id) = table.job_id else {
+                return ApplyResult::Err(
+                    anyhow!("`job_id` column not found in backfill table").into(),
+                );
+            };
             let Some(row_count_column_index) =
                 table.columns.iter().position(|c| c.name() == "row_count")
             else {
                 return ApplyResult::Err(
-                    anyhow!("`row_count` column not found in snapshot backfill table").into(),
+                    anyhow!("`row_count` column not found in backfill table").into(),
                 );
             };
             let scan = LogicalScan::create(
@@ -82,11 +87,15 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
                 }))],
             );
             let select_exprs = vec![ExprImpl::Literal(Box::new(Literal::new(
-                Some(ScalarImpl::Int32(table_id)),
+                Some(ScalarImpl::Int32(job_id.table_id as i32)),
                 DataType::Int32,
             )))];
+            let group_key = GroupBy::GroupKey(vec![ExprImpl::InputRef(Box::new(InputRef {
+                index: 0,
+                data_type: DataType::Int32,
+            }))]);
             let (count, _rewritten_select_exprs, _) =
-                LogicalAgg::create(select_exprs, GroupBy::empty(), None, project.into())?;
+                LogicalAgg::create(select_exprs, group_key, None, project.into())?;
             counts.push(count);
         }
         ApplyResult::Ok(LogicalUnion::new(true, counts).into())
@@ -100,10 +109,12 @@ fn get_backfilling_tables(reader: CatalogReadGuard) -> Vec<Arc<TableCatalog>> {
             let name = &table.name;
             match internal_table_name_to_parts(name) {
                 None => false,
-                Some((_job_name, _fragment_id, table_type, _table_id)) => {
-                    let is_backfill = table_type == "snapshot_backfill";
+                Some((_job_name, _fragment_id, executor_type, _table_id)) => {
+                    let is_backfill =
+                        executor_type == "snapshot_backfill" || executor_type == "backfill";
                     let is_creating = table.stream_job_status == StreamJobStatus::Creating;
-                    is_backfill && is_creating
+                    let is_internal = table.table_type == TableType::Internal;
+                    is_backfill && is_creating && is_internal
                 }
             }
         })

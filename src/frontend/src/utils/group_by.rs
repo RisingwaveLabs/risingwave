@@ -25,10 +25,6 @@ pub enum GroupBy {
 }
 
 impl GroupBy {
-    pub fn empty() -> Self {
-        GroupBy::GroupKey(vec![])
-    }
-
     pub fn is_empty(&self) -> bool {
         match self {
             GroupBy::GroupKey(group_key) => group_key.is_empty(),
