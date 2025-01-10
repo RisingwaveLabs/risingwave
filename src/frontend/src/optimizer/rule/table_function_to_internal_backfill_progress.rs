@@ -48,7 +48,7 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
         ];
 
         let reader = plan.ctx().session_ctx().env().catalog_reader().read_guard();
-        // TODO(kwannoel): Make sure it reads from source, snapshot backfill tables as well.
+        // TODO(kwannoel): Make sure it reads from source tables as well.
         let backfilling_tables = get_backfilling_tables(reader);
 
         // No backfill in progress, just return empty values.
@@ -98,6 +98,7 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
                 LogicalAgg::create(select_exprs, group_key, None, project.into())?;
             counts.push(count);
         }
+        println!("counts: {:?}", counts);
         ApplyResult::Ok(LogicalUnion::new(true, counts).into())
     }
 }
@@ -107,13 +108,17 @@ fn get_backfilling_tables(reader: CatalogReadGuard) -> Vec<Arc<TableCatalog>> {
         .iter_tables()
         .filter(|table| {
             let name = &table.name;
+            println!("table_name: {:?}", name);
+            println!("vnode count: {:?}", table.vnode_count);
             match internal_table_name_to_parts(name) {
                 None => false,
                 Some((_job_name, _fragment_id, executor_type, _table_id)) => {
-                    let is_backfill =
-                        executor_type == "snapshot_backfill" || executor_type == "backfill";
+                    let is_backfill = executor_type == "streamscan";
+                    println!("is_backfill: {:?}", is_backfill);
                     let is_creating = table.stream_job_status == StreamJobStatus::Creating;
+                    println!("is_creating: {:?}", is_creating);
                     let is_internal = table.table_type == TableType::Internal;
+                    println!("is_internal: {:?}", is_internal);
                     is_backfill && is_creating && is_internal
                 }
             }

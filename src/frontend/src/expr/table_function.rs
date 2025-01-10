@@ -573,7 +573,7 @@ impl TableFunction {
         TableFunction {
             args: vec![],
             return_type: DataType::Struct(StructType::new(vec![
-                ("backfill_table_id".to_owned(), DataType::Int64),
+                ("job_id".to_owned(), DataType::Int32),
                 ("row_count".to_owned(), DataType::Int64),
             ])),
             function_type: TableFunctionType::InternalBackfillProgress,

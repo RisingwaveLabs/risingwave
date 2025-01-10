@@ -18,7 +18,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::source::iceberg::{extract_bucket_and_file_name, FileScanBackend};
 
-use super::{BoxedRule, Rule};
+use super::Rule;
 use crate::expr::{Expr, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFileScan, LogicalTableFunction};
