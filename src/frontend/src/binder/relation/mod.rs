@@ -18,7 +18,7 @@ use std::ops::Deref;
 use either::Either;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{Field, TableId};
 use risingwave_sqlparser::ast::{
     AsOf, Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias,
     TableFactor,
@@ -486,12 +486,10 @@ impl Binder {
             })?
             .into();
 
-        let schema = args
-            .get(1)
-            .map_or(DEFAULT_SCHEMA_NAME.to_owned(), |arg| arg.to_string());
+        let schema = args.get(1).map(|arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, None)
+        self.bind_relation_by_name_inner(schema.as_deref(), &table_name, alias, None)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {

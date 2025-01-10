@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::is_system_schema;
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
@@ -59,19 +58,14 @@ pub async fn handle_drop_schema(
             }
         }
     };
-    match mode {
-        Some(DropMode::Restrict) | None => {
-            // Note: we don't check if the schema is empty here.
-            // The check is done in meta `ensure_schema_empty`.
-        }
-        Some(DropMode::Cascade) => {
-            bail_not_implemented!(issue = 6773, "drop schema with cascade mode");
-        }
-    };
+
+    // Note: we don't check if the schema is empty here when drop mode is cascade.
+    // The check is done in meta `ensure_schema_empty`.
+    let cascade = matches!(mode, Some(DropMode::Cascade));
 
     session.check_privilege_for_drop_alter_db_schema(&schema)?;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_schema(schema.id()).await?;
+    catalog_writer.drop_schema(schema.id(), cascade).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_SCHEMA))
 }

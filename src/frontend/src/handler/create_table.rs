@@ -1097,6 +1097,8 @@ pub(super) async fn handle_create_table_plan(
 
             let session = &handler_args.session;
             let db_name = &session.database();
+            let user_name = &session.user_name();
+            let search_path = session.config().search_path();
             let (schema_name, resolved_table_name) =
                 Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
             let (database_id, schema_id) =
@@ -1108,12 +1110,12 @@ pub(super) async fn handle_create_table_plan(
 
             let source = {
                 let catalog_reader = session.env().catalog_reader().read_guard();
-                let schema_name = format_encode
-                    .clone()
-                    .unwrap_or(DEFAULT_SCHEMA_NAME.to_owned());
+                let schema_path =
+                    SchemaPath::new(format_encode.as_deref(), &search_path, user_name);
+
                 let (source, _) = catalog_reader.get_source_by_name(
                     db_name,
-                    SchemaPath::Name(schema_name.as_str()),
+                    schema_path,
                     source_name.as_str(),
                 )?;
                 source.clone()

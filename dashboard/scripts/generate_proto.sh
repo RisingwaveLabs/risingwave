@@ -6,11 +6,13 @@ rm -rf tmp_gen
 mkdir tmp_gen
 cp -a ../proto/*.proto tmp_gen
 
-# Array in proto will conflict with JavaScript's Array, so we replace it with RwArray.
+# Replace some keywords in JavaScript to avoid conflicts: Array, Object.
 if [[ "$OSTYPE" == "darwin"* ]]; then
     sed -i "" -e "s/Array/RwArray/" "tmp_gen/data.proto"
+    sed -i "" -e "s/ Object / RwObject /" "tmp_gen/meta.proto"
 else
     sed -i -e "s/Array/RwArray/" "tmp_gen/data.proto"
+    sed -i -e "s/ Object / RwObject /" "tmp_gen/meta.proto"
 fi
 
 mkdir -p proto/gen

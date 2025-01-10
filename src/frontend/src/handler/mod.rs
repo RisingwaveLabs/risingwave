@@ -462,11 +462,11 @@ pub async fn handle(
                     | ObjectType::Source
                     | ObjectType::Subscription
                     | ObjectType::Index
-                    | ObjectType::Table => {
+                    | ObjectType::Table
+                    | ObjectType::Schema => {
                         cascade = true;
                     }
-                    ObjectType::Schema
-                    | ObjectType::Database
+                    ObjectType::Database
                     | ObjectType::User
                     | ObjectType::Connection
                     | ObjectType::Secret => {

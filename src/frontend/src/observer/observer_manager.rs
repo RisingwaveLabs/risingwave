@@ -27,7 +27,7 @@ use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::FrontendHummockVersion;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::{HummockVersionDeltas, HummockVersionStats};
-use risingwave_pb::meta::relation::RelationInfo;
+use risingwave_pb::meta::object::{ObjectInfo, PbObjectInfo};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
@@ -65,7 +65,7 @@ impl ObserverState for FrontendObserverNode {
         match info.to_owned() {
             Info::Database(_)
             | Info::Schema(_)
-            | Info::RelationGroup(_)
+            | Info::ObjectGroup(_)
             | Info::Function(_)
             | Info::Connection(_) => {
                 self.handle_catalog_notification(resp);
@@ -261,13 +261,27 @@ impl FrontendObserverNode {
                 Operation::Update => catalog_guard.update_schema(schema),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
-            Info::RelationGroup(relation_group) => {
-                for relation in &relation_group.relations {
-                    let Some(relation) = relation.relation_info.as_ref() else {
+            Info::ObjectGroup(object_group) => {
+                for object in &object_group.objects {
+                    let Some(obj) = object.object_info.as_ref() else {
                         continue;
                     };
-                    match relation {
-                        RelationInfo::Table(table) => match resp.operation() {
+                    match obj {
+                        ObjectInfo::Database(db) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_database(db),
+                            Operation::Delete => catalog_guard.drop_database(db.id),
+                            Operation::Update => catalog_guard.update_database(db),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                        ObjectInfo::Schema(schema) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_schema(schema),
+                            Operation::Delete => {
+                                catalog_guard.drop_schema(schema.database_id, schema.id)
+                            }
+                            Operation::Update => catalog_guard.update_schema(schema),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                        PbObjectInfo::Table(table) => match resp.operation() {
                             Operation::Add => catalog_guard.create_table(table),
                             Operation::Delete => catalog_guard.drop_table(
                                 table.database_id,
@@ -289,7 +303,7 @@ impl FrontendObserverNode {
                             }
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
-                        RelationInfo::Source(source) => match resp.operation() {
+                        PbObjectInfo::Source(source) => match resp.operation() {
                             Operation::Add => catalog_guard.create_source(source),
                             Operation::Delete => catalog_guard.drop_source(
                                 source.database_id,
@@ -299,7 +313,7 @@ impl FrontendObserverNode {
                             Operation::Update => catalog_guard.update_source(source),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
-                        RelationInfo::Sink(sink) => match resp.operation() {
+                        PbObjectInfo::Sink(sink) => match resp.operation() {
                             Operation::Add => catalog_guard.create_sink(sink),
                             Operation::Delete => {
                                 catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
@@ -307,7 +321,7 @@ impl FrontendObserverNode {
                             Operation::Update => catalog_guard.update_sink(sink),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
-                        RelationInfo::Subscription(subscription) => match resp.operation() {
+                        PbObjectInfo::Subscription(subscription) => match resp.operation() {
                             Operation::Add => catalog_guard.create_subscription(subscription),
                             Operation::Delete => catalog_guard.drop_subscription(
                                 subscription.database_id,
@@ -317,7 +331,7 @@ impl FrontendObserverNode {
                             Operation::Update => catalog_guard.update_subscription(subscription),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
-                        RelationInfo::Index(index) => match resp.operation() {
+                        PbObjectInfo::Index(index) => match resp.operation() {
                             Operation::Add => catalog_guard.create_index(index),
                             Operation::Delete => catalog_guard.drop_index(
                                 index.database_id,
@@ -327,7 +341,7 @@ impl FrontendObserverNode {
                             Operation::Update => catalog_guard.update_index(index),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
-                        RelationInfo::View(view) => match resp.operation() {
+                        PbObjectInfo::View(view) => match resp.operation() {
                             Operation::Add => catalog_guard.create_view(view),
                             Operation::Delete => {
                                 catalog_guard.drop_view(view.database_id, view.schema_id, view.id)
@@ -335,6 +349,42 @@ impl FrontendObserverNode {
                             Operation::Update => catalog_guard.update_view(view),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
+                        ObjectInfo::Function(function) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_function(function),
+                            Operation::Delete => catalog_guard.drop_function(
+                                function.database_id,
+                                function.schema_id,
+                                function.id.into(),
+                            ),
+                            Operation::Update => catalog_guard.update_function(function),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                        ObjectInfo::Connection(connection) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_connection(connection),
+                            Operation::Delete => catalog_guard.drop_connection(
+                                connection.database_id,
+                                connection.schema_id,
+                                connection.id,
+                            ),
+                            Operation::Update => catalog_guard.update_connection(connection),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                        ObjectInfo::Secret(secret) => {
+                            let mut secret = secret.clone();
+                            // The secret value should not be revealed to users. So mask it in the frontend catalog.
+                            secret.value =
+                                "SECRET VALUE SHOULD NOT BE REVEALED".as_bytes().to_vec();
+                            match resp.operation() {
+                                Operation::Add => catalog_guard.create_secret(&secret),
+                                Operation::Delete => catalog_guard.drop_secret(
+                                    secret.database_id,
+                                    secret.schema_id,
+                                    SecretId::new(secret.id),
+                                ),
+                                Operation::Update => catalog_guard.update_secret(&secret),
+                                _ => panic!("receive an unsupported notify {:?}", resp),
+                            }
+                        }
                     }
                 }
             }

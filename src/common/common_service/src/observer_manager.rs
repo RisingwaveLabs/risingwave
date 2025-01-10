@@ -104,7 +104,7 @@ where
         notification_vec.retain_mut(|notification| match notification.info.as_ref().unwrap() {
             Info::Database(_)
             | Info::Schema(_)
-            | Info::RelationGroup(_)
+            | Info::ObjectGroup(_)
             | Info::User(_)
             | Info::Connection(_)
             | Info::Secret(_)

@@ -764,8 +764,8 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_schema(&self, schema_id: SchemaId) -> Result<WaitVersion> {
-        let request = DropSchemaRequest { schema_id };
+    pub async fn drop_schema(&self, schema_id: SchemaId, cascade: bool) -> Result<WaitVersion> {
+        let request = DropSchemaRequest { schema_id, cascade };
         let resp = self.inner.drop_schema(request).await?;
         Ok(resp
             .version

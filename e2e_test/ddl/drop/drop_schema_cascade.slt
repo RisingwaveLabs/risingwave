@@ -1,0 +1,63 @@
+statement ok
+create schema schema1;
+
+statement ok
+create schema schema2;
+
+statement ok
+create table schema1.t1 (v1 int, v2 int);
+
+statement ok
+create index idx1 on schema1.t1(v1);
+
+statement ok
+create subscription schema1.sub from schema1.t1 with(retention = '1D');
+
+statement ok
+create materialized view schema2.mv2 as select v2, v1 from schema1.t1;
+
+statement ok
+create materialized view schema1.mv1 as select v2, v1 from schema1.t1;
+
+statement ok
+CREATE SOURCE schema1.src1 (v INT) WITH (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+create function schema1.f1(INT) returns int language sql as 'select $1';
+
+statement ok
+create table schema1.t2 (v1 int, v2 int);
+
+statement ok
+create table schema1.t3 (v1 int primary key, v2 int);
+
+statement ok
+create sink schema1.s1 into schema1.t3 from schema1.t2;
+
+statement ok
+create table schema2.t4 (v1 int primary key, v2 int);
+
+statement ok
+create sink schema1.s2 into schema2.t4 from schema1.t2;
+
+statement error
+drop schema schema1;
+
+statement error Found sink into table in dependency
+drop schema schema1 cascade;
+
+statement ok
+drop table schema2.t4 cascade;
+
+statement ok
+drop schema schema1 cascade;
+
+statement ok
+drop schema schema2;

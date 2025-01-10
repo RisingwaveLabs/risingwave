@@ -18,10 +18,10 @@ use std::sync::Arc;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::common::{WorkerNode, WorkerType};
-use risingwave_pb::meta::relation::RelationInfo;
+use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
-    MetaSnapshot, Relation, RelationGroup, SubscribeResponse, SubscribeType,
+    MetaSnapshot, PbObject, PbObjectGroup, SubscribeResponse, SubscribeType,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{self, UnboundedSender};
@@ -175,17 +175,17 @@ impl NotificationManager {
             .await
     }
 
-    pub async fn notify_frontend_relation_info(
+    pub async fn notify_frontend_object_info(
         &self,
         operation: Operation,
-        relation_info: RelationInfo,
+        object_info: PbObjectInfo,
     ) -> NotificationVersion {
         self.notify_with_version(
             SubscribeType::Frontend.into(),
             operation,
-            Info::RelationGroup(RelationGroup {
-                relations: vec![Relation {
-                    relation_info: relation_info.into(),
+            Info::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: object_info.into(),
                 }],
             }),
         )
@@ -197,17 +197,17 @@ impl NotificationManager {
             .await
     }
 
-    pub async fn notify_hummock_relation_info(
+    pub async fn notify_hummock_object_info(
         &self,
         operation: Operation,
-        relation_info: RelationInfo,
+        object_info: PbObjectInfo,
     ) -> NotificationVersion {
         self.notify_with_version(
             SubscribeType::Hummock.into(),
             operation,
-            Info::RelationGroup(RelationGroup {
-                relations: vec![Relation {
-                    relation_info: relation_info.into(),
+            Info::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: object_info.into(),
                 }],
             }),
         )
@@ -219,17 +219,17 @@ impl NotificationManager {
             .await
     }
 
-    pub async fn notify_compactor_relation_info(
+    pub async fn notify_compactor_object_info(
         &self,
         operation: Operation,
-        relation_info: RelationInfo,
+        object_info: PbObjectInfo,
     ) -> NotificationVersion {
         self.notify_with_version(
             SubscribeType::Compactor.into(),
             operation,
-            Info::RelationGroup(RelationGroup {
-                relations: vec![Relation {
-                    relation_info: relation_info.into(),
+            Info::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: object_info.into(),
                 }],
             }),
         )

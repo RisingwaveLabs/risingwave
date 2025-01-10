@@ -577,7 +577,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_schema(&self, schema_id: u32) -> Result<()> {
+    async fn drop_schema(&self, schema_id: u32, _cascade: bool) -> Result<()> {
         let database_id = self.drop_schema_id(schema_id);
         self.catalog.write().drop_schema(database_id, schema_id);
         Ok(())

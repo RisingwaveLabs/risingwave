@@ -32,15 +32,18 @@ use risingwave_meta_model::{
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
-    PbConnection, PbFunction, PbIndex, PbSecret, PbSink, PbSource, PbSubscription, PbTable, PbView,
+    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
+    PbSubscription, PbTable, PbView,
 };
-use risingwave_pb::meta::relation::PbRelationInfo;
+use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
 use risingwave_pb::meta::{
-    FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup,
+    FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup,
 };
 use risingwave_pb::stream_plan::PbFragmentTypeFlag;
-use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
+use risingwave_pb::user::grant_privilege::{
+    PbAction, PbActionWithGrantOption, PbObject as PbGrantObject,
+};
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use risingwave_sqlparser::ast::Statement as SqlStatement;
 use risingwave_sqlparser::parser::Parser;
@@ -71,15 +74,15 @@ use crate::{MetaError, MetaResult};
 ///
 /// assert_eq!(
 ///     query.to_string(MysqlQueryBuilder),
-///     r#"WITH RECURSIVE `used_by_object_ids` (`used_by`) AS (SELECT `used_by` FROM `object_dependency` WHERE `object_dependency`.`oid` = 1 UNION ALL (SELECT `object_dependency`.`used_by` FROM `object_dependency` INNER JOIN `used_by_object_ids` ON `used_by_object_ids`.`used_by` = `oid`)) SELECT DISTINCT `oid`, `obj_type`, `schema_id`, `database_id` FROM `used_by_object_ids` INNER JOIN `object` ON `used_by_object_ids`.`used_by` = `oid` ORDER BY `oid` DESC"#
+///     r#"WITH RECURSIVE `used_by_object_ids` (`used_by`) AS (SELECT `used_by` FROM `object_dependency` WHERE `object_dependency`.`oid` = 1 UNION ALL (SELECT `oid` FROM `object` WHERE `object`.`database_id` = 1 OR `object`.`schema_id` = 1) UNION ALL (SELECT `object_dependency`.`used_by` FROM `object_dependency` INNER JOIN `used_by_object_ids` ON `used_by_object_ids`.`used_by` = `oid`)) SELECT DISTINCT `oid`, `obj_type`, `schema_id`, `database_id` FROM `used_by_object_ids` INNER JOIN `object` ON `used_by_object_ids`.`used_by` = `oid` ORDER BY `oid` DESC"#
 /// );
 /// assert_eq!(
 ///     query.to_string(PostgresQueryBuilder),
-///     r#"WITH RECURSIVE "used_by_object_ids" ("used_by") AS (SELECT "used_by" FROM "object_dependency" WHERE "object_dependency"."oid" = 1 UNION ALL (SELECT "object_dependency"."used_by" FROM "object_dependency" INNER JOIN "used_by_object_ids" ON "used_by_object_ids"."used_by" = "oid")) SELECT DISTINCT "oid", "obj_type", "schema_id", "database_id" FROM "used_by_object_ids" INNER JOIN "object" ON "used_by_object_ids"."used_by" = "oid" ORDER BY "oid" DESC"#
+///     r#"WITH RECURSIVE "used_by_object_ids" ("used_by") AS (SELECT "used_by" FROM "object_dependency" WHERE "object_dependency"."oid" = 1 UNION ALL (SELECT "oid" FROM "object" WHERE "object"."database_id" = 1 OR "object"."schema_id" = 1) UNION ALL (SELECT "object_dependency"."used_by" FROM "object_dependency" INNER JOIN "used_by_object_ids" ON "used_by_object_ids"."used_by" = "oid")) SELECT DISTINCT "oid", "obj_type", "schema_id", "database_id" FROM "used_by_object_ids" INNER JOIN "object" ON "used_by_object_ids"."used_by" = "oid" ORDER BY "oid" DESC"#
 /// );
 /// assert_eq!(
 ///     query.to_string(SqliteQueryBuilder),
-///     r#"WITH RECURSIVE "used_by_object_ids" ("used_by") AS (SELECT "used_by" FROM "object_dependency" WHERE "object_dependency"."oid" = 1 UNION ALL SELECT "object_dependency"."used_by" FROM "object_dependency" INNER JOIN "used_by_object_ids" ON "used_by_object_ids"."used_by" = "oid") SELECT DISTINCT "oid", "obj_type", "schema_id", "database_id" FROM "used_by_object_ids" INNER JOIN "object" ON "used_by_object_ids"."used_by" = "oid" ORDER BY "oid" DESC"#
+///     r#"WITH RECURSIVE "used_by_object_ids" ("used_by") AS (SELECT "used_by" FROM "object_dependency" WHERE "object_dependency"."oid" = 1 UNION ALL SELECT "oid" FROM "object" WHERE "object"."database_id" = 1 OR "object"."schema_id" = 1 UNION ALL SELECT "object_dependency"."used_by" FROM "object_dependency" INNER JOIN "used_by_object_ids" ON "used_by_object_ids"."used_by" = "oid") SELECT DISTINCT "oid", "obj_type", "schema_id", "database_id" FROM "used_by_object_ids" INNER JOIN "object" ON "used_by_object_ids"."used_by" = "oid" ORDER BY "oid" DESC"#
 /// );
 /// ```
 pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
@@ -90,6 +93,16 @@ pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
         .column(object_dependency::Column::UsedBy)
         .from(ObjectDependency)
         .and_where(object_dependency::Column::Oid.eq(obj_id))
+        .to_owned();
+
+    let belonged_obj_query = SelectStatement::new()
+        .column(object::Column::Oid)
+        .from(Object)
+        .and_where(
+            object::Column::DatabaseId
+                .eq(obj_id)
+                .or(object::Column::SchemaId.eq(obj_id)),
+        )
         .to_owned();
 
     let cte_referencing = Query::select()
@@ -103,7 +116,12 @@ pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
         .to_owned();
 
     let common_table_expr = CommonTableExpression::new()
-        .query(base_query.union(UnionType::All, cte_referencing).to_owned())
+        .query(
+            base_query
+                .union(UnionType::All, belonged_obj_query)
+                .union(UnionType::All, cte_referencing)
+                .to_owned(),
+        )
         .column(cte_return_alias.clone())
         .table_name(cte_alias.clone())
         .to_owned();
@@ -559,7 +577,7 @@ where
     Ok(())
 }
 
-/// `ensure_object_not_refer` ensures that object are not used by any other ones except indexes.
+/// `ensure_object_not_refer` ensures that object is not used by any other ones except indexes.
 pub async fn ensure_object_not_refer<C>(
     object_type: ObjectType,
     object_id: ObjectId,
@@ -848,15 +866,15 @@ where
             let object = object.unwrap();
             let oid = object.oid as _;
             let obj = match object.obj_type {
-                ObjectType::Database => PbObject::DatabaseId(oid),
-                ObjectType::Schema => PbObject::SchemaId(oid),
-                ObjectType::Table | ObjectType::Index => PbObject::TableId(oid),
-                ObjectType::Source => PbObject::SourceId(oid),
-                ObjectType::Sink => PbObject::SinkId(oid),
-                ObjectType::View => PbObject::ViewId(oid),
-                ObjectType::Function => PbObject::FunctionId(oid),
+                ObjectType::Database => PbGrantObject::DatabaseId(oid),
+                ObjectType::Schema => PbGrantObject::SchemaId(oid),
+                ObjectType::Table | ObjectType::Index => PbGrantObject::TableId(oid),
+                ObjectType::Source => PbGrantObject::SourceId(oid),
+                ObjectType::Sink => PbGrantObject::SinkId(oid),
+                ObjectType::View => PbGrantObject::ViewId(oid),
+                ObjectType::Function => PbGrantObject::FunctionId(oid),
                 ObjectType::Connection => unreachable!("connection is not supported yet"),
-                ObjectType::Subscription => PbObject::SubscriptionId(oid),
+                ObjectType::Subscription => PbGrantObject::SubscriptionId(oid),
                 ObjectType::Secret => unreachable!("secret is not supported yet"),
             };
             PbGrantPrivilege {
@@ -872,16 +890,16 @@ where
 }
 
 // todo: remove it after migrated to sql backend.
-pub fn extract_grant_obj_id(object: &PbObject) -> ObjectId {
+pub fn extract_grant_obj_id(object: &PbGrantObject) -> ObjectId {
     match object {
-        PbObject::DatabaseId(id)
-        | PbObject::SchemaId(id)
-        | PbObject::TableId(id)
-        | PbObject::SourceId(id)
-        | PbObject::SinkId(id)
-        | PbObject::ViewId(id)
-        | PbObject::FunctionId(id)
-        | PbObject::SubscriptionId(id) => *id as _,
+        PbGrantObject::DatabaseId(id)
+        | PbGrantObject::SchemaId(id)
+        | PbGrantObject::TableId(id)
+        | PbGrantObject::SourceId(id)
+        | PbGrantObject::SinkId(id)
+        | PbGrantObject::ViewId(id)
+        | PbGrantObject::FunctionId(id)
+        | PbGrantObject::SubscriptionId(id) => *id as _,
         _ => unreachable!("invalid object type: {:?}", object),
     }
 }
@@ -1021,24 +1039,6 @@ pub fn rebuild_fragment_mapping_from_actors(
     result
 }
 
-pub async fn get_fragment_ids_by_jobs<C>(
-    db: &C,
-    job_ids: Vec<ObjectId>,
-) -> MetaResult<Vec<FragmentId>>
-where
-    C: ConnectionTrait,
-{
-    let fragment_ids: Vec<FragmentId> = Fragment::find()
-        .select_only()
-        .column(fragment::Column::FragmentId)
-        .filter(fragment::Column::JobId.is_in(job_ids))
-        .into_tuple()
-        .all(db)
-        .await?;
-
-    Ok(fragment_ids)
-}
-
 /// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
 pub async fn get_fragment_actor_ids<C>(
     db: &C,
@@ -1123,50 +1123,63 @@ where
     ))
 }
 
-/// Build a relation group for notifying the deletion of the given objects.
+/// Build a object group for notifying the deletion of the given objects.
 ///
-/// Note that only id fields are filled in the relation info, as the arguments are partial objects.
+/// Note that only id fields are filled in the object info, as the arguments are partial objects.
 /// As a result, the returned notification info should only be used for deletion.
-pub(crate) fn build_relation_group_for_delete(
-    relation_objects: Vec<PartialObject>,
+pub(crate) fn build_object_group_for_delete(
+    partial_objects: Vec<PartialObject>,
 ) -> NotificationInfo {
-    let mut relations = vec![];
-    for obj in relation_objects {
+    let mut objects = vec![];
+    for obj in partial_objects {
         match obj.obj_type {
-            ObjectType::Table => relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::Table(PbTable {
+            ObjectType::Database => objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Database(PbDatabase {
+                    id: obj.oid as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Schema => objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Schema(PbSchema {
+                    id: obj.oid as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Table => objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Table(PbTable {
                     id: obj.oid as _,
                     schema_id: obj.schema_id.unwrap() as _,
                     database_id: obj.database_id.unwrap() as _,
                     ..Default::default()
                 })),
             }),
-            ObjectType::Source => relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::Source(PbSource {
+            ObjectType::Source => objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Source(PbSource {
                     id: obj.oid as _,
                     schema_id: obj.schema_id.unwrap() as _,
                     database_id: obj.database_id.unwrap() as _,
                     ..Default::default()
                 })),
             }),
-            ObjectType::Sink => relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::Sink(PbSink {
+            ObjectType::Sink => objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Sink(PbSink {
                     id: obj.oid as _,
                     schema_id: obj.schema_id.unwrap() as _,
                     database_id: obj.database_id.unwrap() as _,
                     ..Default::default()
                 })),
             }),
-            ObjectType::Subscription => relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::Subscription(PbSubscription {
+            ObjectType::Subscription => objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Subscription(PbSubscription {
                     id: obj.oid as _,
                     schema_id: obj.schema_id.unwrap() as _,
                     database_id: obj.database_id.unwrap() as _,
                     ..Default::default()
                 })),
             }),
-            ObjectType::View => relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::View(PbView {
+            ObjectType::View => objects.push(PbObject {
+                object_info: Some(PbObjectInfo::View(PbView {
                     id: obj.oid as _,
                     schema_id: obj.schema_id.unwrap() as _,
                     database_id: obj.database_id.unwrap() as _,
@@ -1174,16 +1187,16 @@ pub(crate) fn build_relation_group_for_delete(
                 })),
             }),
             ObjectType::Index => {
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Index(PbIndex {
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Index(PbIndex {
                         id: obj.oid as _,
                         schema_id: obj.schema_id.unwrap() as _,
                         database_id: obj.database_id.unwrap() as _,
                         ..Default::default()
                     })),
                 });
-                relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Table(PbTable {
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Table(PbTable {
                         id: obj.oid as _,
                         schema_id: obj.schema_id.unwrap() as _,
                         database_id: obj.database_id.unwrap() as _,
@@ -1191,10 +1204,33 @@ pub(crate) fn build_relation_group_for_delete(
                     })),
                 });
             }
-            _ => unreachable!("only relations will be dropped."),
+            ObjectType::Function => objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Function(PbFunction {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Connection => objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Connection(PbConnection {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
+            ObjectType::Secret => objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Secret(PbSecret {
+                    id: obj.oid as _,
+                    schema_id: obj.schema_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap() as _,
+                    ..Default::default()
+                })),
+            }),
         }
     }
-    NotificationInfo::RelationGroup(PbRelationGroup { relations })
+    NotificationInfo::ObjectGroup(PbObjectGroup { objects })
 }
 
 pub fn extract_external_table_name_from_definition(table_definition: &str) -> Option<String> {
@@ -1225,7 +1261,7 @@ pub async fn rename_relation(
     object_type: ObjectType,
     object_id: ObjectId,
     object_name: &str,
-) -> MetaResult<(Vec<PbRelation>, String)> {
+) -> MetaResult<(Vec<PbObject>, String)> {
     use sea_orm::ActiveModelTrait;
 
     use crate::controller::rename::alter_relation_rename;
@@ -1252,8 +1288,8 @@ pub async fn rename_relation(
                 ..Default::default()
             };
             active_model.update(txn).await?;
-            to_update_relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::$entity(ObjectModel(relation, obj).into())),
+            to_update_relations.push(PbObject {
+                object_info: Some(PbObjectInfo::$entity(ObjectModel(relation, obj).into())),
             });
             old_name
         }};
@@ -1284,10 +1320,8 @@ pub async fn rename_relation(
                 ..Default::default()
             };
             active_model.update(txn).await?;
-            to_update_relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::Index(
-                    ObjectModel(index, obj.unwrap()).into(),
-                )),
+            to_update_relations.push(PbObject {
+                object_info: Some(PbObjectInfo::Index(ObjectModel(index, obj.unwrap()).into())),
             });
             old_name
         }
@@ -1305,7 +1339,7 @@ pub async fn rename_relation_refer(
     object_id: ObjectId,
     object_name: &str,
     old_name: &str,
-) -> MetaResult<Vec<PbRelation>> {
+) -> MetaResult<Vec<PbObject>> {
     use sea_orm::ActiveModelTrait;
 
     use crate::controller::rename::alter_relation_rename_refs;
@@ -1326,8 +1360,8 @@ pub async fn rename_relation_refer(
                 ..Default::default()
             };
             active_model.update(txn).await?;
-            to_update_relations.push(PbRelation {
-                relation_info: Some(PbRelationInfo::$entity(
+            to_update_relations.push(PbObject {
+                object_info: Some(PbObjectInfo::$entity(
                     ObjectModel(relation, obj.unwrap()).into(),
                 )),
             });

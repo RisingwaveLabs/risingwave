@@ -233,9 +233,10 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<DropSchemaResponse>, Status> {
         let req = request.into_inner();
         let schema_id = req.get_schema_id();
+        let drop_mode = DropMode::from_request_setting(req.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSchema(schema_id as _))
+            .run_command(DdlCommand::DropSchema(schema_id as _, drop_mode))
             .await?;
         Ok(Response::new(DropSchemaResponse {
             status: None,

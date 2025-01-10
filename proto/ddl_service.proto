@@ -45,6 +45,7 @@ message CreateSchemaResponse {
 
 message DropSchemaRequest {
   uint32 schema_id = 1;
+  bool cascade = 2;
 }
 
 message DropSchemaResponse {
