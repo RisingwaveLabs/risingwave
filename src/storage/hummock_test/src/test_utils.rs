@@ -39,7 +39,7 @@ use risingwave_storage::hummock::event_handler::HummockVersionUpdate;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
-use risingwave_storage::hummock::test_utils::default_opts_for_test;
+use risingwave_storage::hummock::test_utils::*;
 use risingwave_storage::hummock::write_limiter::WriteLimiter;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;

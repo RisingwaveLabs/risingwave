@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -20,6 +21,7 @@ use foyer::{
     CacheHint, Engine, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
     StorageValue as HybridValue,
 };
+use futures::TryFutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::EvictionConfig;
@@ -27,10 +29,12 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
-use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
+use risingwave_hummock_sdk::{
+    EpochWithGap, HummockEpoch, HummockReadEpoch, HummockSstableObjectId,
+};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
@@ -39,6 +43,7 @@ use super::{
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgent, FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
+use crate::error::StorageResult;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferItem, SharedBufferValue,
 };
@@ -50,7 +55,8 @@ use crate::hummock::{
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
 use crate::storage_value::StorageValue;
-use crate::StateStoreIter;
+use crate::store::*;
+use crate::{StateStore, StateStoreIter};
 
 pub fn default_opts_for_test() -> StorageOpts {
     StorageOpts {
@@ -475,4 +481,129 @@ where
         .build()
         .await
         .unwrap()
+}
+
+pub trait StateStoreReadTestExt: StateStore {
+    /// Point gets a value from the state store.
+    /// The result is based on a snapshot corresponding to the given `epoch`.
+    /// Both full key and the value are returned.
+    fn get_keyed_row(
+        &self,
+        key: TableKey<Bytes>,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>>;
+
+    /// Point gets a value from the state store.
+    /// The result is based on a snapshot corresponding to the given `epoch`.
+    /// Only the value is returned.
+    fn get(
+        &self,
+        key: TableKey<Bytes>,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, Option<Bytes>> {
+        self.get_keyed_row(key, epoch, read_options)
+            .map_ok(|v| v.map(|(_, v)| v))
+    }
+
+    /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
+    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
+    /// in `key_range`) The returned iterator will iterate data based on a snapshot
+    /// corresponding to the given `epoch`.
+    fn iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, <<Self as StateStore>::ReadSnapshot as StateStoreRead>::Iter>;
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, <<Self as StateStore>::ReadSnapshot as StateStoreRead>::RevIter>;
+
+    fn scan(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        limit: Option<usize>,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, Vec<StateStoreKeyedRow>>;
+}
+
+impl<S: StateStore> StateStoreReadTestExt for S {
+    async fn get_keyed_row(
+        &self,
+        key: TableKey<Bytes>,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
+        let snapshot = self
+            .new_read_snapshot(
+                HummockReadEpoch::NoWait(epoch),
+                NewReadSnapshotOptions {
+                    table_id: read_options.table_id,
+                },
+            )
+            .await?;
+        snapshot.get_keyed_row(key, read_options).await
+    }
+
+    async fn iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<<<Self as StateStore>::ReadSnapshot as StateStoreRead>::Iter> {
+        let snapshot = self
+            .new_read_snapshot(
+                HummockReadEpoch::NoWait(epoch),
+                NewReadSnapshotOptions {
+                    table_id: read_options.table_id,
+                },
+            )
+            .await?;
+        snapshot.iter(key_range, read_options).await
+    }
+
+    async fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<<<Self as StateStore>::ReadSnapshot as StateStoreRead>::RevIter> {
+        let snapshot = self
+            .new_read_snapshot(
+                HummockReadEpoch::NoWait(epoch),
+                NewReadSnapshotOptions {
+                    table_id: read_options.table_id,
+                },
+            )
+            .await?;
+        snapshot.rev_iter(key_range, read_options).await
+    }
+
+    async fn scan(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        limit: Option<usize>,
+        mut read_options: ReadOptions,
+    ) -> StorageResult<Vec<StateStoreKeyedRow>> {
+        if limit.is_some() {
+            read_options.prefetch_options.prefetch = false;
+        }
+        const MAX_INITIAL_CAP: usize = 1024;
+        let limit = limit.unwrap_or(usize::MAX);
+        let mut ret = Vec::with_capacity(min(limit, MAX_INITIAL_CAP));
+        let mut iter = self.iter(key_range, epoch, read_options).await?;
+        while let Some((key, value)) = iter.try_next().await? {
+            ret.push((key.copy_into(), Bytes::copy_from_slice(value)))
+        }
+        Ok(ret)
+    }
 }

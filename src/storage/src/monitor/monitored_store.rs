@@ -29,8 +29,6 @@ use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{error, Instrument};
 
-#[cfg(all(not(madsim), feature = "hm-trace"))]
-use super::traced_store::TracedStateStore;
 use super::{MonitoredStateStoreGetStats, MonitoredStateStoreIterStats, MonitoredStorageMetrics};
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -43,38 +41,13 @@ use crate::store_impl::AsHummock;
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
-    #[cfg(not(all(not(madsim), feature = "hm-trace")))]
     inner: Box<S>,
-
-    #[cfg(all(not(madsim), feature = "hm-trace"))]
-    inner: Box<TracedStateStore<S>>,
 
     storage_metrics: Arc<MonitoredStorageMetrics>,
 }
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
-        #[cfg(all(not(madsim), feature = "hm-trace"))]
-        let inner = TracedStateStore::new_global(inner);
-        Self {
-            inner: Box::new(inner),
-            storage_metrics,
-        }
-    }
-
-    #[cfg(all(not(madsim), feature = "hm-trace"))]
-    pub fn new_from_local(
-        inner: TracedStateStore<S>,
-        storage_metrics: Arc<MonitoredStorageMetrics>,
-    ) -> Self {
-        Self {
-            inner: Box::new(inner),
-            storage_metrics,
-        }
-    }
-
-    #[cfg(not(all(not(madsim), feature = "hm-trace")))]
-    pub fn new_from_local(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
         Self {
             inner: Box::new(inner),
             storage_metrics,
@@ -119,11 +92,6 @@ impl<S> MonitoredStateStore<S> {
     }
 
     pub fn inner(&self) -> &S {
-        #[cfg(all(not(madsim), feature = "hm-trace"))]
-        {
-            self.inner.inner()
-        }
-        #[cfg(not(all(not(madsim), feature = "hm-trace")))]
         &self.inner
     }
 
@@ -183,13 +151,12 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + '_ {
         let table_id = read_options.table_id;
         let key_len = key.len();
         self.monitored_get_keyed_row(
-            self.inner.get_keyed_row(key, epoch, read_options),
+            self.inner.get_keyed_row(key, read_options),
             table_id,
             key_len,
         )
@@ -198,24 +165,22 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     fn iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         self.monitored_iter::<'_, _, _, StateStoreIterStats>(
             read_options.table_id,
-            self.inner.iter(key_range, epoch, read_options),
+            self.inner.iter(key_range, read_options),
         )
     }
 
     fn rev_iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
         self.monitored_iter::<'_, _, _, StateStoreIterStats>(
             read_options.table_id,
-            self.inner.rev_iter(key_range, epoch, read_options),
+            self.inner.rev_iter(key_range, read_options),
         )
     }
 }
@@ -341,6 +306,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     type Local = MonitoredStateStore<S::Local>;
+    type ReadSnapshot = MonitoredStateStore<S::ReadSnapshot>;
 
     fn try_wait_epoch(
         &self,
@@ -361,13 +327,24 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     }
 
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
-        MonitoredStateStore::new_from_local(
+        MonitoredStateStore::new(
             self.inner
                 .new_local(option)
                 .instrument_await("store_new_local")
                 .await,
             self.storage_metrics.clone(),
         )
+    }
+
+    async fn new_read_snapshot(
+        &self,
+        epoch: HummockReadEpoch,
+        options: NewReadSnapshotOptions,
+    ) -> StorageResult<Self::ReadSnapshot> {
+        Ok(MonitoredStateStore::new(
+            self.inner.new_read_snapshot(epoch, options).await?,
+            self.storage_metrics.clone(),
+        ))
     }
 }
 

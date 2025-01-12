@@ -33,7 +33,9 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockEpoch, HummockReadEpoch, HummockVersionId, FIRST_VERSION_ID,
+};
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -43,7 +45,7 @@ use risingwave_storage::monitor::{
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use risingwave_storage::opts::StorageOpts;
-use risingwave_storage::store::{ReadOptions, StateStoreRead};
+use risingwave_storage::store::{NewReadSnapshotOptions, ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
@@ -598,7 +600,11 @@ async fn poll_compaction_tasks_status(
     (compaction_ok, cur_version)
 }
 
-type StateStoreIterType = Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::Iter>>;
+type StateStoreIterType = Pin<
+    Box<
+        <<MonitoredStateStore<HummockStorage> as StateStore>::ReadSnapshot as StateStoreRead>::Iter,
+    >,
+>;
 
 async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,
@@ -621,10 +627,17 @@ async fn open_hummock_iters(
     );
 
     for &epoch in snapshots {
-        let iter = hummock
+        let snapshot = hummock
+            .new_read_snapshot(
+                HummockReadEpoch::NoWait(epoch),
+                NewReadSnapshotOptions {
+                    table_id: TableId { table_id },
+                },
+            )
+            .await?;
+        let iter = snapshot
             .iter(
                 range.clone(),
-                epoch,
                 ReadOptions {
                     table_id: TableId { table_id },
                     cache_policy: CachePolicy::Fill(CacheHint::Normal),

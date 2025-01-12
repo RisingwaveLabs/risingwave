@@ -32,10 +32,9 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::store::LocalHummockStorage;
+use risingwave_storage::hummock::test_utils::*;
 use risingwave_storage::hummock::HummockStorage;
-use risingwave_storage::store::{
-    to_owned_item, LocalStateStore, StateStoreIterExt, StateStoreRead,
-};
+use risingwave_storage::store::{to_owned_item, LocalStateStore, StateStoreIterExt};
 use risingwave_storage::{StateStore, StateStoreIter, StateStoreReadIter};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
