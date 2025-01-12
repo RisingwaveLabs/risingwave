@@ -34,7 +34,6 @@ use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
-use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{
@@ -203,7 +202,6 @@ struct AutoRebuildStateStoreReadIter<S: StateStoreRead, F> {
     // call to get whether to rebuild the iter. Once return true, the closure should reset itself.
     should_rebuild: F,
     end_bound: Bound<TableKey<Bytes>>,
-    epoch: HummockEpoch,
     options: ReadOptions,
 }
 
@@ -212,19 +210,17 @@ impl<S: StateStoreRead, F: FnMut() -> bool> AutoRebuildStateStoreReadIter<S, F> 
         state_store: S,
         should_rebuild: F,
         range: TableKeyRange,
-        epoch: HummockEpoch,
         options: ReadOptions,
     ) -> StorageResult<Self> {
         let (start_bound, end_bound) = range;
         let iter = state_store
-            .iter((start_bound, end_bound.clone()), epoch, options.clone())
+            .iter((start_bound, end_bound.clone()), options.clone())
             .await?;
         Ok(Self {
             state_store,
             iter,
             should_rebuild,
             end_bound,
-            epoch,
             options,
         })
     }
@@ -234,7 +230,6 @@ mod timeout_auto_rebuild {
     use std::time::{Duration, Instant};
 
     use risingwave_hummock_sdk::key::TableKeyRange;
-    use risingwave_hummock_sdk::HummockEpoch;
     use risingwave_storage::error::StorageResult;
     use risingwave_storage::store::{ReadOptions, StateStoreRead};
 
@@ -246,7 +241,6 @@ mod timeout_auto_rebuild {
     pub(super) async fn iter_with_timeout_rebuild<S: StateStoreRead>(
         state_store: S,
         range: TableKeyRange,
-        epoch: HummockEpoch,
         options: ReadOptions,
         timeout: Duration,
     ) -> StorageResult<TimeoutAutoRebuildIter<S>> {
@@ -286,7 +280,6 @@ mod timeout_auto_rebuild {
                 }
             },
             range,
-            epoch,
             options,
         )
         .await
@@ -313,7 +306,6 @@ impl<S: StateStoreRead, F: FnMut() -> bool + Send> StateStoreIter
                         Included(TableKey(range_start.clone())),
                         self.end_bound.clone(),
                     ),
-                    self.epoch,
                     self.options.clone(),
                 )
                 .await?;
@@ -373,7 +365,6 @@ impl<S: StateStoreRead + Clone> KvLogStoreReader<S> {
                 iter_with_timeout_rebuild(
                     state_store,
                     key_range,
-                    HummockEpoch::MAX,
                     ReadOptions {
                         // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
                         prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
@@ -525,7 +516,6 @@ impl<S: StateStoreRead + Clone> LogReader for KvLogStoreReader<S> {
                                     state_store
                                         .iter(
                                             (Included(range_start), Included(range_end)),
-                                            HummockEpoch::MAX,
                                             ReadOptions {
                                                 prefetch_options:
                                                     PrefetchOptions::prefetch_for_large_range_scan(),

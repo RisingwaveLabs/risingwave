@@ -265,7 +265,6 @@ pub trait StateStoreRead: StaticSendSync {
     fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>>;
 
@@ -275,10 +274,9 @@ pub trait StateStoreRead: StaticSendSync {
     fn get(
         &self,
         key: TableKey<Bytes>,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Option<Bytes>> {
-        self.get_keyed_row(key, epoch, read_options)
+        self.get_keyed_row(key, read_options)
             .map_ok(|v| v.map(|(_, v)| v))
     }
 
@@ -290,14 +288,12 @@ pub trait StateStoreRead: StaticSendSync {
     fn iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Self::Iter>;
 
     fn rev_iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Self::RevIter>;
 }
@@ -313,7 +309,6 @@ pub trait StateStoreReadExt: StaticSendSync {
     fn scan(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Vec<StateStoreKeyedRow>>;
@@ -323,7 +318,6 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
     async fn scan(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         limit: Option<usize>,
         mut read_options: ReadOptions,
     ) -> StorageResult<Vec<StateStoreKeyedRow>> {
@@ -333,7 +327,7 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         const MAX_INITIAL_CAP: usize = 1024;
         let limit = limit.unwrap_or(usize::MAX);
         let mut ret = Vec::with_capacity(min(limit, MAX_INITIAL_CAP));
-        let mut iter = self.iter(key_range, epoch, read_options).await?;
+        let mut iter = self.iter(key_range, read_options).await?;
         while let Some((key, value)) = iter.try_next().await? {
             ret.push((key.copy_into(), Bytes::copy_from_slice(value)))
         }
@@ -374,7 +368,7 @@ pub struct NewReadSnapshotOptions {
     pub table_id: TableId,
 }
 
-pub trait StateStore: StateStoreRead + StateStoreReadLog + StaticSendSync + Clone {
+pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
     type Local: LocalStateStore;
     type ReadSnapshot: StateStoreRead + Clone;
 

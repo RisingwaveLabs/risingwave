@@ -174,16 +174,11 @@ impl ReplayWorker {
         } = record;
 
         match operation {
-            Operation::Get {
-                key,
-                epoch,
-                read_options,
-            } => {
+            Operation::Get { key, read_options } => {
                 let actual = match storage_type {
                     StorageType::Global => {
                         // epoch must be Some
-                        let epoch = epoch.unwrap();
-                        replay.get(key, epoch, read_options).await
+                        replay.get(key, read_options).await
                     }
                     StorageType::Local(_, local_storage_id) => {
                         let opts = local_storage_opts_map.get(&local_storage_id).unwrap();
@@ -228,14 +223,12 @@ impl ReplayWorker {
             }
             Operation::Iter {
                 key_range,
-                epoch,
                 read_options,
             } => {
                 let iter = match storage_type {
                     StorageType::Global => {
                         // Global Storage must have a epoch
-                        let epoch = epoch.unwrap();
-                        replay.iter(key_range, epoch, read_options).await
+                        replay.iter(key_range, read_options).await
                     }
                     StorageType::Local(_, id) => {
                         let opts = local_storage_opts_map.get(&id).unwrap();
@@ -603,7 +596,6 @@ mod tests {
 
         let op = Operation::Iter {
             key_range: (Bound::Unbounded, Bound::Unbounded),
-            epoch: Some(45),
             read_options: iter_read_options,
         };
 

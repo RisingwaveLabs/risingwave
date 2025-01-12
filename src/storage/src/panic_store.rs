@@ -37,7 +37,7 @@ impl StateStoreRead for PanicStateStore {
     async fn get_keyed_row(
         &self,
         _key: TableKey<Bytes>,
-        _epoch: u64,
+
         _read_options: ReadOptions,
     ) -> StorageResult<Option<StateStoreKeyedRow>> {
         panic!("should not read from the state store!");
@@ -47,7 +47,7 @@ impl StateStoreRead for PanicStateStore {
     async fn iter(
         &self,
         _key_range: TableKeyRange,
-        _epoch: u64,
+
         _read_options: ReadOptions,
     ) -> StorageResult<Self::Iter> {
         panic!("should not read from the state store!");
@@ -57,7 +57,7 @@ impl StateStoreRead for PanicStateStore {
     async fn rev_iter(
         &self,
         _key_range: TableKeyRange,
-        _epoch: u64,
+
         _read_options: ReadOptions,
     ) -> StorageResult<Self::RevIter> {
         panic!("should not read from the state store!");
@@ -148,7 +148,6 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!")
     }
 
-    #[allow(clippy::unused_async)]
     async fn try_flush(&mut self) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }

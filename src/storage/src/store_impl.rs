@@ -319,15 +319,15 @@ pub mod verify {
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<Option<StateStoreKeyedRow>> {
             let actual = self
                 .actual
-                .get_keyed_row(key.clone(), epoch, read_options.clone())
+                .get_keyed_row(key.clone(), read_options.clone())
                 .await;
             if let Some(expected) = &self.expected {
-                let expected = expected.get_keyed_row(key, epoch, read_options).await;
+                let expected = expected.get_keyed_row(key, read_options).await;
                 assert_result_eq(&actual, &expected);
             }
             actual
@@ -339,16 +339,16 @@ pub mod verify {
         fn iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
             async move {
                 let actual = self
                     .actual
-                    .iter(key_range.clone(), epoch, read_options.clone())
+                    .iter(key_range.clone(), read_options.clone())
                     .await?;
                 let expected = if let Some(expected) = &self.expected {
-                    Some(expected.iter(key_range, epoch, read_options).await?)
+                    Some(expected.iter(key_range, read_options).await?)
                 } else {
                     None
                 };
@@ -361,16 +361,16 @@ pub mod verify {
         fn rev_iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
             async move {
                 let actual = self
                     .actual
-                    .rev_iter(key_range.clone(), epoch, read_options.clone())
+                    .rev_iter(key_range.clone(), read_options.clone())
                     .await?;
                 let expected = if let Some(expected) = &self.expected {
-                    Some(expected.rev_iter(key_range, epoch, read_options).await?)
+                    Some(expected.rev_iter(key_range, read_options).await?)
                 } else {
                     None
                 };
@@ -902,21 +902,21 @@ mod dyn_state_store {
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<Option<StateStoreKeyedRow>>;
 
         async fn iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter>;
 
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter>;
     }
@@ -939,30 +939,28 @@ mod dyn_state_store {
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<Option<StateStoreKeyedRow>> {
-            self.get_keyed_row(key, epoch, read_options).await
+            self.get_keyed_row(key, read_options).await
         }
 
         async fn iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter> {
-            Ok(Box::new(self.iter(key_range, epoch, read_options).await?))
+            Ok(Box::new(self.iter(key_range, read_options).await?))
         }
 
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter> {
-            Ok(Box::new(
-                self.rev_iter(key_range, epoch, read_options).await?,
-            ))
+            Ok(Box::new(self.rev_iter(key_range, read_options).await?))
         }
     }
 
@@ -1255,7 +1253,6 @@ mod dyn_state_store {
         };
     }
 
-    state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStore>, DynStateStoreRead);
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreRead);
 
     #[derive(Clone)]
@@ -1271,28 +1268,28 @@ mod dyn_state_store {
         fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
-            self.as_ref().get_keyed_row(key, epoch, read_options)
+            self.as_ref().get_keyed_row(key, read_options)
         }
 
         fn iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
-            self.as_ref().iter(key_range, epoch, read_options)
+            self.as_ref().iter(key_range, read_options)
         }
 
         fn rev_iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
-            self.as_ref().rev_iter(key_range, epoch, read_options)
+            self.as_ref().rev_iter(key_range, read_options)
         }
     }
 
@@ -1313,10 +1310,7 @@ mod dyn_state_store {
         }
     }
 
-    pub trait DynStateStore:
-        DynStateStoreRead + DynStateStoreReadLog + DynStateStoreExt + AsHummock
-    {
-    }
+    pub trait DynStateStore: DynStateStoreReadLog + DynStateStoreExt + AsHummock {}
 
     impl AsHummock for StateStoreDynRef {
         fn as_hummock(&self) -> Option<&HummockStorage> {
@@ -1324,10 +1318,7 @@ mod dyn_state_store {
         }
     }
 
-    impl<S: DynStateStoreRead + DynStateStoreReadLog + DynStateStoreExt + AsHummock> DynStateStore
-        for S
-    {
-    }
+    impl<S: DynStateStoreReadLog + DynStateStoreExt + AsHummock> DynStateStore for S {}
 
     impl StateStore for StateStoreDynRef {
         type Local = BoxDynLocalStateStore;

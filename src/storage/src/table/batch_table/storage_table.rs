@@ -370,7 +370,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         pk: impl Row,
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<OwnedRow>> {
-        let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
         let read_committed = wait_epoch.is_read_committed();
         self.store
@@ -404,9 +403,17 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
             ..Default::default()
         };
-        if let Some((full_key, value)) = self
+        let read_snapshot = self
             .store
-            .get_keyed_row(serialized_pk, epoch, read_options)
+            .new_read_snapshot(
+                wait_epoch,
+                NewReadSnapshotOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await?;
+        if let Some((full_key, value)) = read_snapshot
+            .get_keyed_row(serialized_pk, read_options)
             .await?
         {
             let row = self.row_serde.deserialize(&value)?;
@@ -697,7 +704,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     self.row_serde.clone(),
                     table_key_range,
                     read_options,
-                    wait_epoch,
                 )
                 .await?
                 .into_stream::<K>();
@@ -1092,13 +1098,11 @@ impl<SI: StateStoreIter, SD: ValueRowSerde> StorageTableInnerIterInner<SI, SD> {
         row_deserializer: Arc<SD>,
         table_key_range: TableKeyRange,
         read_options: ReadOptions,
-        epoch: HummockReadEpoch,
     ) -> StorageResult<Self>
     where
         S: StateStoreRead<Iter = SI>,
     {
-        let raw_epoch = epoch.get_epoch();
-        let iter = store.iter(table_key_range, raw_epoch, read_options).await?;
+        let iter = store.iter(table_key_range, read_options).await?;
         let iter = Self {
             iter,
             mapping,

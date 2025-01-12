@@ -159,7 +159,6 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
-            None,
             read_options.clone().into(),
             self.storage_type,
         );
@@ -175,7 +174,6 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
-            None,
             read_options.clone().into(),
             self.storage_type,
         );
@@ -310,7 +308,6 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
     fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
         self.traced_get_keyed_row(
@@ -324,35 +321,31 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
     fn iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
-            Some(epoch),
             read_options.clone().into(),
             self.storage_type,
         );
-        self.traced_iter(self.inner.iter(key_range, epoch, read_options), span)
+        self.traced_iter(self.inner.iter(key_range, read_options), span)
     }
 
     fn rev_iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
-            Some(epoch),
             read_options.clone().into(),
             self.storage_type,
         );
-        self.traced_iter(self.inner.rev_iter(key_range, epoch, read_options), span)
+        self.traced_iter(self.inner.rev_iter(key_range, read_options), span)
     }
 }
 

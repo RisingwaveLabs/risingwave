@@ -149,13 +149,12 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + '_ {
         let table_id = read_options.table_id;
         let key_len = key.len();
         self.monitored_get_keyed_row(
-            self.inner.get_keyed_row(key, epoch, read_options),
+            self.inner.get_keyed_row(key, read_options),
             table_id,
             key_len,
         )
@@ -164,24 +163,22 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     fn iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         self.monitored_iter::<'_, _, _, StateStoreIterStats>(
             read_options.table_id,
-            self.inner.iter(key_range, epoch, read_options),
+            self.inner.iter(key_range, read_options),
         )
     }
 
     fn rev_iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
         self.monitored_iter::<'_, _, _, StateStoreIterStats>(
             read_options.table_id,
-            self.inner.rev_iter(key_range, epoch, read_options),
+            self.inner.rev_iter(key_range, read_options),
         )
     }
 }
