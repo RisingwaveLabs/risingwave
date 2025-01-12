@@ -168,8 +168,8 @@ impl LocalStateStore for PanicStateStore {
 
 impl StateStore for PanicStateStore {
     type Local = Self;
+    type ReadSnapshot = Self;
 
-    #[allow(clippy::unused_async)]
     async fn try_wait_epoch(
         &self,
         _epoch: HummockReadEpoch,
@@ -178,9 +178,16 @@ impl StateStore for PanicStateStore {
         panic!("should not wait epoch from the panic state store!");
     }
 
-    #[allow(clippy::unused_async)]
     async fn new_local(&self, _option: NewLocalOptions) -> Self::Local {
         panic!("should not call new local from the panic state store");
+    }
+
+    async fn new_read_snapshot(
+        &self,
+        _epoch: HummockReadEpoch,
+        _options: NewReadSnapshotOptions,
+    ) -> StorageResult<Self::ReadSnapshot> {
+        panic!()
     }
 }
 

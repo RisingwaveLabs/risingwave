@@ -49,8 +49,8 @@ use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{
-    NextEpochOptions, PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter,
-    StateStoreIterExt, TryWaitEpochOptions,
+    NewReadSnapshotOptions, NextEpochOptions, PrefetchOptions, ReadLogOptions, ReadOptions,
+    StateStoreIter, StateStoreIterExt, StateStoreRead, TryWaitEpochOptions,
 };
 use crate::table::merge_sort::NodePeek;
 use crate::table::{ChangeLogRow, KeyedRow, TableDistribution, TableIter};
@@ -612,9 +612,20 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             None => self.distribution.vnodes().iter_vnodes().collect_vec(),
         };
 
+        let read_snapshot = self
+            .store
+            .new_read_snapshot(
+                wait_epoch,
+                NewReadSnapshotOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await?;
+
         build_vnode_stream(
             |vnode| {
                 self.iter_vnode_with_encoded_key_range(
+                    &read_snapshot,
                     prefix_hint.clone(),
                     (start_bound.as_ref(), end_bound.as_ref()),
                     wait_epoch,
@@ -624,6 +635,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             },
             |vnode| {
                 self.iter_vnode_with_encoded_key_range(
+                    &read_snapshot,
                     prefix_hint.clone(),
                     (start_bound.as_ref(), end_bound.as_ref()),
                     wait_epoch,
@@ -639,6 +651,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 
     async fn iter_vnode_with_encoded_key_range<K: CopyFromSlice>(
         &self,
+        read_snapshot: &S::ReadSnapshot,
         prefix_hint: Option<Bytes>,
         encoded_key_range: (Bound<&Bytes>, Bound<&Bytes>),
         wait_epoch: HummockReadEpoch,
@@ -672,8 +685,8 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     true => None,
                     false => Some(Arc::new(self.pk_serializer.clone())),
                 };
-                let iter = StorageTableInnerIterInner::<S, SD>::new(
-                    &self.store,
+                let iter = StorageTableInnerIterInner::new(
+                    read_snapshot,
                     self.mapping.clone(),
                     self.epoch_idx,
                     pk_serializer,
@@ -911,8 +924,18 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         } else {
             Unbounded
         };
+        let read_snapshot = self
+            .store
+            .new_read_snapshot(
+                epoch,
+                NewReadSnapshotOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await?;
         Ok(self
             .iter_vnode_with_encoded_key_range::<()>(
+                &read_snapshot,
                 None,
                 (start_bound.as_ref(), Unbounded),
                 epoch,
@@ -1028,9 +1051,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 }
 
 /// [`StorageTableInnerIterInner`] iterates on the storage table.
-struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
+struct StorageTableInnerIterInner<SI: StateStoreIter, SD: ValueRowSerde> {
     /// An iterator that returns raw bytes from storage.
-    iter: S::Iter,
+    iter: SI,
 
     mapping: Arc<ColumnMapping>,
 
@@ -1054,10 +1077,10 @@ struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
     output_row_in_key_indices: Vec<usize>,
 }
 
-impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
+impl<SI: StateStoreIter, SD: ValueRowSerde> StorageTableInnerIterInner<SI, SD> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     #[allow(clippy::too_many_arguments)]
-    async fn new(
+    async fn new<S>(
         store: &S,
         mapping: Arc<ColumnMapping>,
         epoch_idx: Option<usize>,
@@ -1070,16 +1093,11 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         table_key_range: TableKeyRange,
         read_options: ReadOptions,
         epoch: HummockReadEpoch,
-    ) -> StorageResult<Self> {
+    ) -> StorageResult<Self>
+    where
+        S: StateStoreRead<Iter = SI>,
+    {
         let raw_epoch = epoch.get_epoch();
-        store
-            .try_wait_epoch(
-                epoch,
-                TryWaitEpochOptions {
-                    table_id: read_options.table_id,
-                },
-            )
-            .await?;
         let iter = store.iter(table_key_range, raw_epoch, read_options).await?;
         let iter = Self {
             iter,

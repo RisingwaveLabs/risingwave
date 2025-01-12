@@ -271,6 +271,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {
     type Local = TracedStateStore<S::Local>;
+    type ReadSnapshot = TracedStateStore<S::ReadSnapshot>;
 
     async fn try_wait_epoch(
         &self,
@@ -288,6 +289,17 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 
     async fn new_local(&self, options: NewLocalOptions) -> Self::Local {
         TracedStateStore::new_local(self.inner.new_local(options.clone()).await, options)
+    }
+
+    async fn new_read_snapshot(
+        &self,
+        epoch: HummockReadEpoch,
+        options: NewReadSnapshotOptions,
+    ) -> StorageResult<Self::ReadSnapshot> {
+        self.inner
+            .new_read_snapshot(epoch, options)
+            .await
+            .map(TracedStateStore::new_global)
     }
 }
 

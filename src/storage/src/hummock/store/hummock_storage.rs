@@ -699,6 +699,7 @@ impl StateStoreReadLog for HummockStorage {
 
 impl StateStore for HummockStorage {
     type Local = LocalHummockStorage;
+    type ReadSnapshot = Self;
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
     /// we will only check whether it is le `sealed_epoch` and won't wait.
@@ -766,6 +767,15 @@ impl StateStore for HummockStorage {
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_ {
         self.new_local_inner(option)
+    }
+
+    async fn new_read_snapshot(
+        &self,
+        _epoch: HummockReadEpoch,
+        _options: NewReadSnapshotOptions,
+    ) -> StorageResult<Self::ReadSnapshot> {
+        let temp = 0;
+        Ok(self.clone())
     }
 }
 

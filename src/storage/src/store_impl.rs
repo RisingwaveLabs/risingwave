@@ -36,8 +36,8 @@ use crate::hummock::{
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
 use crate::monitor::{
-    CompactorMetrics, HummockStateStoreMetrics, MonitoredStateStore as Monitored,
-    MonitoredStorageMetrics, ObjectStoreMetrics,
+    CompactorMetrics, HummockStateStoreMetrics, MonitoredStateStore, MonitoredStorageMetrics,
+    ObjectStoreMetrics,
 };
 use crate::opts::StorageOpts;
 use crate::StateStore;
@@ -66,6 +66,43 @@ mod opaque_type {
 }
 use opaque_type::{hummock, in_memory, sled};
 pub use opaque_type::{HummockStorageType, MemoryStateStoreType, SledStateStoreType};
+
+#[cfg(feature = "hm-trace")]
+type Monitored<S> = MonitoredStateStore<crate::monitor::traced_store::TracedStateStore<S>>;
+
+#[cfg(not(feature = "hm-trace"))]
+type Monitored<S> = MonitoredStateStore<S>;
+
+fn monitored<S: StateStore>(
+    state_store: S,
+    storage_metrics: Arc<MonitoredStorageMetrics>,
+) -> Monitored<S> {
+    let inner = {
+        #[cfg(feature = "hm-trace")]
+        {
+            crate::monitor::traced_store::TracedStateStore::new_global(state_store)
+        }
+        #[cfg(not(feature = "hm-trace"))]
+        {
+            state_store
+        }
+    };
+    inner.monitored(storage_metrics)
+}
+
+fn inner<S>(state_store: &Monitored<S>) -> &S {
+    let inner = state_store.inner();
+    {
+        #[cfg(feature = "hm-trace")]
+        {
+            inner.inner()
+        }
+        #[cfg(not(feature = "hm-trace"))]
+        {
+            inner
+        }
+    }
+}
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -135,7 +172,7 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of MemoryStateStoreType in deducted here.
-        Self::MemoryStateStore(in_memory(state_store).monitored(storage_metrics))
+        Self::MemoryStateStore(monitored(in_memory(state_store), storage_metrics))
     }
 
     pub fn hummock(
@@ -143,14 +180,14 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreType in deducted here.
-        Self::HummockStateStore(hummock(state_store).monitored(storage_metrics))
+        Self::HummockStateStore(monitored(hummock(state_store), storage_metrics))
     }
 
     pub fn sled(
         state_store: SledStateStore,
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
-        Self::SledStateStore(sled(state_store).monitored(storage_metrics))
+        Self::SledStateStore(monitored(sled(state_store), storage_metrics))
     }
 
     pub fn shared_in_memory_store(storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
@@ -167,7 +204,7 @@ impl StateStoreImpl {
     pub fn as_hummock(&self) -> Option<&HummockStorage> {
         match self {
             StateStoreImpl::HummockStateStore(hummock) => {
-                Some(hummock.inner().as_hummock().expect("should be hummock"))
+                Some(inner(hummock).as_hummock().expect("should be hummock"))
             }
             _ => None,
         }
@@ -559,6 +596,7 @@ pub mod verify {
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
         type Local = VerifyStateStore<A::Local, E::Local>;
+        type ReadSnapshot = VerifyStateStore<A::ReadSnapshot, E::ReadSnapshot>;
 
         fn try_wait_epoch(
             &self,
@@ -579,6 +617,23 @@ pub mod verify {
                 expected,
                 _phantom: PhantomData::<()>,
             }
+        }
+
+        async fn new_read_snapshot(
+            &self,
+            epoch: HummockReadEpoch,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<Self::ReadSnapshot> {
+            let expected = if let Some(expected) = &self.expected {
+                Some(expected.new_read_snapshot(epoch, options).await?)
+            } else {
+                None
+            };
+            Ok(VerifyStateStore {
+                actual: self.actual.new_read_snapshot(epoch, options).await?,
+                expected,
+                _phantom: PhantomData::<()>,
+            })
         }
     }
 
@@ -1154,6 +1209,11 @@ mod dyn_state_store {
         ) -> StorageResult<()>;
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynLocalStateStore;
+        async fn new_read_snapshot(
+            &self,
+            epoch: HummockReadEpoch,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<StateStoreReadDynRef>;
     }
 
     #[async_trait::async_trait]
@@ -1168,6 +1228,16 @@ mod dyn_state_store {
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynLocalStateStore {
             StateStorePointer(Box::new(self.new_local(option).await))
+        }
+
+        async fn new_read_snapshot(
+            &self,
+            epoch: HummockReadEpoch,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<StateStoreReadDynRef> {
+            Ok(StateStorePointer(Arc::new(
+                self.new_read_snapshot(epoch, options).await?,
+            )))
         }
     }
 
@@ -1261,6 +1331,7 @@ mod dyn_state_store {
 
     impl StateStore for StateStoreDynRef {
         type Local = BoxDynLocalStateStore;
+        type ReadSnapshot = StateStoreReadDynRef;
 
         fn try_wait_epoch(
             &self,
@@ -1275,6 +1346,14 @@ mod dyn_state_store {
             option: NewLocalOptions,
         ) -> impl Future<Output = Self::Local> + Send + '_ {
             (*self.0).new_local(option)
+        }
+
+        async fn new_read_snapshot(
+            &self,
+            epoch: HummockReadEpoch,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<Self::ReadSnapshot> {
+            (*self.0).new_read_snapshot(epoch, options).await
         }
     }
 }

@@ -369,8 +369,14 @@ impl From<TryWaitEpochOptions> for TracedTryWaitEpochOptions {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct NewReadSnapshotOptions {
+    pub table_id: TableId,
+}
+
 pub trait StateStore: StateStoreRead + StateStoreReadLog + StaticSendSync + Clone {
     type Local: LocalStateStore;
+    type ReadSnapshot: StateStoreRead + Clone;
 
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
     /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
@@ -386,6 +392,12 @@ pub trait StateStore: StateStoreRead + StateStoreReadLog + StaticSendSync + Clon
     }
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_;
+
+    fn new_read_snapshot(
+        &self,
+        epoch: HummockReadEpoch,
+        options: NewReadSnapshotOptions,
+    ) -> impl StorageFuture<'_, Self::ReadSnapshot>;
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data

@@ -778,6 +778,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     type Local = RangeKvLocalStateStore<R>;
+    type ReadSnapshot = Self;
 
     #[allow(clippy::unused_async)]
     async fn try_wait_epoch(
@@ -791,6 +792,14 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
 
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
         RangeKvLocalStateStore::new(self.clone(), option)
+    }
+
+    async fn new_read_snapshot(
+        &self,
+        _epoch: HummockReadEpoch,
+        _options: NewReadSnapshotOptions,
+    ) -> StorageResult<Self::ReadSnapshot> {
+        Ok(self.clone())
     }
 }
 
