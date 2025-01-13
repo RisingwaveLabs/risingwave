@@ -2213,33 +2213,33 @@ async fn test_table_watermark() {
     {
         for (local, vnode) in [(&local1, vnode1), (&local2, vnode2)] {
             for index in epoch1_indexes() {
-                let value = risingwave_storage::store::LocalStateStore::get(
-                    local,
-                    gen_key(vnode, index),
+                let value = local
+                    .get(
+                        gen_key(vnode, index),
+                        ReadOptions {
+                            table_id: TEST_TABLE_ID,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(value.unwrap(), gen_val(index));
+            }
+            let result = local
+                .iter(
+                    RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         ..Default::default()
                     },
                 )
                 .await
+                .unwrap()
+                .into_stream(to_owned_item)
+                .map_ok(|(full_key, value)| (full_key.user_key, value))
+                .try_collect::<Vec<_>>()
+                .await
                 .unwrap();
-                assert_eq!(value.unwrap(), gen_val(index));
-            }
-            let result = risingwave_storage::store::LocalStateStore::iter(
-                local,
-                RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
-                ReadOptions {
-                    table_id: TEST_TABLE_ID,
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap()
-            .into_stream(to_owned_item)
-            .map_ok(|(full_key, value)| (full_key.user_key, value))
-            .try_collect::<Vec<_>>()
-            .await
-            .unwrap();
             let expected = epoch1_indexes()
                 .map(|index| {
                     (
@@ -2280,16 +2280,16 @@ async fn test_table_watermark() {
     {
         for (local, vnode) in [(&local1, vnode1), (&local2, vnode2)] {
             for index in epoch1_indexes() {
-                let value = risingwave_storage::store::LocalStateStore::get(
-                    local,
-                    gen_key(vnode, index),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap();
+                let value = local
+                    .get(
+                        gen_key(vnode, index),
+                        ReadOptions {
+                            table_id: TEST_TABLE_ID,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap();
                 if index < watermark1 {
                     assert!(value.is_none());
                 } else {
@@ -2384,16 +2384,16 @@ async fn test_table_watermark() {
     let test_after_epoch2 = |local1: LocalHummockStorage, local2: LocalHummockStorage| async {
         for (local, vnode) in [(&local1, vnode1), (&local2, vnode2)] {
             for index in indexes_after_epoch2() {
-                let value = risingwave_storage::store::LocalStateStore::get(
-                    local,
-                    gen_key(vnode, index),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap();
+                let value = local
+                    .get(
+                        gen_key(vnode, index),
+                        ReadOptions {
+                            table_id: TEST_TABLE_ID,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap();
                 if index < watermark1 {
                     assert!(value.is_none());
                 } else {

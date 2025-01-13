@@ -58,6 +58,20 @@ impl<S> TracedStateStore<S, Option<u64>> {
     pub fn epoch(&self) -> Option<u64> {
         self.extra
     }
+
+    pub fn new_local(inner: S, options: NewLocalOptions) -> Self {
+        let id = get_concurrent_id();
+        let local_storage_id = rand::random::<u64>();
+        let storage_type: StorageType = StorageType::Local(id, local_storage_id);
+        let _span: MayTraceSpan =
+            TraceSpan::new_local_storage_span(options.into(), storage_type, local_storage_id);
+
+        Self {
+            inner,
+            storage_type,
+            extra: None,
+        }
+    }
 }
 
 impl<S> TracedStateStore<S> {
@@ -76,20 +90,6 @@ impl<S> TracedStateStore<S> {
     pub fn new_global(inner: S) -> Self {
         Self::new(inner, StorageType::Global)
     }
-
-    pub fn new_local(inner: S, options: NewLocalOptions) -> Self {
-        let id = get_concurrent_id();
-        let local_storage_id = rand::random::<u64>();
-        let storage_type: StorageType = StorageType::Local(id, local_storage_id);
-        let _span: MayTraceSpan =
-            TraceSpan::new_local_storage_span(options.into(), storage_type, local_storage_id);
-
-        Self {
-            inner,
-            storage_type,
-            extra: (),
-        }
-    }
 }
 
 impl<S, E> TracedStateStore<S, E> {
@@ -106,29 +106,6 @@ impl<S, E> TracedStateStore<S, E> {
         }
         let traced = TracedStateStoreIter::new(res?, span);
         Ok(traced)
-    }
-
-    async fn traced_get(
-        &self,
-        key: TableKey<Bytes>,
-        epoch: Option<u64>,
-        read_options: ReadOptions,
-        get_future: impl Future<Output = StorageResult<Option<Bytes>>>,
-    ) -> StorageResult<Option<Bytes>> {
-        let span = TraceSpan::new_get_span(
-            key.0.clone(),
-            epoch,
-            read_options.clone().into(),
-            self.storage_type,
-        );
-
-        let res = get_future.await;
-
-        span.may_send_result(OperationResult::Get(TraceResult::from(
-            res.as_ref()
-                .map(|o| o.as_ref().map(|b| TracedBytes::from(b.clone()))),
-        )));
-        res
     }
 
     async fn traced_get_keyed_row(
@@ -155,24 +132,36 @@ impl<S, E> TracedStateStore<S, E> {
     }
 }
 
-impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
+impl<S: StateStoreGet> StateStoreGet for TracedStateStore<S, Option<u64>> {
+    async fn on_key_value<O: Send + 'static>(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> StorageResult<Option<O>> {
+        if let Some((key, value)) = self
+            .traced_get_keyed_row(
+                key.clone(),
+                self.epoch(),
+                read_options.clone(),
+                self.inner.on_key_value(key, read_options, |key, value| {
+                    Ok((key.copy_into(), Bytes::copy_from_slice(value)))
+                }),
+            )
+            .await?
+        {
+            Ok(Some(on_key_value_fn(key.to_ref(), value.as_ref())?))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S, Option<u64>> {
     type FlushedSnapshotReader = TracedStateStore<S::FlushedSnapshotReader, Option<u64>>;
 
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
-
-    fn get(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + '_ {
-        self.traced_get(
-            key.clone(),
-            None,
-            read_options.clone(),
-            self.inner.get(key, read_options),
-        )
-    }
 
     fn iter(
         &self,
@@ -294,7 +283,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {
-    type Local = TracedStateStore<S::Local>;
+    type Local = TracedStateStore<S::Local, Option<u64>>;
     type ReadSnapshot = TracedStateStore<S::ReadSnapshot, Option<u64>>;
 
     async fn try_wait_epoch(
@@ -332,19 +321,6 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S, Option<u64>> {
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
-
-    fn get_keyed_row(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
-        self.traced_get_keyed_row(
-            key.clone(),
-            self.epoch(),
-            read_options.clone(),
-            self.inner.get_keyed_row(key, read_options),
-        )
-    }
 
     fn iter(
         &self,

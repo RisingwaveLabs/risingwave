@@ -42,7 +42,9 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::monitor::MemoryCollector;
-use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreKeyedRow, StateStoreRead};
+use crate::store::{
+    OpConsistencyLevel, ReadOptions, StateStoreGet, StateStoreKeyedRow, StateStoreRead,
+};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -377,6 +379,18 @@ pub(crate) fn sanity_check_enabled() -> bool {
     SANITY_CHECK_ENABLED.load(AtomicOrdering::Acquire)
 }
 
+async fn get_from_state_store(
+    state_store: &impl StateStoreGet,
+    key: TableKey<Bytes>,
+    read_options: ReadOptions,
+) -> StorageResult<Option<Bytes>> {
+    state_store
+        .on_key_value(key, read_options, |_, value| {
+            Ok(Bytes::copy_from_slice(value))
+        })
+        .await
+}
+
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(
     key: &TableKey<Bytes>,
@@ -395,7 +409,7 @@ pub(crate) async fn do_insert_sanity_check(
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
-    let stored_value = inner.get(key.clone(), read_options).await?;
+    let stored_value = get_from_state_store(inner, key.clone(), read_options).await?;
 
     if let Some(stored_value) = stored_value {
         return Err(Box::new(MemTableError::InconsistentOperation {
@@ -430,7 +444,7 @@ pub(crate) async fn do_delete_sanity_check(
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
-    match inner.get(key.clone(), read_options).await? {
+    match get_from_state_store(inner, key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
@@ -476,7 +490,7 @@ pub(crate) async fn do_update_sanity_check(
         ..Default::default()
     };
 
-    match inner.get(key.clone(), read_options).await? {
+    match get_from_state_store(inner, key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),

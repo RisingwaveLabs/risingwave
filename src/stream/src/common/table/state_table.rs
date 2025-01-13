@@ -57,8 +57,8 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
-    ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
-    TryWaitEpochOptions,
+    ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreGet, StateStoreIter,
+    StateStoreIterExt, TryWaitEpochOptions,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{
@@ -114,7 +114,7 @@ pub struct StateTableInner<
     pk_serde: OrderedRowSerde,
 
     /// Row deserializer with value encoding
-    row_serde: SD,
+    row_serde: Arc<SD>,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -206,7 +206,7 @@ where
 }
 
 fn consistent_old_value_op(
-    row_serde: impl ValueRowSerde,
+    row_serde: Arc<impl ValueRowSerde>,
     is_log_store: bool,
 ) -> OpConsistencyLevel {
     OpConsistencyLevel::ConsistentOldValue {
@@ -394,23 +394,19 @@ where
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
 
-        let make_row_serde = || {
-            SD::new(
-                Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
-                Arc::from(table_columns.clone().into_boxed_slice()),
-            )
-        };
+        let row_serde = Arc::new(SD::new(
+            Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
+            Arc::from(table_columns.clone().into_boxed_slice()),
+        ));
 
         let state_table_op_consistency_level = op_consistency_level;
         let op_consistency_level = match op_consistency_level {
             StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
             StateTableOpConsistencyLevel::ConsistentOldValue => {
-                let row_serde = make_row_serde();
-                consistent_old_value_op(row_serde, false)
+                consistent_old_value_op(row_serde.clone(), false)
             }
             StateTableOpConsistencyLevel::LogStoreEnabled => {
-                let row_serde = make_row_serde();
-                consistent_old_value_op(row_serde, true)
+                consistent_old_value_op(row_serde.clone(), true)
             }
         };
 
@@ -431,8 +427,6 @@ where
             )
         };
         let local_state_store = store.new_local(new_local_options).await;
-
-        let row_serde = make_row_serde();
 
         // If state table has versioning, that means it supports
         // Schema change. In that case, the row encoding should be column aware as well.
@@ -635,10 +629,13 @@ where
 {
     /// Get a single row from state table.
     pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
-        let encoded_row: Option<Bytes> = self.get_encoded_row(pk).await?;
-        match encoded_row {
-            Some(encoded_row) => {
-                let row = self.row_serde.deserialize(&encoded_row)?;
+        // TODO: avoid clone when `on_key_value_fn` can be non-static
+        let row_serde = self.row_serde.clone();
+        let row = self
+            .get_inner(pk, move |_, value| Ok(row_serde.deserialize(value)?))
+            .await?;
+        match row {
+            Some(row) => {
                 if IS_REPLICATED {
                     // If the table is replicated, we need to deserialize the row with the output
                     // indices.
@@ -654,6 +651,16 @@ where
 
     /// Get a raw encoded row from state table.
     pub async fn get_encoded_row(&self, pk: impl Row) -> StreamExecutorResult<Option<Bytes>> {
+        self.get_inner(pk, |_, value| Ok(Bytes::copy_from_slice(value)))
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn get_inner<O: Send + 'static>(
+        &self,
+        pk: impl Row,
+        on_key_value_fn: impl risingwave_storage::store::KeyValueFn<O>,
+    ) -> StreamExecutorResult<Option<O>> {
         assert!(pk.len() <= self.pk_indices.len());
 
         let serialized_pk =
@@ -678,7 +685,7 @@ where
         };
 
         self.local_store
-            .get(serialized_pk, read_options)
+            .on_key_value(serialized_pk, read_options, on_key_value_fn)
             .await
             .map_err(Into::into)
     }
@@ -742,8 +749,8 @@ where
                     self.table_id(),
                     vnode,
                     &key,
-                    prev.debug_fmt(&self.row_serde),
-                    new.debug_fmt(&self.row_serde),
+                    prev.debug_fmt(&*self.row_serde),
+                    new.debug_fmt(&*self.row_serde),
                 )
             }
         }
@@ -871,9 +878,11 @@ where
             .compute_chunk_vnode(&chunk, &self.pk_indices);
 
         let values = if let Some(ref value_indices) = self.value_indices {
-            chunk.project(value_indices).serialize_with(&self.row_serde)
+            chunk
+                .project(value_indices)
+                .serialize_with(&*self.row_serde)
         } else {
-            chunk.serialize_with(&self.row_serde)
+            chunk.serialize_with(&*self.row_serde)
         };
 
         // TODO(kwannoel): Seems like we are doing vis check twice here.
@@ -1211,7 +1220,7 @@ where
         Ok(deserialize_keyed_row_stream::<'_, ()>(
             self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
                 .await?,
-            &self.row_serde,
+            &*self.row_serde,
         )
         .map_ok(|(_, row)| row))
     }
@@ -1225,7 +1234,7 @@ where
         Ok(deserialize_keyed_row_stream(
             self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
                 .await?,
-            &self.row_serde,
+            &*self.row_serde,
         )
         .map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)))
     }
@@ -1375,7 +1384,7 @@ where
                     prefetch_options,
                 )
                 .await?,
-                &self.row_serde,
+                &*self.row_serde,
             ))
         } else {
             futures::future::Either::Right(deserialize_keyed_row_stream(
@@ -1385,7 +1394,7 @@ where
                     prefetch_options,
                 )
                 .await?,
-                &self.row_serde,
+                &*self.row_serde,
             ))
         })
     }
@@ -1440,7 +1449,7 @@ where
                     },
                 )
                 .await?,
-            &self.row_serde,
+            &*self.row_serde,
         )
         .map_err(Into::into))
     }
