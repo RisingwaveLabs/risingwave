@@ -503,6 +503,8 @@ impl HummockManager {
                 .on_conflict_do_nothing()
                 .exec(txn)
                 .await?;
+            // Return early to skip persisting delta.
+            return Ok(version_sst_ids);
         }
         let written = write_sstable_infos(
             delta.newly_added_sst_infos().filter(|s| {
