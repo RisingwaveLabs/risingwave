@@ -29,6 +29,7 @@ use crate::error::{ErrorCode, Result};
 use crate::TableCatalog;
 
 fn get_format_encode_from_table(table: &TableCatalog) -> Result<Option<FormatEncodeOptions>> {
+    // TODO(purify): use purified definition.
     let stmt = table.create_sql_ast()?;
     let Statement::CreateTable { format_encode, .. } = stmt else {
         unreachable!()
@@ -63,6 +64,7 @@ pub async fn handle_refresh_schema(
     };
 
     // NOTE(st1page): since we have not implemented alter format encode for table, it is actually no use.
+    // TODO(purify): use purified definition.
     let definition = alter_definition_format_encode(
         &original_table.definition,
         format_encode.row_options.clone(),

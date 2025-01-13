@@ -55,6 +55,7 @@ pub async fn get_new_table_definition_for_cdc_table(
     );
 
     // Retrieve the original table definition.
+    // TODO(purify): use purified definition.
     let mut definition = original_catalog.create_sql_ast()?;
 
     // Clear the original columns field, so that we'll follow `new_columns` to generate a
@@ -257,6 +258,7 @@ pub async fn handle_alter_table_column(
     }
 
     // Retrieve the original table definition and parse it to AST.
+    // TODO(purify): use purified definition.
     let mut definition = original_catalog.create_sql_ast()?;
     let Statement::CreateTable {
         columns,
