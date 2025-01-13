@@ -23,7 +23,9 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{MAX_EPOCH, MAX_SPILL_TIMES};
-use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{
+    is_empty_key_range, vnode_range, FullKey, TableKey, TableKeyRange,
+};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::EpochWithGap;
 use tracing::{warn, Instrument};
@@ -48,8 +50,8 @@ use crate::hummock::utils::{
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{
-    BackwardSstableIterator, HummockError, MemoryLimiter, SstableIterator,
-    SstableIteratorReadOptions, SstableStoreRef,
+    BackwardSstableIterator, HummockError, HummockStorageReadSnapshot, MemoryLimiter,
+    SstableIterator, SstableIteratorReadOptions, SstableStoreRef,
 };
 use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableHummockRevIterator};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
@@ -246,23 +248,32 @@ pub struct LocalHummockFlushedSnapshotReader {
     hummock_version_reader: HummockVersionReader,
 }
 
-impl StateStoreRead for LocalHummockFlushedSnapshotReader {
-    type Iter = HummockStorageIterator;
-    type RevIter = HummockStorageRevIterator;
-
-    fn get_keyed_row(
+impl StateStoreGet for LocalHummockFlushedSnapshotReader {
+    async fn on_key_value(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
+        on_key_value_fn: impl FnOnce(FullKey<&[u8]>, &[u8]) + Send,
+    ) -> StorageResult<()> {
+        let temp = 0;
         assert_eq!(self.table_id, read_options.table_id);
-        Self::get_flushed(
+        if let Some((key, value)) = Self::get_flushed(
             &self.hummock_version_reader,
             &self.read_version,
             key,
             read_options,
         )
+        .await?
+        {
+            on_key_value_fn(key.to_ref(), value.as_ref());
+        }
+        Ok(())
     }
+}
+
+impl StateStoreRead for LocalHummockFlushedSnapshotReader {
+    type Iter = HummockStorageIterator;
+    type RevIter = HummockStorageRevIterator;
 
     fn iter(
         &self,

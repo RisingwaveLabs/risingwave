@@ -254,9 +254,13 @@ pub trait StateStoreReadLog: StaticSendSync {
     ) -> impl StorageFuture<'_, Self::ChangeLogIter>;
 }
 
-pub trait StateStoreRead: StaticSendSync {
-    type Iter: StateStoreReadIter;
-    type RevIter: StateStoreReadIter;
+pub trait StateStoreGet: StaticSendSync {
+    fn on_key_value(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+        on_key_value_fn: impl FnOnce(FullKey<&[u8]>, &[u8]) + Send,
+    ) -> impl StorageFuture<'_, ()>;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -265,7 +269,16 @@ pub trait StateStoreRead: StaticSendSync {
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>>;
+    ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>> {
+        async move {
+            let mut ret = None;
+            self.on_key_value(key, read_options, |key, value| {
+                ret = Some((key.copy_into(), Bytes::copy_from_slice(value)));
+            })
+            .await?;
+            Ok(ret)
+        }
+    }
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -278,6 +291,32 @@ pub trait StateStoreRead: StaticSendSync {
         self.get_keyed_row(key, read_options)
             .map_ok(|v| v.map(|(_, v)| v))
     }
+}
+
+pub trait StateStoreRead: StateStoreGet + StaticSendSync {
+    type Iter: StateStoreReadIter;
+    type RevIter: StateStoreReadIter;
+
+    // /// Point gets a value from the state store.
+    // /// The result is based on a snapshot corresponding to the given `epoch`.
+    // /// Both full key and the value are returned.
+    // fn get_keyed_row(
+    //     &self,
+    //     key: TableKey<Bytes>,
+    //     read_options: ReadOptions,
+    // ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>>;
+    //
+    // /// Point gets a value from the state store.
+    // /// The result is based on a snapshot corresponding to the given `epoch`.
+    // /// Only the value is returned.
+    // fn get(
+    //     &self,
+    //     key: TableKey<Bytes>,
+    //     read_options: ReadOptions,
+    // ) -> impl StorageFuture<'_, Option<Bytes>> {
+    //     self.get_keyed_row(key, read_options)
+    //         .map_ok(|v| v.map(|(_, v)| v))
+    // }
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and

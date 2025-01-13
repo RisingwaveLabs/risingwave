@@ -629,18 +629,27 @@ pub struct RangeKvStateStoreReadSnapshot<R: RangeKv> {
     table_id: TableId,
 }
 
+impl<R: RangeKv> StateStoreGet for RangeKvStateStoreReadSnapshot<R> {
+    async fn on_key_value(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+        on_key_value_fn: impl FnOnce(FullKey<&[u8]>, &[u8]) + Send,
+    ) -> StorageResult<()> {
+        let temp = 0;
+        if let Some((key, value)) = self
+            .inner
+            .get_keyed_row_impl(key, self.epoch, self.table_id)?
+        {
+            on_key_value_fn(key.to_ref(), value.as_ref());
+        }
+        Ok(())
+    }
+}
+
 impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
     type Iter = RangeKvStateStoreIter<R>;
     type RevIter = RangeKvStateStoreRevIter<R>;
-
-    async fn get_keyed_row(
-        &self,
-        key: TableKey<Bytes>,
-        _read_options: ReadOptions,
-    ) -> StorageResult<Option<StateStoreKeyedRow>> {
-        self.inner
-            .get_keyed_row_impl(key, self.epoch, self.table_id)
-    }
 
     async fn iter(
         &self,

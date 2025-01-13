@@ -24,7 +24,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{
-    is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
+    is_empty_key_range, vnode, vnode_range, FullKey, TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
@@ -607,17 +607,24 @@ pub struct HummockStorageReadSnapshot {
     simple_time_travel_version_cache: Arc<SimpleTimeTravelVersionCache>,
 }
 
-impl StateStoreRead for HummockStorageReadSnapshot {
-    type Iter = HummockStorageIterator;
-    type RevIter = HummockStorageRevIterator;
-
-    fn get_keyed_row(
+impl StateStoreGet for HummockStorageReadSnapshot {
+    async fn on_key_value(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
-        self.get_inner(key, read_options)
+        on_key_value_fn: impl FnOnce(FullKey<&[u8]>, &[u8]) + Send,
+    ) -> StorageResult<()> {
+        let temp = 0;
+        if let Some((key, value)) = self.get_inner(key, read_options).await? {
+            on_key_value_fn(key.to_ref(), value.as_ref());
+        }
+        Ok(())
     }
+}
+
+impl StateStoreRead for HummockStorageReadSnapshot {
+    type Iter = HummockStorageIterator;
+    type RevIter = HummockStorageRevIterator;
 
     fn iter(
         &self,

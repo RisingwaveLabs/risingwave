@@ -271,12 +271,13 @@ pub mod verify {
     use bytes::Bytes;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
+    use crate::monitor::MonitoredStateStore;
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
@@ -312,26 +313,25 @@ pub mod verify {
         }
     }
 
+    impl<A: StateStoreGet, E: StateStoreGet> StateStoreGet for VerifyStateStore<A, E> {
+        async fn on_key_value(
+            &self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+            on_key_value_fn: impl FnOnce(FullKey<&[u8]>, &[u8]) + Send,
+        ) -> StorageResult<()> {
+            if self.expected.is_some() {
+                warn!("bypass verify for on_key_value because the on_key_value_fn is FnOnce and can only call once");
+            }
+            self.actual
+                .on_key_value(key, read_options, on_key_value_fn)
+                .await
+        }
+    }
+
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
         type Iter = impl StateStoreReadIter;
         type RevIter = impl StateStoreReadIter;
-
-        async fn get_keyed_row(
-            &self,
-            key: TableKey<Bytes>,
-
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<StateStoreKeyedRow>> {
-            let actual = self
-                .actual
-                .get_keyed_row(key.clone(), read_options.clone())
-                .await;
-            if let Some(expected) = &self.expected {
-                let expected = expected.get_keyed_row(key, read_options).await;
-                assert_result_eq(&actual, &expected);
-            }
-            actual
-        }
 
         // TODO: may avoid manual async fn when the bug of rust compiler is fixed. Currently it will
         // fail to compile.

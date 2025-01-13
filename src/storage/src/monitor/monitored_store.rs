@@ -22,7 +22,7 @@ use futures::{Future, TryFutureExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
@@ -32,6 +32,7 @@ use super::{MonitoredStateStoreGetStats, MonitoredStateStoreIterStats, Monitored
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
+use crate::memory::{RangeKv, RangeKvStateStoreReadSnapshot};
 use crate::monitor::monitored_storage_metrics::StateStoreIterStats;
 use crate::monitor::{StateStoreIterLogStats, StateStoreIterStatsTrait};
 use crate::store::*;
@@ -142,23 +143,33 @@ impl<S> MonitoredStateStore<S> {
     }
 }
 
-impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
-    type Iter = impl StateStoreReadIter;
-    type RevIter = impl StateStoreReadIter;
-
-    fn get_keyed_row(
+impl<S: StateStoreGet> StateStoreGet for MonitoredStateStore<S> {
+    async fn on_key_value(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + '_ {
+        on_key_value_fn: impl FnOnce(FullKey<&[u8]>, &[u8]) + Send,
+    ) -> StorageResult<()> {
+        let temp = 0;
         let table_id = read_options.table_id;
         let key_len = key.len();
-        self.monitored_get_keyed_row(
-            self.inner.get_keyed_row(key, read_options),
-            table_id,
-            key_len,
-        )
+        if let Some((key, value)) = self
+            .monitored_get_keyed_row(
+                self.inner.get_keyed_row(key, read_options),
+                table_id,
+                key_len,
+            )
+            .await?
+        {
+            on_key_value_fn(key.to_ref(), value.as_ref());
+        }
+        Ok(())
     }
+}
+
+impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
+    type Iter = impl StateStoreReadIter;
+    type RevIter = impl StateStoreReadIter;
 
     fn iter(
         &self,

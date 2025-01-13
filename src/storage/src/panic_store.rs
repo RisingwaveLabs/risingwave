@@ -18,10 +18,11 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
+use crate::monitor::MonitoredStateStore;
 use crate::store::*;
 
 /// A panic state store. If a workload is fully in-memory, we can use this state store to
@@ -29,21 +30,21 @@ use crate::store::*;
 #[derive(Clone, Default)]
 pub struct PanicStateStore;
 
+impl StateStoreGet for PanicStateStore {
+    async fn on_key_value(
+        &self,
+        _key: TableKey<Bytes>,
+        _read_options: ReadOptions,
+        _on_key_value_fn: impl FnOnce(FullKey<&[u8]>, &[u8]) + Send,
+    ) -> StorageResult<()> {
+        panic!("should not read from PanicStateStore")
+    }
+}
+
 impl StateStoreRead for PanicStateStore {
     type Iter = PanicStateStoreIter<StateStoreKeyedRow>;
     type RevIter = PanicStateStoreIter<StateStoreKeyedRow>;
 
-    #[allow(clippy::unused_async)]
-    async fn get_keyed_row(
-        &self,
-        _key: TableKey<Bytes>,
-
-        _read_options: ReadOptions,
-    ) -> StorageResult<Option<StateStoreKeyedRow>> {
-        panic!("should not read from the state store!");
-    }
-
-    #[allow(clippy::unused_async)]
     async fn iter(
         &self,
         _key_range: TableKeyRange,
@@ -53,7 +54,6 @@ impl StateStoreRead for PanicStateStore {
         panic!("should not read from the state store!");
     }
 
-    #[allow(clippy::unused_async)]
     async fn rev_iter(
         &self,
         _key_range: TableKeyRange,
@@ -86,7 +86,6 @@ impl LocalStateStore for PanicStateStore {
     type Iter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
     type RevIter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
 
-    #[allow(clippy::unused_async)]
     async fn get(
         &self,
         _key: TableKey<Bytes>,
@@ -95,7 +94,6 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    #[allow(clippy::unused_async)]
     async fn iter(
         &self,
         _key_range: TableKeyRange,
@@ -104,7 +102,6 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    #[allow(clippy::unused_async)]
     async fn rev_iter(
         &self,
         _key_range: TableKeyRange,
@@ -126,7 +123,6 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    #[allow(clippy::unused_async)]
     async fn flush(&mut self) -> StorageResult<usize> {
         panic!("should not operate on the panic state store!");
     }
@@ -139,7 +135,6 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    #[allow(clippy::unused_async)]
     async fn init(&mut self, _epoch: InitOptions) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
