@@ -280,6 +280,7 @@ pub mod verify {
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
+    #[expect(dead_code)]
     fn assert_result_eq<Item: PartialEq + Debug, E>(
         first: &std::result::Result<Item, E>,
         second: &std::result::Result<Item, E>,
@@ -443,19 +444,6 @@ pub mod verify {
 
         type Iter<'a> = impl StateStoreIter + 'a;
         type RevIter<'a> = impl StateStoreIter + 'a;
-
-        async fn get(
-            &self,
-            key: TableKey<Bytes>,
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>> {
-            let actual = self.actual.get(key.clone(), read_options.clone()).await;
-            if let Some(expected) = &self.expected {
-                let expected = expected.get(key, read_options).await;
-                assert_result_eq(&actual, &expected);
-            }
-            actual
-        }
 
         #[expect(clippy::manual_async_fn)]
         fn iter(
@@ -1005,13 +993,7 @@ mod dyn_state_store {
     // For LocalStateStore
     pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreKeyedRow>;
     #[async_trait::async_trait]
-    pub trait DynLocalStateStore: StaticSendSync {
-        async fn get(
-            &self,
-            key: TableKey<Bytes>,
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>>;
-
+    pub trait DynLocalStateStore: DynStateStoreGet + StaticSendSync {
         #[expect(elided_named_lifetimes)] // false positive
         async fn iter(
             &self,
@@ -1056,14 +1038,6 @@ mod dyn_state_store {
 
     #[async_trait::async_trait]
     impl<S: LocalStateStore> DynLocalStateStore for S {
-        async fn get(
-            &self,
-            key: TableKey<Bytes>,
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>> {
-            self.get(key, read_options).await
-        }
-
         #[expect(elided_named_lifetimes)] // false positive
         async fn iter(
             &self,
@@ -1138,14 +1112,6 @@ mod dyn_state_store {
         type FlushedSnapshotReader = StateStoreReadDynRef;
         type Iter<'a> = BoxLocalStateStoreIterStream<'a>;
         type RevIter<'a> = BoxLocalStateStoreIterStream<'a>;
-
-        fn get(
-            &self,
-            key: TableKey<Bytes>,
-            read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
-            (*self.0).get(key, read_options)
-        }
 
         fn iter(
             &self,
@@ -1275,13 +1241,14 @@ mod dyn_state_store {
 
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreRead);
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreGet);
+    state_store_pointer_dyn_as_ref!(Box<dyn DynLocalStateStore>, DynStateStoreGet);
 
     #[derive(Clone)]
     pub struct StateStorePointer<P>(pub(crate) P);
 
     impl<P> StateStoreGet for StateStorePointer<P>
     where
-        StateStorePointer<P>: AsRef<dyn DynStateStoreRead> + StaticSendSync,
+        StateStorePointer<P>: AsRef<dyn DynStateStoreGet> + StaticSendSync,
     {
         fn on_key_value<'a, O: Send + 'static>(
             &'a self,

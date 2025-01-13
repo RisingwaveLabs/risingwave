@@ -286,27 +286,6 @@ pub trait StateStoreRead: StateStoreGet + StaticSendSync {
     type Iter: StateStoreReadIter;
     type RevIter: StateStoreReadIter;
 
-    // /// Point gets a value from the state store.
-    // /// The result is based on a snapshot corresponding to the given `epoch`.
-    // /// Both full key and the value are returned.
-    // fn get_keyed_row(
-    //     &self,
-    //     key: TableKey<Bytes>,
-    //     read_options: ReadOptions,
-    // ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>>;
-    //
-    // /// Point gets a value from the state store.
-    // /// The result is based on a snapshot corresponding to the given `epoch`.
-    // /// Only the value is returned.
-    // fn get(
-    //     &self,
-    //     key: TableKey<Bytes>,
-    //     read_options: ReadOptions,
-    // ) -> impl StorageFuture<'_, Option<Bytes>> {
-    //     self.get_keyed_row(key, read_options)
-    //         .map_ok(|v| v.map(|(_, v)| v))
-    // }
-
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
     /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
@@ -387,18 +366,10 @@ pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
-pub trait LocalStateStore: StaticSendSync {
+pub trait LocalStateStore: StateStoreGet + StaticSendSync {
     type FlushedSnapshotReader: StateStoreRead + Clone;
     type Iter<'a>: StateStoreIter + 'a;
     type RevIter<'a>: StateStoreIter + 'a;
-
-    /// Point gets a value from the state store.
-    /// The result is based on the latest written snapshot.
-    fn get(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-    ) -> impl StorageFuture<'_, Option<Bytes>>;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and

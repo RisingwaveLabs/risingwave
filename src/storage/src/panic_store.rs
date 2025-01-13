@@ -85,14 +85,6 @@ impl LocalStateStore for PanicStateStore {
     type Iter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
     type RevIter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
 
-    async fn get(
-        &self,
-        _key: TableKey<Bytes>,
-        _read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
-        panic!("should not operate on the panic state store!");
-    }
-
     async fn iter(
         &self,
         _key_range: TableKeyRange,

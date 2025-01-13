@@ -93,30 +93,6 @@ impl<S> MonitoredStateStore<S> {
         &self.inner
     }
 
-    async fn monitored_get(
-        &self,
-        get_future: impl Future<Output = StorageResult<Option<Bytes>>>,
-        table_id: TableId,
-        key_len: usize,
-    ) -> StorageResult<Option<Bytes>> {
-        let mut stats =
-            MonitoredStateStoreGetStats::new(table_id.table_id, self.storage_metrics.clone());
-
-        let value = get_future
-            .verbose_instrument_await("store_get")
-            .instrument(tracing::trace_span!("store_get"))
-            .await
-            .inspect_err(|e| error!(error = %e.as_report(), "Failed in get"))?;
-
-        stats.get_key_size = key_len;
-        if let Some(value) = value.as_ref() {
-            stats.get_value_size = value.len();
-        }
-        stats.report();
-
-        Ok(value)
-    }
-
     async fn monitored_on_key_value<O>(
         &self,
         on_key_value_future: impl Future<Output = StorageResult<Option<(O, usize)>>>,
@@ -127,8 +103,8 @@ impl<S> MonitoredStateStore<S> {
             MonitoredStateStoreGetStats::new(table_id.table_id, self.storage_metrics.clone());
 
         let value = on_key_value_future
-            .verbose_instrument_await("store_get_keyed_row")
-            .instrument(tracing::trace_span!("store_get_keyed_row"))
+            .verbose_instrument_await("store_on_key_value")
+            .instrument(tracing::trace_span!("store_on_key_value"))
             .await
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in get"))?;
 
@@ -219,17 +195,6 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
-
-    fn get(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
-        let table_id = read_options.table_id;
-        let key_len = key.len();
-        // TODO: may collect the metrics as local
-        self.monitored_get(self.inner.get(key, read_options), table_id, key_len)
-    }
 
     fn iter(
         &self,

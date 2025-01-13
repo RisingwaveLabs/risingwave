@@ -630,12 +630,12 @@ pub struct RangeKvStateStoreReadSnapshot<R: RangeKv> {
 }
 
 impl<R: RangeKv> StateStoreGet for RangeKvStateStoreReadSnapshot<R> {
-    fn on_key_value<'a, O: Send + 'static>(
+    async fn on_key_value<'a, O: Send + 'static>(
         &'a self,
         key: TableKey<Bytes>,
         _read_options: ReadOptions,
         on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl Future<Output = StorageResult<Option<O>>> + Send + 'a {
+    ) -> StorageResult<Option<O>> {
         let ret = self
             .inner
             .get_keyed_row_impl(key, self.epoch, self.table_id)
@@ -646,7 +646,7 @@ impl<R: RangeKv> StateStoreGet for RangeKvStateStoreReadSnapshot<R> {
                     Ok(None)
                 }
             });
-        std::future::ready(ret)
+        ret
     }
 }
 
@@ -884,28 +884,39 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
     }
 }
 
+impl<R: RangeKv> StateStoreGet for RangeKvLocalStateStore<R> {
+    fn on_key_value<O: Send + 'static>(
+        &self,
+        key: TableKey<Bytes>,
+        _read_options: ReadOptions,
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> impl StorageFuture<'_, Option<O>> {
+        async move {
+            if let Some((key, value)) = match self.mem_table.buffer.get(&key) {
+                None => self
+                    .inner
+                    .get_keyed_row_impl(key, self.epoch(), self.table_id)?,
+                Some(op) => match op {
+                    KeyOp::Insert(value) | KeyOp::Update((_, value)) => Some((
+                        FullKey::new(self.table_id, key, self.epoch()),
+                        value.clone(),
+                    )),
+                    KeyOp::Delete(_) => None,
+                },
+            } {
+                Ok(Some(on_key_value_fn(key.to_ref(), value.as_ref())?))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
 impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     type FlushedSnapshotReader = RangeKvStateStoreReadSnapshot<R>;
 
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
-
-    async fn get(
-        &self,
-        key: TableKey<Bytes>,
-        _read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
-        match self.mem_table.buffer.get(&key) {
-            None => self
-                .inner
-                .get_keyed_row_impl(key, self.epoch(), self.table_id)
-                .map(|option| option.map(|(_, value)| value)),
-            Some(op) => match op {
-                KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
-                KeyOp::Delete(_) => Ok(None),
-            },
-        }
-    }
 
     async fn iter(
         &self,
