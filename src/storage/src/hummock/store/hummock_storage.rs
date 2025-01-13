@@ -24,7 +24,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{
-    is_empty_key_range, vnode, vnode_range, FullKey, TableKey, TableKeyRange,
+    is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
@@ -254,11 +254,12 @@ impl HummockStorageReadSnapshot {
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
-    async fn get_inner(
+    async fn get_inner<O>(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> StorageResult<Option<StateStoreKeyedRow>> {
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> StorageResult<Option<O>> {
         let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
         let (key_range, read_version_tuple) = self
@@ -270,7 +271,13 @@ impl HummockStorageReadSnapshot {
         }
 
         self.hummock_version_reader
-            .get(key, self.raw_epoch, read_options, read_version_tuple)
+            .get(
+                key,
+                self.raw_epoch,
+                read_options,
+                read_version_tuple,
+                on_key_value_fn,
+            )
             .await
     }
 
@@ -608,17 +615,13 @@ pub struct HummockStorageReadSnapshot {
 }
 
 impl StateStoreGet for HummockStorageReadSnapshot {
-    async fn on_key_value(
-        &self,
+    fn on_key_value<'a, O: Send + 'static>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl FnOnce(FullKey<&[u8]>, &[u8]) + Send,
-    ) -> StorageResult<()> {
-        let temp = 0;
-        if let Some((key, value)) = self.get_inner(key, read_options).await? {
-            on_key_value_fn(key.to_ref(), value.as_ref());
-        }
-        Ok(())
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> impl StorageFuture<'a, Option<O>> {
+        self.get_inner(key, read_options, on_key_value_fn)
     }
 }
 

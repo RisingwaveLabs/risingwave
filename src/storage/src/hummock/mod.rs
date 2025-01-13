@@ -72,7 +72,7 @@ pub async fn get_from_sstable_info(
     read_options: &ReadOptions,
     dist_key_hash: Option<u64>,
     local_stats: &mut StoreLocalStatistic,
-) -> HummockResult<Option<(HummockValue<Bytes>, EpochWithGap)>> {
+) -> HummockResult<Option<impl HummockIterator>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
@@ -102,15 +102,16 @@ pub async fn get_from_sstable_info(
     if !iter.is_valid() {
         return Ok(None);
     }
+
+    iter.collect_local_statistic(local_stats);
+
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
     let value = if iter.key().user_key == full_key.user_key {
-        Some((iter.value().to_bytes(), iter.key().epoch_with_gap))
+        Some(iter)
     } else {
         None
     };
-
-    iter.collect_local_statistic(local_stats);
 
     Ok(value)
 }
@@ -130,13 +131,13 @@ pub fn hit_sstable_bloom_filter(
 }
 
 /// Get `user_value` from `ImmutableMemtable`
-pub fn get_from_batch(
-    imm: &ImmutableMemtable,
+pub fn get_from_batch<'a>(
+    imm: &'a ImmutableMemtable,
     table_key: TableKey<&[u8]>,
     read_epoch: HummockEpoch,
     read_options: &ReadOptions,
     local_stats: &mut StoreLocalStatistic,
-) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
+) -> Option<(HummockValue<&'a Bytes>, EpochWithGap)> {
     imm.get(table_key, read_epoch, read_options).inspect(|_| {
         local_stats.get_shared_buffer_hit_counts += 1;
     })

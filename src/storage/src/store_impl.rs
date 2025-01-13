@@ -271,13 +271,12 @@ pub mod verify {
     use bytes::Bytes;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
-    use crate::monitor::MonitoredStateStore;
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
@@ -314,18 +313,16 @@ pub mod verify {
     }
 
     impl<A: StateStoreGet, E: StateStoreGet> StateStoreGet for VerifyStateStore<A, E> {
-        async fn on_key_value(
-            &self,
+        fn on_key_value<'a, O: Send + 'static>(
+            &'a self,
             key: TableKey<Bytes>,
             read_options: ReadOptions,
-            on_key_value_fn: impl FnOnce(FullKey<&[u8]>, &[u8]) + Send,
-        ) -> StorageResult<()> {
+            on_key_value_fn: impl KeyValueFn<O>,
+        ) -> impl StorageFuture<'a, Option<O>> {
             if self.expected.is_some() {
                 warn!("bypass verify for on_key_value because the on_key_value_fn is FnOnce and can only call once");
             }
-            self.actual
-                .on_key_value(key, read_options, on_key_value_fn)
-                .await
+            self.actual.on_key_value(key, read_options, on_key_value_fn)
         }
     }
 
@@ -854,6 +851,7 @@ impl AsHummock for SledStateStore {
 
 #[cfg(debug_assertions)]
 mod dyn_state_store {
+    use std::any::Any;
     use std::future::Future;
     use std::ops::DerefMut;
     use std::sync::Arc;
@@ -861,7 +859,7 @@ mod dyn_state_store {
     use bytes::Bytes;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
@@ -898,14 +896,17 @@ mod dyn_state_store {
     pub type BoxStateStoreReadChangeLogIter = BoxStateStoreIter<'static, StateStoreReadLogItem>;
 
     #[async_trait::async_trait]
-    pub trait DynStateStoreRead: StaticSendSync {
-        async fn get_keyed_row(
+    pub trait DynStateStoreGet: StaticSendSync {
+        async fn on_key_value(
             &self,
             key: TableKey<Bytes>,
-
             read_options: ReadOptions,
-        ) -> StorageResult<Option<StateStoreKeyedRow>>;
+            on_key_value_fn: BoxKeyValueFn,
+        ) -> StorageResult<Option<BoxAny>>;
+    }
 
+    #[async_trait::async_trait]
+    pub trait DynStateStoreRead: DynStateStoreGet + StaticSendSync {
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -934,17 +935,36 @@ mod dyn_state_store {
 
     pub type StateStoreReadDynRef = StateStorePointer<Arc<dyn DynStateStoreRead>>;
 
+    pub struct BoxAny(Box<dyn Any + Send + 'static>);
+    pub struct BoxKeyValueFn(
+        Box<dyn FnOnce(FullKey<Vec<u8>>, Vec<u8>) -> StorageResult<BoxAny> + Send + 'static>,
+    );
+
+    impl BoxKeyValueFn {
+        fn call(self, key: FullKey<Vec<u8>>, value: Vec<u8>) -> StorageResult<BoxAny> {
+            (self.0)(key, value)
+        }
+    }
+
     #[async_trait::async_trait]
-    impl<S: StateStoreRead> DynStateStoreRead for S {
-        async fn get_keyed_row(
+    impl<S: StateStoreGet> DynStateStoreGet for S {
+        async fn on_key_value(
             &self,
             key: TableKey<Bytes>,
-
             read_options: ReadOptions,
-        ) -> StorageResult<Option<StateStoreKeyedRow>> {
-            self.get_keyed_row(key, read_options).await
+            on_key_value_fn: BoxKeyValueFn,
+        ) -> StorageResult<Option<BoxAny>> {
+            self.on_key_value(key, read_options, move |key, value| {
+                let key: FullKey<Vec<u8>> = key.copy_into();
+                let value = Vec::from(value);
+                on_key_value_fn.call(key, value)
+            })
+            .await
         }
+    }
 
+    #[async_trait::async_trait]
+    impl<S: StateStoreRead> DynStateStoreRead for S {
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -1254,25 +1274,44 @@ mod dyn_state_store {
     }
 
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreRead);
+    state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreGet);
 
     #[derive(Clone)]
     pub struct StateStorePointer<P>(pub(crate) P);
 
-    impl<P> StateStoreRead for StateStorePointer<P>
+    impl<P> StateStoreGet for StateStorePointer<P>
     where
         StateStorePointer<P>: AsRef<dyn DynStateStoreRead> + StaticSendSync,
     {
+        fn on_key_value<'a, O: Send + 'static>(
+            &'a self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+            on_key_value_fn: impl KeyValueFn<O>,
+        ) -> impl Future<Output = StorageResult<Option<O>>> + Send + 'a {
+            async move {
+                let option = self
+                    .as_ref()
+                    .on_key_value(
+                        key,
+                        read_options,
+                        BoxKeyValueFn(Box::new(|key: FullKey<Vec<u8>>, value: Vec<u8>| {
+                            (on_key_value_fn)(key.to_ref(), value.as_slice())
+                                .map(|output| BoxAny(Box::new(output) as _))
+                        }) as _),
+                    )
+                    .await?;
+                Ok(option.map(|box_any| *box_any.0.downcast::<O>().expect("should success")))
+            }
+        }
+    }
+
+    impl<P> StateStoreRead for StateStorePointer<P>
+    where
+        StateStorePointer<P>: AsRef<dyn DynStateStoreRead> + StateStoreGet + StaticSendSync,
+    {
         type Iter = BoxStateStoreReadIter;
         type RevIter = BoxStateStoreReadIter;
-
-        fn get_keyed_row(
-            &self,
-            key: TableKey<Bytes>,
-
-            read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
-            self.as_ref().get_keyed_row(key, read_options)
-        }
 
         fn iter(
             &self,

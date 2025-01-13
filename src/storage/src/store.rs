@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use futures::{Stream, TryFutureExt, TryStreamExt};
+use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
 use risingwave_common::array::Op;
@@ -254,31 +254,16 @@ pub trait StateStoreReadLog: StaticSendSync {
     ) -> impl StorageFuture<'_, Self::ChangeLogIter>;
 }
 
-pub trait StateStoreGet: StaticSendSync {
-    fn on_key_value(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-        on_key_value_fn: impl FnOnce(FullKey<&[u8]>, &[u8]) + Send,
-    ) -> impl StorageFuture<'_, ()>;
+pub trait KeyValueFn<O> =
+    for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'static;
 
-    /// Point gets a value from the state store.
-    /// The result is based on a snapshot corresponding to the given `epoch`.
-    /// Both full key and the value are returned.
-    fn get_keyed_row(
+pub trait StateStoreGet: StaticSendSync {
+    fn on_key_value<O: Send + 'static>(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>> {
-        async move {
-            let mut ret = None;
-            self.on_key_value(key, read_options, |key, value| {
-                ret = Some((key.copy_into(), Bytes::copy_from_slice(value)));
-            })
-            .await?;
-            Ok(ret)
-        }
-    }
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> impl StorageFuture<'_, Option<O>>;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -288,8 +273,12 @@ pub trait StateStoreGet: StaticSendSync {
         key: TableKey<Bytes>,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Option<Bytes>> {
-        self.get_keyed_row(key, read_options)
-            .map_ok(|v| v.map(|(_, v)| v))
+        async move {
+            self.on_key_value(key, read_options, |_, value| {
+                Ok(Bytes::copy_from_slice(value))
+            })
+            .await
+        }
     }
 }
 

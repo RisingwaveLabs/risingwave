@@ -18,11 +18,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
-use crate::monitor::MonitoredStateStore;
 use crate::store::*;
 
 /// A panic state store. If a workload is fully in-memory, we can use this state store to
@@ -31,13 +30,13 @@ use crate::store::*;
 pub struct PanicStateStore;
 
 impl StateStoreGet for PanicStateStore {
-    async fn on_key_value(
-        &self,
+    fn on_key_value<'a, O: Send + 'static>(
+        &'a self,
         _key: TableKey<Bytes>,
         _read_options: ReadOptions,
-        _on_key_value_fn: impl FnOnce(FullKey<&[u8]>, &[u8]) + Send,
-    ) -> StorageResult<()> {
-        panic!("should not read from PanicStateStore")
+        _on_key_value_fn: impl KeyValueFn<O>,
+    ) -> impl StorageFuture<'a, Option<O>> {
+        async { panic!("should not read from PanicStateStore") }
     }
 }
 

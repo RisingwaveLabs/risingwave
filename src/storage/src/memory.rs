@@ -630,20 +630,23 @@ pub struct RangeKvStateStoreReadSnapshot<R: RangeKv> {
 }
 
 impl<R: RangeKv> StateStoreGet for RangeKvStateStoreReadSnapshot<R> {
-    async fn on_key_value(
-        &self,
+    fn on_key_value<'a, O: Send + 'static>(
+        &'a self,
         key: TableKey<Bytes>,
-        read_options: ReadOptions,
-        on_key_value_fn: impl FnOnce(FullKey<&[u8]>, &[u8]) + Send,
-    ) -> StorageResult<()> {
-        let temp = 0;
-        if let Some((key, value)) = self
+        _read_options: ReadOptions,
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> impl Future<Output = StorageResult<Option<O>>> + Send + 'a {
+        let ret = self
             .inner
-            .get_keyed_row_impl(key, self.epoch, self.table_id)?
-        {
-            on_key_value_fn(key.to_ref(), value.as_ref());
-        }
-        Ok(())
+            .get_keyed_row_impl(key, self.epoch, self.table_id)
+            .and_then(|option| {
+                if let Some((key, value)) = option {
+                    on_key_value_fn(key.to_ref(), value.as_ref()).map(Some)
+                } else {
+                    Ok(None)
+                }
+            });
+        std::future::ready(ret)
     }
 }
 
