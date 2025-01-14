@@ -502,8 +502,11 @@ pub(crate) async fn reparse_table_for_sink(
     table_catalog: &Arc<TableCatalog>,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
     // Retrieve the original table definition and parse it to AST.
-    // TODO(purify): use purified definition.
-    let definition = table_catalog.create_sql_ast()?;
+    let definition = table_catalog.create_sql_ast_purified()?;
+    let raw_definition = table_catalog
+        .create_sql_ast()
+        .unwrap_or_else(|_| definition.clone() /* create table as */);
+
     let Statement::CreateTable {
         name,
         format_encode,
@@ -519,7 +522,7 @@ pub(crate) async fn reparse_table_for_sink(
         .map(|format_encode| format_encode.into_v2_with_warning());
 
     // Create handler args as if we're creating a new table with the altered definition.
-    let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
+    let handler_args = HandlerArgs::new(session.clone(), &raw_definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(table_catalog);
     let Statement::CreateTable {
         columns,
