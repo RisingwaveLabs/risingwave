@@ -168,29 +168,18 @@ impl FromStr for Timestamp {
     type Err = InvalidParamsError;
 
     fn from_str(s: &str) -> Result<Self> {
-        if let Ok(res) = speedate::DateTime::parse_str_rfc3339(s) {
-            if res.time.tz_offset.is_some() {
-                return Err(ErrorKind::ParseTimestamp.into());
-            }
-            Ok(Date::from_ymd_uncheck(
-                res.date.year as i32,
-                res.date.month as u32,
-                res.date.day as u32,
-            )
-            .and_hms_micro_uncheck(
-                res.time.hour as u32,
-                res.time.minute as u32,
-                res.time.second as u32,
-                res.time.microsecond,
-            ))
-        } else {
-            let res =
-                speedate::Date::parse_str_rfc3339(s).map_err(|_| ErrorKind::ParseTimestamp)?;
-            Ok(
-                Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
-                    .and_hms_micro_uncheck(0, 0, 0, 0),
-            )
-        }
+        let dt = s
+            .parse::<jiff::civil::DateTime>()
+            .map_err(|_| ErrorKind::ParseTimestamp)?;
+        Ok(
+            Date::from_ymd_uncheck(dt.year() as i32, dt.month() as u32, dt.day() as u32)
+                .and_hms_nano_uncheck(
+                    dt.hour() as u32,
+                    dt.minute() as u32,
+                    dt.second() as u32,
+                    dt.subsec_nanosecond() as u32,
+                ),
+        )
     }
 }
 
@@ -267,7 +256,7 @@ enum ErrorKind {
     ParseDate,
     #[error("Can't cast string to time (expected format is HH:MM:SS[.D+{{up to 6 digits}}][Z] or HH:MM)")]
     ParseTime,
-    #[error("Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 6 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
+    #[error("Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 9 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
     ParseTimestamp,
 }
 
@@ -422,6 +411,13 @@ impl Date {
                 .and_time(Time::from_hms_micro_uncheck(hour, min, sec, micro).0),
         )
     }
+
+    pub fn and_hms_nano_uncheck(self, hour: u32, min: u32, sec: u32, nano: u32) -> Timestamp {
+        Timestamp::new(
+            self.0
+                .and_time(Time::from_hms_nano_uncheck(hour, min, sec, nano).0),
+        )
+    }
 }
 
 impl Time {
@@ -485,6 +481,42 @@ impl Time {
     }
 }
 
+// The first 64 bits of protobuf encoding for `Timestamp` type has 2 possible meanings.
+// * When the highest 2 bits are `11` or `00` (i.e. values ranging from `0b1100...00` to `0b0011..11`),
+//   it is *microseconds* since 1970-01-01 midnight. 2^62 microseconds covers 146235 years.
+// * When the highest 2 bits are `10` or `01`, we flip the second bit to get values from `0b1100...00` to `0b0011..11` again.
+//   It is *seconds* since 1970-01-01 midnight. It is then followed by another 32 bits as nanoseconds within a second.
+// Since timestamp is negative when it is less than 1970-1-1, you need to take both cases into account(`11+00`` or `01+10``).
+enum FirstI64 {
+    V0 { usecs: i64 },
+    V1 { secs: i64 },
+}
+impl FirstI64 {
+    pub fn to_protobuf(&self) -> i64 {
+        match self {
+            FirstI64::V0 { usecs } => *usecs,
+            FirstI64::V1 { secs } => secs ^ (0b01 << 62),
+        }
+    }
+
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<FirstI64> {
+        let value = cur
+            .read_i64::<BigEndian>()
+            .context("failed to read i64 from Time buffer")?;
+        if Self::is_v1_format_state(value) {
+            let secs = value ^ (0b01 << 62);
+            Ok(FirstI64::V1 { secs })
+        } else {
+            Ok(FirstI64::V0 { usecs: value })
+        }
+    }
+
+    fn is_v1_format_state(value: i64) -> bool {
+        let state = (value >> 62) & 0b11;
+        state == 0b10 || state == 0b01
+    }
+}
+
 impl Timestamp {
     pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> Result<Self> {
         Ok(Timestamp::new({
@@ -495,18 +527,34 @@ impl Timestamp {
     }
 
     pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
-        let micros = cur
-            .read_i64::<BigEndian>()
-            .context("failed to read i64 from Timestamp buffer")?;
-
-        Ok(Timestamp::with_micros(micros)?)
+        match FirstI64::from_protobuf(cur)? {
+            FirstI64::V0 { usecs } => Ok(Timestamp::with_micros(usecs)?),
+            FirstI64::V1 { secs } => {
+                let nsecs = cur
+                    .read_u32::<BigEndian>()
+                    .context("failed to read u32 from Time buffer")?;
+                Ok(Timestamp::with_secs_nsecs(secs, nsecs)?)
+            }
+        }
     }
 
-    /// Although `Timestamp` takes 12 bytes, we drop 4 bytes in protobuf encoding.
+    // Since timestamp secs is much smaller than i64, we use the highest 2 bit to store the format information, which is compatible with the old format.
+    // New format: secs(i64) + nsecs(u32)
+    // Old format: micros(i64)
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
-        output
-            .write(&(self.0.and_utc().timestamp_micros()).to_be_bytes())
-            .map_err(Into::into)
+        let timestamp_size = output
+            .write(
+                &(FirstI64::V1 {
+                    secs: self.0.and_utc().timestamp(),
+                }
+                .to_protobuf())
+                .to_be_bytes(),
+            )
+            .map_err(Into::<ArrayError>::into)?;
+        let timestamp_subsec_nanos_size = output
+            .write(&(self.0.and_utc().timestamp_subsec_nanos()).to_be_bytes())
+            .map_err(Into::<ArrayError>::into)?;
+        Ok(timestamp_subsec_nanos_size + timestamp_size)
     }
 
     pub fn get_timestamp_nanos(&self) -> i64 {

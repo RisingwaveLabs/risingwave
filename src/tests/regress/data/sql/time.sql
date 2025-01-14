@@ -60,16 +60,13 @@ DROP TABLE TIME_TBL;
 
 --
 -- test EXTRACT
+-- Since postgresql does not support nanosecond time, it is not tested here. We did a similar test in e2e_test/batch/types/timestamp_ns.slt
 --
-SELECT EXTRACT(MICROSECOND FROM TIME '13:30:25.575401');
-SELECT EXTRACT(MILLISECOND FROM TIME '13:30:25.575401');
-SELECT EXTRACT(SECOND      FROM TIME '13:30:25.575401');
 SELECT EXTRACT(MINUTE      FROM TIME '13:30:25.575401');
 SELECT EXTRACT(HOUR        FROM TIME '13:30:25.575401');
 SELECT EXTRACT(DAY         FROM TIME '13:30:25.575401');  -- error
 SELECT EXTRACT(FORTNIGHT   FROM TIME '13:30:25.575401');  -- error
 SELECT EXTRACT(TIMEZONE    FROM TIME '13:30:25.575401');  -- error
-SELECT EXTRACT(EPOCH       FROM TIME '13:30:25.575401');
 
 -- date_part implementation is mostly the same as extract, so only
 -- test a few cases for additional coverage.

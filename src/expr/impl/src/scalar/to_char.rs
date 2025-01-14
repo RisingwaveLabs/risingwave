@@ -87,6 +87,8 @@ impl ChronoPattern {
             ("Mon", "%b"),
             ("DD", "%d"),
             ("dd", "%d"),
+            ("NS", "%9f"),
+            ("ns", "%9f"),
             ("US", "%6f"),
             ("us", "%6f"),
             ("MS", "%3f"),

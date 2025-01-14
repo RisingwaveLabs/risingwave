@@ -43,8 +43,8 @@ fn make_naive_time(hour: i32, min: i32, sec: F64) -> Result<NaiveTime> {
         });
     }
     let sec_u32 = sec.0.trunc() as u32;
-    let microsecond_u32 = ((sec.0 - sec.0.trunc()) * 1_000_000.0).round_ties_even() as u32;
-    NaiveTime::from_hms_micro_opt(hour as u32, min as u32, sec_u32, microsecond_u32).ok_or_else(
+    let nanosecond_u32 = ((sec.0 - sec.0.trunc()) * 1_000_000_000.0).round_ties_even() as u32;
+    NaiveTime::from_hms_nano_opt(hour as u32, min as u32, sec_u32, nanosecond_u32).ok_or_else(
         || ExprError::InvalidParam {
             name: "hour, min, sec",
             reason: format!("invalid time: {}:{}:{}", hour, min, sec).into(),

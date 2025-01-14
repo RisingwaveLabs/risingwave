@@ -135,25 +135,8 @@ HINT:  Could not choose a best candidate operator. You might need to add explici
 DROP TABLE TIME_TBL;
 --
 -- test EXTRACT
+-- Since postgresql does not support nanosecond time, it is not tested here. We did a similar test in e2e_test/batch/types/timestamp_ns.slt
 --
-SELECT EXTRACT(MICROSECOND FROM TIME '13:30:25.575401');
- extract  
-----------
- 25575401
-(1 row)
-
-SELECT EXTRACT(MILLISECOND FROM TIME '13:30:25.575401');
-  extract  
------------
- 25575.401
-(1 row)
-
-SELECT EXTRACT(SECOND      FROM TIME '13:30:25.575401');
-  extract  
------------
- 25.575401
-(1 row)
-
 SELECT EXTRACT(MINUTE      FROM TIME '13:30:25.575401');
  extract 
 ---------
@@ -172,11 +155,6 @@ SELECT EXTRACT(FORTNIGHT   FROM TIME '13:30:25.575401');  -- error
 ERROR:  "time" units "fortnight" not recognized
 SELECT EXTRACT(TIMEZONE    FROM TIME '13:30:25.575401');  -- error
 ERROR:  "time" units "timezone" not recognized
-SELECT EXTRACT(EPOCH       FROM TIME '13:30:25.575401');
-   extract    
---------------
- 48625.575401
-(1 row)
 
 -- date_part implementation is mostly the same as extract, so only
 -- test a few cases for additional coverage.
