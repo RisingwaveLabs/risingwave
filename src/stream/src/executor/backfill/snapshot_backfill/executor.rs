@@ -35,6 +35,7 @@ use risingwave_storage::StateStore;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use crate::executor::backfill::snapshot_backfill::receive_next_barrier;
 use crate::executor::backfill::snapshot_backfill::state::{BackfillState, EpochBackfillProgress};
 use crate::executor::backfill::snapshot_backfill::vnode_stream::VnodeStream;
 use crate::executor::backfill::utils::{create_builder, mapping_message};
@@ -558,15 +559,6 @@ impl<'a, S> UpstreamBuffer<'a, S> {
     fn barrier_count(&self) -> usize {
         self.upstream_pending_barriers.len()
     }
-}
-
-async fn receive_next_barrier(
-    barrier_rx: &mut UnboundedReceiver<Barrier>,
-) -> StreamExecutorResult<Barrier> {
-    Ok(barrier_rx
-        .recv()
-        .await
-        .ok_or_else(|| anyhow!("end of barrier receiver"))?)
 }
 
 async fn make_log_stream(
