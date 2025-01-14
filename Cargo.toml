@@ -177,7 +177,7 @@ jsonbb = "0.1.4"
 linkme = { version = "0.3", features = ["used_linker"] }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
 parquet = { version = "53.2", features = ["async"] }
-mysql_async = { version = "0.34", default-features = false, features = [
+mysql_async = { version = "0.35", default-features = false, features = [
     "default",
 ] }
 thiserror-ext = { version = "0.2.1", features = ["backtrace"] }
