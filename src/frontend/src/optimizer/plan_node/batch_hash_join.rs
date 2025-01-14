@@ -66,11 +66,16 @@ impl BatchHashJoin {
             // we can not derive the hash distribution from the side where outer join can generate a
             // NULL row
             (Distribution::HashShard(_), Distribution::HashShard(_)) => match join.join_type {
-                JoinType::AsofInner | JoinType::AsofLeftOuter | JoinType::Unspecified => {
+                JoinType::Unspecified => {
                     unreachable!()
                 }
                 JoinType::FullOuter => Distribution::SomeShard,
-                JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {
+                JoinType::Inner
+                | JoinType::LeftOuter
+                | JoinType::LeftSemi
+                | JoinType::LeftAnti
+                | JoinType::AsofInner
+                | JoinType::AsofLeftOuter => {
                     let l2o = join.l2i_col_mapping().composite(&join.i2o_col_mapping());
                     l2o.rewrite_provided_distribution(left)
                 }

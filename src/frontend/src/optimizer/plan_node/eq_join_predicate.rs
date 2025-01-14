@@ -162,6 +162,16 @@ impl EqJoinPredicate {
         &mut self.other_cond
     }
 
+    /// Get the equal predicate
+    pub fn eq_predicate(&self) -> Self {
+        Self {
+            other_cond: Condition::true_cond(),
+            eq_keys: self.eq_keys.clone(),
+            left_cols_num: self.left_cols_num,
+            right_cols_num: self.right_cols_num,
+        }
+    }
+
     /// Get a reference to the join predicate's eq keys.
     ///
     /// Note: `right_col_index` starts from `left_cols_num`

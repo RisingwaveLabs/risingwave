@@ -4,14 +4,15 @@
     SELECT * FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1;
   expected_outputs:
   - stream_error
+  - batch_error
 
 - sql:
     CREATE TABLE t1(v1 varchar, v2 int, v3 int);
     CREATE TABLE t2(v1 varchar, v2 int, v3 int);
     SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1 || 'a' and t1.v2 > t2.v2;
   expected_outputs:
-  - batch_error
   - stream_plan
+  - batch_plan
 
 - sql:
     CREATE TABLE t1(v1 varchar, v2 int, v3 int);
@@ -19,6 +20,7 @@
     SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF LEFT JOIN t2 ON t1.v1 = t2.v1 and t1.v2 *2 < t2.v2;
   expected_outputs:
   - stream_plan
+  - batch_plan
 
 - sql:
     CREATE TABLE t1(v1 varchar, v2 int, v3 int);
@@ -26,6 +28,7 @@
     SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1 and t1.v2 < t2.v2 and t1.v3 < t2.v3;
   expected_outputs:
   - stream_error
+  - batch_error
 
 - sql:
     CREATE TABLE t1(v1 varchar, v2 int, v3 int);
@@ -33,3 +36,4 @@
     SELECT t1.v1 t1_v1, t1.v2 t1_v2, t2.v1 t2_v1, t2.v2 t2_v2 FROM t1 ASOF JOIN t2 ON t1.v2 < t2.v2;
   expected_outputs:
   - stream_error
+  - batch_error
