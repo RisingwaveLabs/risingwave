@@ -1,0 +1,91 @@
+version: '3.1'
+
+services:
+  risingwave-standalone:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: risingwave-standalone
+  postgres-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: postgres-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
+
+  mongodb:
+    extends: ../mongodb/docker-compose.yaml
+    service: mongodb
+
+  mongodb-setup:
+    extends: ../mongodb/docker-compose.yaml
+    service: mongodb-setup
+
+  debezium:
+    image: debezium/connect:1.9
+    container_name: debezium
+    depends_on:
+      - message_queue
+      - mongodb
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: curl -f localhost:8083
+      interval: 1s
+      start_period: 120s
+    environment:
+      BOOTSTRAP_SERVERS: message_queue:29092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: debezium_mongodb_config
+      OFFSET_STORAGE_TOPIC: debezium_mongodb_offset
+      STATUS_STORAGE_TOPIC: debezium_mongodb_status
+      # Remove these two lines below to test the debezium json format。
+      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://message_queue:8081
+
+  random_data_generator:
+    extends: ../mongodb/docker-compose.yaml
+    service: random_data_generator
+
+
+  register-mongodb-connector:
+    image: curlimages/curl:7.79.1
+    container_name: register-mongodb-connector
+    depends_on:
+      debezium: { condition: service_healthy }
+    command: >
+      /bin/sh /register-mongodb-connector.sh
+    restart: on-failure
+    volumes:
+      - ./register-mongodb-connector.sh:/register-mongodb-connector.sh
+
+  kafka-connect-ui:
+    image: landoop/kafka-connect-ui:0.9.7
+    container_name: kafka-connect-ui
+    depends_on:
+      debezium: { condition: service_healthy }
+    ports:
+      - "8000:8000"
+    environment:
+      CONNECT_URL: http://debezium:8083
+
+volumes:
+  mongodb_data:
+  message_queue:
+    external: false
+  debezium:
+    external: false
