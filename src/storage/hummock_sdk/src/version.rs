@@ -275,7 +275,7 @@ impl HummockVersion {
                 .table_change_log
                 .values()
                 .map(|c| {
-                    c.0.iter()
+                    c.iter()
                         .map(|l| {
                             l.old_value
                                 .iter()

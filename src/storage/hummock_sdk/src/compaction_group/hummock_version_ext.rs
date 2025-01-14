@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::iter::once;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -697,16 +698,10 @@ impl HummockVersion {
             match table_change_log.entry(*table_id) {
                 Entry::Occupied(entry) => {
                     let change_log = entry.into_mut();
-                    if let Some(prev_log) = change_log.0.last() {
-                        assert!(
-                            prev_log.epochs.last().expect("non-empty")
-                                < new_change_log.epochs.first().expect("non-empty")
-                        );
-                    }
-                    change_log.0.push(new_change_log.clone());
+                    change_log.add_change_log(new_change_log.clone());
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(TableChangeLogCommon(vec![new_change_log.clone()]));
+                    entry.insert(TableChangeLogCommon::new(once(new_change_log.clone())));
                 }
             };
         }
@@ -958,7 +953,7 @@ where
         self.get_combined_levels()
             .flat_map(|level| level.table_infos.iter())
             .chain(self.table_change_log.values().flat_map(|change_log| {
-                change_log.0.iter().flat_map(|epoch_change_log| {
+                change_log.iter().flat_map(|epoch_change_log| {
                     epoch_change_log
                         .old_value
                         .iter()
@@ -1365,7 +1360,7 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObject
                 .flat_map(|level| level.table_infos.iter().map(|t| (t.object_id, t.file_size)))
         })
         .chain(version.table_change_log.values().flat_map(|c| {
-            c.0.iter().flat_map(|l| {
+            c.iter().flat_map(|l| {
                 l.old_value
                     .iter()
                     .chain(l.new_value.iter())

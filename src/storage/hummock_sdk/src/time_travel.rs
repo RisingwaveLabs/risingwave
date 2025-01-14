@@ -68,7 +68,7 @@ fn refill_table_change_log(
     table_change_log: &mut TableChangeLog,
     sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>,
 ) {
-    for c in &mut table_change_log.0 {
+    for c in table_change_log.iter_mut() {
         for s in &mut c.old_value {
             refill_sstable_info(s, sst_id_to_info);
         }
@@ -113,7 +113,7 @@ impl From<(&HummockVersion, &HashSet<StateTableId>)> for IncompleteHummockVersio
                     if !time_travel_table_ids.contains(&table_id.table_id()) {
                         return None;
                     }
-                    debug_assert!(change_log.0.iter().all(|d| {
+                    debug_assert!(change_log.iter().all(|d| {
                         d.new_value.iter().chain(d.old_value.iter()).all(|s| {
                             s.table_ids
                                 .iter()
@@ -121,11 +121,12 @@ impl From<(&HummockVersion, &HashSet<StateTableId>)> for IncompleteHummockVersio
                         })
                     }));
                     let incomplete_table_change_log = change_log
-                        .0
                         .iter()
-                        .map(|e| PbEpochNewChangeLog::from(e).into())
-                        .collect();
-                    Some((*table_id, TableChangeLogCommon(incomplete_table_change_log)))
+                        .map(|e| PbEpochNewChangeLog::from(e).into());
+                    Some((
+                        *table_id,
+                        TableChangeLogCommon::new(incomplete_table_change_log),
+                    ))
                 })
                 .collect(),
             state_table_info: version.state_table_info.clone(),

@@ -27,7 +27,6 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
@@ -994,10 +993,9 @@ impl HummockVersionReader {
         options: ReadLogOptions,
     ) -> HummockResult<ChangeLogIterator> {
         let change_log = if let Some(change_log) = version.table_change_log.get(&options.table_id) {
-            change_log.filter_epoch(epoch_range)
+            change_log.filter_epoch(epoch_range).collect_vec()
         } else {
-            static EMPTY_VEC: Vec<EpochNewChangeLog> = Vec::new();
-            &EMPTY_VEC[..]
+            Vec::new()
         };
         if let Some(max_epoch_change_log) = change_log.last() {
             let (_, max_epoch) = epoch_range;

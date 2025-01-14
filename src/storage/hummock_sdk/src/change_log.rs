@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
@@ -22,7 +22,36 @@ use tracing::warn;
 use crate::sstable_info::SstableInfo;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TableChangeLogCommon<T>(pub Vec<EpochNewChangeLogCommon<T>>);
+pub struct TableChangeLogCommon<T>(
+    // older log at the front
+    VecDeque<EpochNewChangeLogCommon<T>>,
+);
+
+impl<T> TableChangeLogCommon<T> {
+    pub fn new(logs: impl IntoIterator<Item = EpochNewChangeLogCommon<T>>) -> Self {
+        let logs = logs.into_iter().collect::<VecDeque<_>>();
+        debug_assert!(logs.iter().flat_map(|log| log.epochs.iter()).is_sorted());
+        Self(logs)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &EpochNewChangeLogCommon<T>> {
+        self.0.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut EpochNewChangeLogCommon<T>> {
+        self.0.iter_mut()
+    }
+
+    pub fn add_change_log(&mut self, new_change_log: EpochNewChangeLogCommon<T>) {
+        if let Some(prev_log) = self.0.back() {
+            assert!(
+                prev_log.epochs.last().expect("non-empty")
+                    < new_change_log.epochs.first().expect("non-empty")
+            );
+        }
+        self.0.push_back(new_change_log);
+    }
+}
 
 pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;
 
@@ -30,6 +59,7 @@ pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;
 pub struct EpochNewChangeLogCommon<T> {
     pub new_value: Vec<T>,
     pub old_value: Vec<T>,
+    // epochs are sorted in ascending order
     pub epochs: Vec<u64>,
 }
 
@@ -91,20 +121,19 @@ impl<T> TableChangeLogCommon<T> {
     pub fn filter_epoch(
         &self,
         (min_epoch, max_epoch): (u64, u64),
-    ) -> &[EpochNewChangeLogCommon<T>] {
+    ) -> impl Iterator<Item = &EpochNewChangeLogCommon<T>> + '_ {
         let start = self.0.partition_point(|epoch_change_log| {
             epoch_change_log.epochs.last().expect("non-empty") < &min_epoch
         });
         let end = self.0.partition_point(|epoch_change_log| {
             epoch_change_log.epochs.first().expect("non-empty") <= &max_epoch
         });
-        &self.0[start..end]
+        self.0.range(start..end)
     }
 
     /// Returns epochs where value is non-null and >= `min_epoch`.
     pub fn get_non_empty_epochs(&self, min_epoch: u64, max_count: usize) -> Vec<u64> {
         self.filter_epoch((min_epoch, u64::MAX))
-            .iter()
             .filter(|epoch_change_log| {
                 // Filter out empty change logs
                 let new_value_empty = epoch_change_log.new_value.is_empty();
@@ -113,16 +142,17 @@ impl<T> TableChangeLogCommon<T> {
             })
             .flat_map(|epoch_change_log| epoch_change_log.epochs.iter().cloned())
             .filter(|a| a >= &min_epoch)
-            .clone()
             .take(max_count)
             .collect()
     }
 
     pub fn truncate(&mut self, truncate_epoch: u64) {
-        // TODO: may optimize by using VecDeque to maintain the log
-        self.0
-            .retain(|change_log| *change_log.epochs.last().expect("non-empty") > truncate_epoch);
-        if let Some(first_log) = self.0.first_mut() {
+        while let Some(change_log) = self.0.front()
+            && *change_log.epochs.last().expect("non-empty") <= truncate_epoch
+        {
+            let _change_log = self.0.pop_front().expect("non-empty");
+        }
+        if let Some(first_log) = self.0.front_mut() {
             first_log.epochs.retain(|epoch| *epoch > truncate_epoch);
         }
     }
@@ -256,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_filter_epoch() {
-        let table_change_log = TableChangeLogCommon::<SstableInfo>(vec![
+        let table_change_log = TableChangeLogCommon::<SstableInfo>::new([
             EpochNewChangeLog {
                 new_value: vec![],
                 old_value: vec![],
@@ -288,15 +318,18 @@ mod tests {
                     })
                     .cloned()
                     .collect_vec();
-                let actual = table_change_log.filter_epoch((min_epoch, max_epoch));
-                assert_eq!(&expected, actual, "{:?}", (min_epoch, max_epoch));
+                let actual = table_change_log
+                    .filter_epoch((min_epoch, max_epoch))
+                    .cloned()
+                    .collect_vec();
+                assert_eq!(expected, actual, "{:?}", (min_epoch, max_epoch));
             }
         }
     }
 
     #[test]
     fn test_truncate() {
-        let mut table_change_log = TableChangeLogCommon::<SstableInfo>(vec![
+        let mut table_change_log = TableChangeLogCommon::<SstableInfo>::new([
             EpochNewChangeLog {
                 new_value: vec![],
                 old_value: vec![],
@@ -322,7 +355,7 @@ mod tests {
         table_change_log.truncate(1);
         assert_eq!(
             table_change_log,
-            TableChangeLogCommon::<SstableInfo>(vec![
+            TableChangeLogCommon::<SstableInfo>::new([
                 EpochNewChangeLog {
                     new_value: vec![],
                     old_value: vec![],
@@ -344,7 +377,7 @@ mod tests {
         table_change_log.truncate(3);
         assert_eq!(
             table_change_log,
-            TableChangeLogCommon::<SstableInfo>(vec![
+            TableChangeLogCommon::<SstableInfo>::new([
                 EpochNewChangeLog {
                     new_value: vec![],
                     old_value: vec![],

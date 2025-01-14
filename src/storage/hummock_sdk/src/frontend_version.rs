@@ -44,17 +44,13 @@ impl FrontendHummockVersion {
                 .map(|(table_id, change_log)| {
                     (
                         *table_id,
-                        TableChangeLogCommon(
-                            change_log
-                                .0
-                                .iter()
-                                .map(|change_log| EpochNewChangeLogCommon {
-                                    new_value: vec![],
-                                    old_value: vec![],
-                                    epochs: change_log.epochs.clone(),
-                                })
-                                .collect(),
-                        ),
+                        TableChangeLogCommon::new(change_log.iter().map(|change_log| {
+                            EpochNewChangeLogCommon {
+                                new_value: vec![],
+                                old_value: vec![],
+                                epochs: change_log.epochs.clone(),
+                            }
+                        })),
                     )
                 })
                 .collect(),
@@ -76,7 +72,6 @@ impl FrontendHummockVersion {
                         table_id.table_id,
                         PbTableChangeLog {
                             change_logs: change_log
-                                .0
                                 .iter()
                                 .map(|change_log| PbEpochNewChangeLog {
                                     old_value: vec![],
@@ -102,17 +97,13 @@ impl FrontendHummockVersion {
                 .map(|(table_id, change_log)| {
                     (
                         TableId::new(table_id),
-                        TableChangeLogCommon(
-                            change_log
-                                .change_logs
-                                .into_iter()
-                                .map(|change_log| EpochNewChangeLogCommon {
-                                    new_value: vec![],
-                                    old_value: vec![],
-                                    epochs: change_log.epochs,
-                                })
-                                .collect(),
-                        ),
+                        TableChangeLogCommon::new(change_log.change_logs.into_iter().map(
+                            |change_log| EpochNewChangeLogCommon {
+                                new_value: vec![],
+                                old_value: vec![],
+                                epochs: change_log.epochs,
+                            },
+                        )),
                     )
                 })
                 .collect(),
