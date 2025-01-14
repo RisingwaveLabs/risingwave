@@ -171,6 +171,15 @@ impl GlobalBarrierWorkerContextImpl {
                         background_jobs
                     };
 
+                    tracing::info!("recovered mview progress");
+
+                    // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
+                    let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
+
+                    let mut active_streaming_nodes =
+                        ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
+                            .await?;
+
                     let background_streaming_jobs = background_jobs.keys().cloned().collect_vec();
                     info!(
                         "background streaming jobs: {:?} total {}",
@@ -204,13 +213,6 @@ impl GlobalBarrierWorkerContextImpl {
                             unreschedulable_jobs
                         );
                     }
-
-                    // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
-
-                    let mut active_streaming_nodes =
-                        ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
-                            .await?;
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
