@@ -870,8 +870,9 @@ mod tests {
                 shared_buffer_batch
                     .get(TableKey(k.as_slice()), epoch, &ReadOptions::default())
                     .unwrap()
-                    .0,
-                v.clone()
+                    .0
+                    .as_slice(),
+                v.as_slice()
             );
         }
         assert_eq!(
@@ -1388,8 +1389,9 @@ mod tests {
                             &ReadOptions::default()
                         )
                         .unwrap()
-                        .0,
-                    value.clone(),
+                        .0
+                        .as_slice(),
+                    value.as_slice(),
                     "epoch: {}, key: {:?}",
                     test_epoch(i as u64 + 1),
                     String::from_utf8(key.clone())
@@ -1573,8 +1575,9 @@ mod tests {
                             &ReadOptions::default()
                         )
                         .unwrap()
-                        .0,
-                    value.clone(),
+                        .0
+                        .as_slice(),
+                    value.as_slice(),
                     "epoch: {}, key: {:?}",
                     test_epoch(i as u64 + 1),
                     String::from_utf8(key.clone())

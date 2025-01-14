@@ -314,12 +314,12 @@ pub mod verify {
     }
 
     impl<A: StateStoreGet, E: StateStoreGet> StateStoreGet for VerifyStateStore<A, E> {
-        fn on_key_value<'a, O: Send + 'static>(
-            &'a self,
+        fn on_key_value<O: Send + 'static>(
+            &self,
             key: TableKey<Bytes>,
             read_options: ReadOptions,
             on_key_value_fn: impl KeyValueFn<O>,
-        ) -> impl StorageFuture<'a, Option<O>> {
+        ) -> impl StorageFuture<'_, Option<O>> {
             if self.expected.is_some() {
                 warn!("bypass verify for on_key_value because the on_key_value_fn is FnOnce and can only call once");
             }
@@ -924,6 +924,8 @@ mod dyn_state_store {
     pub type StateStoreReadDynRef = StateStorePointer<Arc<dyn DynStateStoreRead>>;
 
     pub struct BoxAny(Box<dyn Any + Send + 'static>);
+
+    #[expect(clippy::type_complexity)]
     pub struct BoxKeyValueFn(
         Box<dyn FnOnce(FullKey<Vec<u8>>, Vec<u8>) -> StorageResult<BoxAny> + Send + 'static>,
     );
@@ -1250,26 +1252,24 @@ mod dyn_state_store {
     where
         StateStorePointer<P>: AsRef<dyn DynStateStoreGet> + StaticSendSync,
     {
-        fn on_key_value<'a, O: Send + 'static>(
-            &'a self,
+        async fn on_key_value<O: Send + 'static>(
+            &self,
             key: TableKey<Bytes>,
             read_options: ReadOptions,
             on_key_value_fn: impl KeyValueFn<O>,
-        ) -> impl Future<Output = StorageResult<Option<O>>> + Send + 'a {
-            async move {
-                let option = self
-                    .as_ref()
-                    .on_key_value(
-                        key,
-                        read_options,
-                        BoxKeyValueFn(Box::new(|key: FullKey<Vec<u8>>, value: Vec<u8>| {
-                            (on_key_value_fn)(key.to_ref(), value.as_slice())
-                                .map(|output| BoxAny(Box::new(output) as _))
-                        }) as _),
-                    )
-                    .await?;
-                Ok(option.map(|box_any| *box_any.0.downcast::<O>().expect("should success")))
-            }
+        ) -> StorageResult<Option<O>> {
+            let option = self
+                .as_ref()
+                .on_key_value(
+                    key,
+                    read_options,
+                    BoxKeyValueFn(Box::new(|key: FullKey<Vec<u8>>, value: Vec<u8>| {
+                        (on_key_value_fn)(key.to_ref(), value.as_slice())
+                            .map(|output| BoxAny(Box::new(output) as _))
+                    }) as _),
+                )
+                .await?;
+            Ok(option.map(|box_any| *box_any.0.downcast::<O>().expect("should success")))
         }
     }
 

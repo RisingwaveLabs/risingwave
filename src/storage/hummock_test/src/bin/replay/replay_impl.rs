@@ -14,6 +14,7 @@
 
 use std::ops::Bound;
 
+use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -34,7 +35,8 @@ use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::{
-    to_owned_item, LocalStateStore, NewReadSnapshotOptions, StateStoreIterExt, StateStoreRead,
+    to_owned_item, LocalStateStore, NewReadSnapshotOptions, StateStoreGet, StateStoreIterExt,
+    StateStoreRead,
 };
 use risingwave_storage::{StateStore, StateStoreIter, StateStoreReadIter};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -265,12 +267,13 @@ impl LocalReplayRead for LocalReplayImpl {
         key: TracedBytes,
         read_options: TracedReadOptions,
     ) -> Result<Option<TracedBytes>> {
-        Ok(
-            LocalStateStore::get(&self.0, TableKey(key.into()), read_options.into())
-                .await
-                .unwrap()
-                .map(TracedBytes::from),
-        )
+        Ok(self
+            .0
+            .on_key_value(TableKey(key.into()), read_options.into(), |_, value| {
+                Ok(TracedBytes::from(Bytes::copy_from_slice(value)))
+            })
+            .await
+            .unwrap())
     }
 }
 

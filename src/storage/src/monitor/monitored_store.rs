@@ -120,26 +120,23 @@ impl<S> MonitoredStateStore<S> {
 }
 
 impl<S: StateStoreGet> StateStoreGet for MonitoredStateStore<S> {
-    fn on_key_value<'a, O: Send + 'static>(
-        &'a self,
+    fn on_key_value<O: Send + 'static>(
+        &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
         on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl Future<Output = StorageResult<Option<O>>> + Send + 'a {
-        async move {
-            let table_id = read_options.table_id;
-            let key_len = key.len();
-            self.monitored_on_key_value(
-                self.inner
-                    .on_key_value(key, read_options, move |key, value| {
-                        let result = on_key_value_fn(key, value);
-                        result.map(|output| (output, value.len()))
-                    }),
-                table_id,
-                key_len,
-            )
-            .await
-        }
+    ) -> impl StorageFuture<'_, Option<O>> {
+        let table_id = read_options.table_id;
+        let key_len = key.len();
+        self.monitored_on_key_value(
+            self.inner
+                .on_key_value(key, read_options, move |key, value| {
+                    let result = on_key_value_fn(key, value);
+                    result.map(|output| (output, value.len()))
+                }),
+            table_id,
+            key_len,
+        )
     }
 }
 

@@ -615,12 +615,12 @@ pub struct HummockStorageReadSnapshot {
 }
 
 impl StateStoreGet for HummockStorageReadSnapshot {
-    fn on_key_value<'a, O: Send + 'static>(
-        &'a self,
+    fn on_key_value<O: Send + 'static>(
+        &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
         on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl StorageFuture<'a, Option<O>> {
+    ) -> impl StorageFuture<'_, Option<O>> {
         self.get_inner(key, read_options, on_key_value_fn)
     }
 }

@@ -30,12 +30,12 @@ use crate::store::*;
 pub struct PanicStateStore;
 
 impl StateStoreGet for PanicStateStore {
-    fn on_key_value<'a, O: Send + 'static>(
-        &'a self,
+    fn on_key_value<O: Send + 'static>(
+        &self,
         _key: TableKey<Bytes>,
         _read_options: ReadOptions,
         _on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl StorageFuture<'a, Option<O>> {
+    ) -> impl StorageFuture<'_, Option<O>> {
         async { panic!("should not read from PanicStateStore") }
     }
 }

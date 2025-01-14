@@ -630,8 +630,8 @@ pub struct RangeKvStateStoreReadSnapshot<R: RangeKv> {
 }
 
 impl<R: RangeKv> StateStoreGet for RangeKvStateStoreReadSnapshot<R> {
-    async fn on_key_value<'a, O: Send + 'static>(
-        &'a self,
+    async fn on_key_value<O: Send + 'static>(
+        &self,
         key: TableKey<Bytes>,
         _read_options: ReadOptions,
         on_key_value_fn: impl KeyValueFn<O>,

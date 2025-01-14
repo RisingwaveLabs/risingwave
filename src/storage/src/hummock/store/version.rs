@@ -557,19 +557,17 @@ impl HummockVersionReader {
             ) {
                 return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
+                } else if let Some(value) = data.into_user_value() {
+                    Some(on_key_value_fn(
+                        FullKey::new_with_gap_epoch(
+                            read_options.table_id,
+                            table_key.to_ref(),
+                            data_epoch,
+                        ),
+                        value.as_ref(),
+                    )?)
                 } else {
-                    if let Some(value) = data.into_user_value() {
-                        Some(on_key_value_fn(
-                            FullKey::new_with_gap_epoch(
-                                read_options.table_id,
-                                table_key.to_ref(),
-                                data_epoch,
-                            ),
-                            value.as_ref(),
-                        )?)
-                    } else {
-                        None
-                    }
+                    None
                 });
             }
         }
@@ -602,19 +600,17 @@ impl HummockVersionReader {
                 let data_epoch = iter.key().epoch_with_gap;
                 return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
+                } else if let Some(value) = iter.value().into_user_value() {
+                    Some(on_key_value_fn(
+                        FullKey::new_with_gap_epoch(
+                            read_options.table_id,
+                            table_key.to_ref(),
+                            data_epoch,
+                        ),
+                        value,
+                    )?)
                 } else {
-                    if let Some(value) = iter.value().into_user_value() {
-                        Some(on_key_value_fn(
-                            FullKey::new_with_gap_epoch(
-                                read_options.table_id,
-                                table_key.to_ref(),
-                                data_epoch,
-                            ),
-                            value,
-                        )?)
-                    } else {
-                        None
-                    }
+                    None
                 });
             }
         }
@@ -651,19 +647,17 @@ impl HummockVersionReader {
                             let data_epoch = iter.key().epoch_with_gap;
                             return Ok(if data_epoch.pure_epoch() < min_epoch {
                                 None
+                            } else if let Some(value) = iter.value().into_user_value() {
+                                Some(on_key_value_fn(
+                                    FullKey::new_with_gap_epoch(
+                                        read_options.table_id,
+                                        table_key.to_ref(),
+                                        data_epoch,
+                                    ),
+                                    value,
+                                )?)
                             } else {
-                                if let Some(value) = iter.value().into_user_value() {
-                                    Some(on_key_value_fn(
-                                        FullKey::new_with_gap_epoch(
-                                            read_options.table_id,
-                                            table_key.to_ref(),
-                                            data_epoch,
-                                        ),
-                                        value,
-                                    )?)
-                                } else {
-                                    None
-                                }
+                                None
                             });
                         }
                     }
@@ -699,19 +693,17 @@ impl HummockVersionReader {
                         let data_epoch = iter.key().epoch_with_gap;
                         return Ok(if data_epoch.pure_epoch() < min_epoch {
                             None
+                        } else if let Some(value) = iter.value().into_user_value() {
+                            Some(on_key_value_fn(
+                                FullKey::new_with_gap_epoch(
+                                    read_options.table_id,
+                                    table_key.to_ref(),
+                                    data_epoch,
+                                ),
+                                value,
+                            )?)
                         } else {
-                            if let Some(value) = iter.value().into_user_value() {
-                                Some(on_key_value_fn(
-                                    FullKey::new_with_gap_epoch(
-                                        read_options.table_id,
-                                        table_key.to_ref(),
-                                        data_epoch,
-                                    ),
-                                    value,
-                                )?)
-                            } else {
-                                None
-                            }
+                            None
                         });
                     }
                 }

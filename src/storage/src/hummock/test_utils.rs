@@ -523,7 +523,11 @@ impl<S: StateStore> StateStoreReadTestExt for S {
                 },
             )
             .await?;
-        snapshot.get_keyed_row(key, read_options).await
+        snapshot
+            .on_key_value(key, read_options, |key, value| {
+                Ok((key.copy_into(), Bytes::copy_from_slice(value)))
+            })
+            .await
     }
 
     async fn iter(

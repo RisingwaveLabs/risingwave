@@ -416,7 +416,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let row_serde = self.row_serde.clone();
         if let Some((epoch, row)) = read_snapshot
             .on_key_value(serialized_pk, read_options, move |key, value| {
-                let row = row_serde.deserialize(&value)?;
+                let row = row_serde.deserialize(value)?;
                 Ok((key.epoch_with_gap.pure_epoch(), row))
             })
             .await?
