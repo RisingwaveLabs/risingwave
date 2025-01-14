@@ -34,9 +34,28 @@ use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
 
 #[derive(Clone)]
-pub struct TracedStateStore<S> {
+pub struct TracedStateStore<S, E = ()> {
     inner: S,
     storage_type: StorageType,
+    extra: E,
+}
+
+impl<S> TracedStateStore<S, Option<u64>> {
+    pub fn new_with_snapshot_epoch(inner: S, epoch: Option<u64>) -> Self {
+        if should_use_trace() {
+            init_collector();
+            tracing::info!("Hummock Tracing Enabled");
+        }
+        Self {
+            inner,
+            storage_type: StorageType::Global,
+            extra: epoch,
+        }
+    }
+
+    pub fn epoch(&self) -> Option<u64> {
+        self.extra
+    }
 }
 
 impl<S> TracedStateStore<S> {
@@ -48,6 +67,7 @@ impl<S> TracedStateStore<S> {
         Self {
             inner,
             storage_type,
+            extra: (),
         }
     }
 
@@ -65,9 +85,12 @@ impl<S> TracedStateStore<S> {
         Self {
             inner,
             storage_type,
+            extra: (),
         }
     }
+}
 
+impl<S, E> TracedStateStore<S, E> {
     async fn traced_iter<'a, St: StateStoreIter>(
         &'a self,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
@@ -131,8 +154,7 @@ impl<S> TracedStateStore<S> {
 }
 
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
-    // Not trace the FlushedSnapshotReader
-    type FlushedSnapshotReader = S::FlushedSnapshotReader;
+    type FlushedSnapshotReader = TracedStateStore<S::FlushedSnapshotReader, Option<u64>>;
 
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
@@ -159,6 +181,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
+            None,
             read_options.clone().into(),
             self.storage_type,
         );
@@ -174,6 +197,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
+            None,
             read_options.clone().into(),
             self.storage_type,
         );
@@ -263,13 +287,13 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     }
 
     fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
-        self.inner.new_flushed_snapshot_reader()
+        TracedStateStore::new_with_snapshot_epoch(self.inner.new_flushed_snapshot_reader(), None)
     }
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {
     type Local = TracedStateStore<S::Local>;
-    type ReadSnapshot = TracedStateStore<S::ReadSnapshot>;
+    type ReadSnapshot = TracedStateStore<S::ReadSnapshot, Option<u64>>;
 
     async fn try_wait_epoch(
         &self,
@@ -297,11 +321,13 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         self.inner
             .new_read_snapshot(epoch, options)
             .await
-            .map(TracedStateStore::new_global)
+            .map(|snapshot| {
+                TracedStateStore::new_with_snapshot_epoch(snapshot, Some(epoch.get_epoch()))
+            })
     }
 }
 
-impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
+impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S, Option<u64>> {
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
 
@@ -312,9 +338,9 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
     ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
         self.traced_get_keyed_row(
             key.clone(),
-            Some(epoch),
+            self.epoch(),
             read_options.clone(),
-            self.inner.get_keyed_row(key, epoch, read_options),
+            self.inner.get_keyed_row(key, read_options),
         )
     }
 
@@ -327,6 +353,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
+            self.epoch(),
             read_options.clone().into(),
             self.storage_type,
         );
@@ -342,6 +369,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
+            self.epoch(),
             read_options.clone().into(),
             self.storage_type,
         );
@@ -400,7 +428,7 @@ impl<S> TracedStateStore<S> {
     }
 }
 
-impl<S> Drop for TracedStateStore<S> {
+impl<S, E> Drop for TracedStateStore<S, E> {
     fn drop(&mut self) {
         if let StorageType::Local(_, _) = self.storage_type {
             let _ = TraceSpan::new_drop_storage_span(self.storage_type);

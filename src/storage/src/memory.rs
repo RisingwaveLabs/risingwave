@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
-use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, LazyLock};
@@ -896,42 +895,38 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
         }
     }
 
-    fn iter(
+    async fn iter(
         &self,
         key_range: TableKeyRange,
         _read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
-        async move {
-            let iter = self
-                .inner
-                .iter_impl(key_range.clone(), self.epoch(), self.table_id)?;
-            Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
-                self.mem_table.iter(key_range),
-                iter.into_stream(to_owned_item),
-                self.table_id,
-                self.epoch(),
-                false,
-            ))))
-        }
+    ) -> StorageResult<Self::Iter<'_>> {
+        let iter = self
+            .inner
+            .iter_impl(key_range.clone(), self.epoch(), self.table_id)?;
+        Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
+            self.mem_table.iter(key_range),
+            iter.into_stream(to_owned_item),
+            self.table_id,
+            self.epoch(),
+            false,
+        ))))
     }
 
-    fn rev_iter(
+    async fn rev_iter(
         &self,
         key_range: TableKeyRange,
         _read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
-        async move {
-            let iter = self
-                .inner
-                .rev_iter_impl(key_range.clone(), self.epoch(), self.table_id)?;
-            Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
-                self.mem_table.rev_iter(key_range),
-                iter.into_stream(to_owned_item),
-                self.table_id,
-                self.epoch(),
-                true,
-            ))))
-        }
+    ) -> StorageResult<Self::RevIter<'_>> {
+        let iter = self
+            .inner
+            .rev_iter_impl(key_range.clone(), self.epoch(), self.table_id)?;
+        Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
+            self.mem_table.rev_iter(key_range),
+            iter.into_stream(to_owned_item),
+            self.table_id,
+            self.epoch(),
+            true,
+        ))))
     }
 
     fn insert(
@@ -1349,6 +1344,7 @@ mod tests {
     use crate::hummock::iterator::test_utils::{
         iterator_test_table_key_of, iterator_test_value_of,
     };
+    use crate::hummock::test_utils::StateStoreReadTestExt;
     use crate::memory::sled::SledStateStore;
 
     #[tokio::test]

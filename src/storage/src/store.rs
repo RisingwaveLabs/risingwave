@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
@@ -296,43 +295,6 @@ pub trait StateStoreRead: StaticSendSync {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Self::RevIter>;
-}
-
-pub trait StateStoreReadExt: StaticSendSync {
-    /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
-    /// `full_key_range` used for iter.
-    /// The result is based on a snapshot corresponding to the given `epoch`.
-    ///
-    ///
-    /// By default, this simply calls `StateStore::iter` to fetch elements.
-    fn scan(
-        &self,
-        key_range: TableKeyRange,
-        limit: Option<usize>,
-        read_options: ReadOptions,
-    ) -> impl StorageFuture<'_, Vec<StateStoreKeyedRow>>;
-}
-
-impl<S: StateStoreRead> StateStoreReadExt for S {
-    async fn scan(
-        &self,
-        key_range: TableKeyRange,
-        limit: Option<usize>,
-        mut read_options: ReadOptions,
-    ) -> StorageResult<Vec<StateStoreKeyedRow>> {
-        if limit.is_some() {
-            read_options.prefetch_options.prefetch = false;
-        }
-        const MAX_INITIAL_CAP: usize = 1024;
-        let limit = limit.unwrap_or(usize::MAX);
-        let mut ret = Vec::with_capacity(min(limit, MAX_INITIAL_CAP));
-        let mut iter = self.iter(key_range, read_options).await?;
-        while let Some((key, value)) = iter.try_next().await? {
-            ret.push((key.copy_into(), Bytes::copy_from_slice(value)))
-        }
-        Ok(ret)
-    }
 }
 
 #[derive(Clone)]

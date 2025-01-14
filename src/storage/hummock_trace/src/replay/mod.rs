@@ -89,11 +89,13 @@ pub trait ReplayRead {
     async fn iter(
         &self,
         key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
+        epoch: u64,
         read_options: TracedReadOptions,
     ) -> Result<BoxStream<'static, Result<ReplayItem>>>;
     async fn get(
         &self,
         key: TracedBytes,
+        epoch: u64,
         read_options: TracedReadOptions,
     ) -> Result<Option<TracedBytes>>;
 }

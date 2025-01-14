@@ -671,13 +671,15 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, KeyPayloadType, TableKey};
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::hummock::iterator::test_utils::{
         iterator_test_table_key_of, iterator_test_value_of,
     };
     use risingwave_storage::store::{
-        LocalStateStore, NewLocalOptions, ReadOptions, SealCurrentEpochOptions, StateStoreRead,
+        LocalStateStore, NewLocalOptions, NewReadSnapshotOptions, ReadOptions,
+        SealCurrentEpochOptions, StateStoreRead,
     };
     use risingwave_storage::{StateStore, StateStoreIter};
 
@@ -740,8 +742,17 @@ mod tests {
         );
 
         let kv_iter = pairs.clone().into_iter();
-        let iter = state_store
-            .iter(key_range.clone(), epoch, read_options.clone())
+        let snapshot = state_store
+            .new_read_snapshot(
+                HummockReadEpoch::NoWait(epoch),
+                NewReadSnapshotOptions {
+                    table_id: TEST_TABLE_ID,
+                },
+            )
+            .await
+            .unwrap();
+        let iter = snapshot
+            .iter(key_range.clone(), read_options.clone())
             .await
             .unwrap();
         validate(kv_iter, iter).await;
@@ -753,7 +764,7 @@ mod tests {
         let mut rebuild_count = 0;
         let rebuild_count_mut_ref = &mut rebuild_count;
         let iter = AutoRebuildStateStoreReadIter::new(
-            state_store,
+            snapshot,
             move || {
                 *count_mut_ref += 1;
                 if *count_mut_ref % rebuild_period == 0 {
@@ -764,7 +775,6 @@ mod tests {
                 }
             },
             key_range.clone(),
-            epoch,
             read_options,
         )
         .await

@@ -108,6 +108,8 @@ pub enum Operation {
     Get {
         /// Key to retrieve.
         key: TracedBytes,
+        /// Optional epoch value.
+        epoch: Option<u64>,
         /// Read options for the operation.
         read_options: TracedReadOptions,
     },
@@ -134,6 +136,8 @@ pub enum Operation {
     Iter {
         /// Key range for iteration.
         key_range: TracedIterRange,
+        /// Optional epoch value.
+        epoch: Option<u64>,
         /// Read options for the operation.
         read_options: TracedReadOptions,
     },
@@ -180,9 +184,10 @@ pub enum Operation {
 }
 
 impl Operation {
-    pub fn get(key: Bytes, read_options: TracedReadOptions) -> Operation {
+    pub fn get(key: Bytes, epoch: Option<u64>, read_options: TracedReadOptions) -> Operation {
         Operation::Get {
             key: key.into(),
+            epoch,
             read_options,
         }
     }
@@ -377,10 +382,12 @@ mod tests {
     fn test_record_is_iter_related() {
         let iter_operation = Operation::Iter {
             key_range: (Bound::Unbounded, Bound::Unbounded),
+            epoch: None,
             read_options: TracedReadOptions::for_test(0),
         };
         let get_operation = Operation::Get {
             key: TracedBytes(Bytes::from("test")),
+            epoch: None,
             read_options: TracedReadOptions::for_test(0),
         };
 

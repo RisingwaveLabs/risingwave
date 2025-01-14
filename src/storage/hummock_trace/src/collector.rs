@@ -228,14 +228,16 @@ impl TraceSpan {
 
     pub fn new_get_span(
         key: Bytes,
+        epoch: Option<u64>,
         read_options: TracedReadOptions,
         storage_type: StorageType,
     ) -> MayTraceSpan {
-        Self::new_global_op(Operation::get(key, read_options), storage_type)
+        Self::new_global_op(Operation::get(key, epoch, read_options), storage_type)
     }
 
     pub fn new_iter_span(
         key_range: (Bound<Bytes>, Bound<Bytes>),
+        epoch: Option<u64>,
         read_options: TracedReadOptions,
         storage_type: StorageType,
     ) -> MayTraceSpan {
@@ -245,6 +247,7 @@ impl TraceSpan {
                     key_range.0.as_ref().map(|v| v.clone().into()),
                     key_range.1.as_ref().map(|v| v.clone().into()),
                 ),
+                epoch,
                 read_options,
             },
             storage_type,
