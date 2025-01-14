@@ -20,6 +20,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
+use risingwave_common::util::epoch::Epoch;
 use tokio::sync::oneshot;
 
 use crate::error::{DmlError, Result};
@@ -194,6 +195,17 @@ impl WriteHandle {
         Ok(())
     }
 
+    pub async fn end_returning_epoch(mut self) -> Result<Epoch> {
+        assert_eq!(self.txn_state, TxnState::Begin);
+        self.txn_state = TxnState::Committed;
+        // Await the notifier.
+        let (notifier, epoch_notifier) =
+            self.write_txn_control_msg_returning_epoch(TxnMsg::End(self.txn_id))?;
+        notifier.await.map_err(|_| DmlError::ReaderClosed)?;
+        let epoch = epoch_notifier.await.map_err(|_| DmlError::ReaderClosed)?;
+        Ok(epoch)
+    }
+
     pub fn rollback(mut self) -> Result<oneshot::Receiver<usize>> {
         self.rollback_inner()
     }
@@ -212,7 +224,7 @@ impl WriteHandle {
     async fn write_txn_data_msg(&self, txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
         assert_eq!(self.txn_id, txn_msg.txn_id());
         let (notifier_tx, notifier_rx) = oneshot::channel();
-        match self.tx.send(txn_msg, notifier_tx).await {
+        match self.tx.send(txn_msg, notifier_tx, None).await {
             Ok(_) => Ok(notifier_rx),
 
             // It's possible that the source executor is scaled in or migrated, so the channel
@@ -226,8 +238,27 @@ impl WriteHandle {
     fn write_txn_control_msg(&self, txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
         assert_eq!(self.txn_id, txn_msg.txn_id());
         let (notifier_tx, notifier_rx) = oneshot::channel();
-        match self.tx.send_immediate(txn_msg, notifier_tx) {
+        match self.tx.send_immediate(txn_msg, notifier_tx, None) {
             Ok(_) => Ok(notifier_rx),
+
+            // It's possible that the source executor is scaled in or migrated, so the channel
+            // is closed. To guarantee the transactional atomicity, bail out.
+            Err(_) => Err(DmlError::ReaderClosed),
+        }
+    }
+
+    fn write_txn_control_msg_returning_epoch(
+        &self,
+        txn_msg: TxnMsg,
+    ) -> Result<(oneshot::Receiver<usize>, oneshot::Receiver<Epoch>)> {
+        assert_eq!(self.txn_id, txn_msg.txn_id());
+        let (notifier_tx, notifier_rx) = oneshot::channel();
+        let (epoch_notifier_tx, epoch_notifier_rx) = oneshot::channel();
+        match self
+            .tx
+            .send_immediate(txn_msg, notifier_tx, Some(epoch_notifier_tx))
+        {
+            Ok(_) => Ok((notifier_rx, epoch_notifier_rx)),
 
             // It's possible that the source executor is scaled in or migrated, so the channel
             // is closed. To guarantee the transactional atomicity, bail out.
@@ -249,7 +280,7 @@ pub struct TableStreamReader {
 impl TableStreamReader {
     #[try_stream(boxed, ok = StreamChunk, error = DmlError)]
     pub async fn into_data_stream_for_test(mut self) {
-        while let Some((txn_msg, notifier)) = self.rx.recv().await {
+        while let Some((txn_msg, notifier, _epoch_notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
             match txn_msg {
                 TxnMsg::Begin(_) | TxnMsg::End(_) | TxnMsg::Rollback(_) => {
@@ -263,18 +294,18 @@ impl TableStreamReader {
         }
     }
 
-    #[try_stream(boxed, ok = TxnMsg, error = DmlError)]
+    #[try_stream(boxed, ok = (TxnMsg, Option<oneshot::Sender<Epoch>>), error = DmlError)]
     pub async fn into_stream(mut self) {
-        while let Some((txn_msg, notifier)) = self.rx.recv().await {
+        while let Some((txn_msg, notifier, epoch_notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
             match &txn_msg {
                 TxnMsg::Begin(_) | TxnMsg::End(_) | TxnMsg::Rollback(_) => {
                     _ = notifier.send(0);
-                    yield txn_msg;
+                    yield (txn_msg, epoch_notifier);
                 }
                 TxnMsg::Data(_, chunk) => {
                     _ = notifier.send(chunk.cardinality());
-                    yield txn_msg;
+                    yield (txn_msg, epoch_notifier);
                 }
             }
         }
@@ -311,7 +342,7 @@ mod tests {
             .unwrap();
         write_handle.begin().unwrap();
 
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
+        assert_matches!(reader.next().await.unwrap()?, (TxnMsg::Begin(_), None));
 
         macro_rules! write_chunk {
             ($i:expr) => {{
@@ -343,7 +374,7 @@ mod tests {
             write_handle.end().await.unwrap();
         });
 
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
+        assert_matches!(reader.next().await.unwrap()?, (TxnMsg::End(_), None));
 
         Ok(())
     }
@@ -357,7 +388,7 @@ mod tests {
             .unwrap();
         write_handle.begin().unwrap();
 
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
+        assert_matches!(reader.next().await.unwrap()?, (TxnMsg::Begin(_), None));
 
         let chunk = StreamChunk::new(vec![Op::Insert], vec![I64Array::from_iter([1]).into_ref()]);
         write_handle.write_chunk(chunk).await.unwrap();
@@ -369,7 +400,7 @@ mod tests {
 
         // Rollback on drop
         drop(write_handle);
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Rollback(_));
+        assert_matches!(reader.next().await.unwrap()?, (TxnMsg::Rollback(_), None));
 
         Ok(())
     }

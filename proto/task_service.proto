@@ -44,6 +44,16 @@ message CreateTaskRequest {
   plan_common.ExprContext expr_context = 5;
 }
 
+message FastInsertRequest {
+  batch_plan.FastInsertNode fast_insert_node = 2;
+}
+
+
+message FastInsertResponse {
+  // Optional error message for failed task.
+  string error_message = 1;
+}
+
 message CancelTaskRequest {
   batch_plan.TaskId task_id = 1;
 }
@@ -73,6 +83,7 @@ service TaskService {
   // Cancel an already-died (self execution-failure, previous aborted, completed) task will still succeed.
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
   rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
+  rpc FastInsert(FastInsertRequest) returns (FastInsertResponse);
 }
 
 message GetDataRequest {

@@ -15,6 +15,7 @@
 pub mod aggregation;
 mod delete;
 mod expand;
+mod fast_insert;
 mod filter;
 mod generic_exchange;
 mod group_top_n;
@@ -52,6 +53,7 @@ use anyhow::Context;
 use async_recursion::async_recursion;
 pub use delete::*;
 pub use expand::*;
+pub use fast_insert::*;
 pub use filter::*;
 use futures::stream::BoxStream;
 pub use generic_exchange::*;

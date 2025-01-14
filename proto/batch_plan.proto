@@ -164,6 +164,25 @@ message InsertNode {
   uint32 session_id = 7;
 }
 
+message FastInsertNode {
+  // Id of the table to perform inserting.
+  uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 2;
+  repeated uint32 column_indices = 3;
+  data.DataChunk data_chunk = 4;
+
+  plan_common.DefaultColumns default_columns = 5;
+  // An optional field and will be `None` for tables without user-defined pk.
+  // The `BatchInsertExecutor` should add a column with NULL value which will
+  // be filled in streaming.
+  optional uint32 row_id_index = 6;
+
+  // Session id is used to ensure that dml data from the same session should be
+  // sent to a fixed worker node and channel.
+  uint32 session_id = 7;
+}
+
 message DeleteNode {
   // Id of the table to perform deleting.
   uint32 table_id = 1;
