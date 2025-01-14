@@ -35,6 +35,47 @@ select * from t
 ----
 1 ABC 2
 
+# create a new version of schema that added a new optional nested field
+system ok
+sr_register avro_alter_table_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"},{"name":"nested","type":["null",{"type":"record","name":"Nested","fields":[{"name":"baz","type":"int"}]}],"default":null}]}'
+
+# Refresh table schema should succeed
+statement ok
+ALTER TABLE t REFRESH SCHEMA;
+
+query ?
+select * from t
+----
+1 ABC NULL 2
+
+# Produce a new message with the new schema
+system ok
+echo '{"foo":"DEF", "bar":2, "nested":{"Nested":{"baz":2}}}' | rpk topic produce --schema-id=topic avro_alter_table_test
+
+sleep 4s
+
+query ? rowsort
+select * from t
+----
+1 ABC NULL 2
+2 DEF (2)  3
+
+# create a new version of schema that added a new field to "nested"
+system ok
+sr_register avro_alter_table_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"},{"name":"nested","type":["null",{"type":"record","name":"Nested","fields":[{"name":"baz","type":"int"},{"name":"qux","type":"string","default":""}]}],"default":null}]}'
+
+# Refresh table schema should fail
+statement error
+ALTER TABLE t REFRESH SCHEMA;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Feature is not yet implemented: The data type of column "nested" has been changed from "struct<baz integer>" to "struct<baz integer, qux character varying>". This is currently not supported, even if it could be a compatible change in external systems.
+No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+
+
+
 # create a new version of schema that removed field bar
 system ok
 sr_register avro_alter_table_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"foo","type":"string"}]}'
@@ -71,10 +112,11 @@ ALTER TABLE t DROP COLUMN gen_col;
 statement ok
 ALTER TABLE t REFRESH SCHEMA;
 
-query ?
+query ? rowsort
 select * from t
 ----
 ABC
+DEF
 
 statement ok
 drop table t;

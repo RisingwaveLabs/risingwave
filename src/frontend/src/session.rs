@@ -1145,7 +1145,7 @@ impl SessionImpl {
 
     pub fn notice_to_user(&self, str: impl Into<String>) {
         let notice = str.into();
-        tracing::trace!("notice to user:{}", notice);
+        tracing::trace!(notice, "notice to user");
         self.notices.write().push(notice);
     }
 

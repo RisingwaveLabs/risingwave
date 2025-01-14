@@ -33,7 +33,7 @@ use risingwave_pb::catalog::{
     StreamJobStatus as PbStreamJobStatus,
 };
 use risingwave_pb::plan_common::ColumnDescVersion;
-pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
+pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, FieldLike, Schema};
 use serde::{Deserialize, Serialize};
 
 use crate::array::DataChunk;

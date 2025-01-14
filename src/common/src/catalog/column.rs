@@ -23,6 +23,7 @@ use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, PbColumnCatalog, PbColumnDesc,
 };
 
+use super::schema::FieldLike;
 use super::{
     iceberg_sequence_num_column_desc, row_id_column_desc, rw_timestamp_column_desc,
     USER_COLUMN_ID_OFFSET,
@@ -520,6 +521,26 @@ impl ColumnCatalog {
         } else {
             Cow::Borrowed(&self.column_desc.name)
         }
+    }
+}
+
+impl FieldLike for ColumnDesc {
+    fn data_type(&self) -> &DataType {
+        &self.data_type
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl FieldLike for ColumnCatalog {
+    fn data_type(&self) -> &DataType {
+        &self.column_desc.data_type
+    }
+
+    fn name(&self) -> &str {
+        &self.column_desc.name
     }
 }
 

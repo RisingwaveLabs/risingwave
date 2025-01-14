@@ -69,13 +69,12 @@ pub async fn handle_create_as(
                 .fields()
                 .iter()
                 .map(|field| {
-                    let id = col_id_gen.generate(&field.name);
-                    ColumnCatalog {
+                    col_id_gen.generate(field).map(|id| ColumnCatalog {
                         column_desc: ColumnDesc::from_field_with_column_id(field, id.get_id()),
                         is_hidden: false,
-                    }
+                    })
                 })
-                .collect()
+                .try_collect()?
         } else {
             unreachable!()
         }
