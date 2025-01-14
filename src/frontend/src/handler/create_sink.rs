@@ -503,9 +503,7 @@ pub(crate) async fn reparse_table_for_sink(
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
     // Retrieve the original table definition and parse it to AST.
     let definition = table_catalog.create_sql_ast_purified()?;
-    let raw_definition = table_catalog
-        .create_sql_ast()
-        .unwrap_or_else(|_| definition.clone() /* create table as */);
+    let raw_definition = table_catalog.create_sql_ast()?;
 
     let Statement::CreateTable {
         name,
