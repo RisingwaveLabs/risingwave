@@ -46,7 +46,7 @@ deltalake = { workspace = true }
 duration-str = "0.12.0"
 easy-ext = "1"
 either = "1"
-elasticsearch = { version = "8.15.0-alpha.1", features = ["rustls-tls"] }
+elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
