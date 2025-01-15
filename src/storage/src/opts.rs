@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::config::{
-    extract_storage_memory_config, EvictionConfig, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
+    extract_storage_memory_config, EvictionConfig, ObjectStoreConfig, RefillTarget, RwConfig,
+    StorageMemoryConfig,
 };
 use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
 use risingwave_common::system_param::system_params_for_test;
@@ -97,6 +98,7 @@ pub struct StorageOpts {
     pub data_file_cache_runtime_config: foyer::RuntimeOptions,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
+    pub cache_refill_data_refill_target: RefillTarget,
     pub cache_refill_timeout_ms: u64,
     pub cache_refill_concurrency: usize,
     pub cache_refill_recent_filter_layers: usize,
@@ -214,6 +216,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_flush_buffer_threshold_mb: s.meta_file_cache_flush_buffer_threshold_mb,
             meta_file_cache_runtime_config: c.storage.meta_file_cache.runtime_config.clone(),
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
+            cache_refill_data_refill_target: c.storage.cache_refill.data_refill_target,
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,
             cache_refill_recent_filter_layers: c.storage.cache_refill.recent_filter_layers,
