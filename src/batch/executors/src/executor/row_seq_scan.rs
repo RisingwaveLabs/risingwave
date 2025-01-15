@@ -11,23 +11,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::ops::{Bound, Deref};
+use std::ops::Deref;
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use prometheus::Histogram;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Schema};
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{scan_range, PbScanRange};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::as_of::AsOfType;
 use risingwave_pb::plan_common::{as_of, PbAsOf, StorageTableDesc};
@@ -35,9 +31,11 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
+use super::ScanRange;
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    build_scan_ranges_from_pb, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder,
 };
 use crate::monitor::BatchMetrics;
 
@@ -57,17 +55,6 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     limit: Option<u64>,
     as_of: Option<AsOf>,
 }
-
-/// Range for batch scan.
-#[derive(Debug)]
-pub struct ScanRange {
-    /// The prefix of the primary key.
-    pub pk_prefix: OwnedRow,
-
-    /// The range bounds of the next column.
-    pub next_col_bounds: (Bound<OwnedRow>, Bound<OwnedRow>),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AsOf {
     pub timestamp: i64,
@@ -94,71 +81,6 @@ impl From<&AsOf> for PbAsOf {
             as_of_type: Some(AsOfType::Timestamp(as_of::Timestamp {
                 timestamp: v.timestamp,
             })),
-        }
-    }
-}
-
-impl ScanRange {
-    /// Create a scan range from the prost representation.
-    pub fn new(scan_range: PbScanRange, pk_types: Vec<DataType>) -> Result<Self> {
-        let mut index = 0;
-        let pk_prefix = OwnedRow::new(
-            scan_range
-                .eq_conds
-                .iter()
-                .map(|v| {
-                    let ty = pk_types.get(index).unwrap();
-                    index += 1;
-                    deserialize_datum(v.as_slice(), ty)
-                })
-                .try_collect()?,
-        );
-        if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
-            return Ok(Self {
-                pk_prefix,
-                ..Self::full()
-            });
-        }
-
-        let build_bound = |bound: &scan_range::Bound, mut index| -> Result<Bound<OwnedRow>> {
-            let next_col_bounds = OwnedRow::new(
-                bound
-                    .value
-                    .iter()
-                    .map(|v| {
-                        let ty = pk_types.get(index).unwrap();
-                        index += 1;
-                        deserialize_datum(v.as_slice(), ty)
-                    })
-                    .try_collect()?,
-            );
-            if bound.inclusive {
-                Ok(Bound::Included(next_col_bounds))
-            } else {
-                Ok(Bound::Excluded(next_col_bounds))
-            }
-        };
-
-        let next_col_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = match (
-            scan_range.lower_bound.as_ref(),
-            scan_range.upper_bound.as_ref(),
-        ) {
-            (Some(lb), Some(ub)) => (build_bound(lb, index)?, build_bound(ub, index)?),
-            (None, Some(ub)) => (Bound::Unbounded, build_bound(ub, index)?),
-            (Some(lb), None) => (build_bound(lb, index)?, Bound::Unbounded),
-            (None, None) => unreachable!(),
-        };
-        Ok(Self {
-            pk_prefix,
-            next_col_bounds,
-        })
-    }
-
-    /// Create a scan range for full table scan.
-    pub fn full() -> Self {
-        Self {
-            pk_prefix: OwnedRow::default(),
-            next_col_bounds: (Bound::Unbounded, Bound::Unbounded),
         }
     }
 }
@@ -219,31 +141,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             None => Some(Bitmap::ones(table_desc.vnode_count()).into()),
         };
 
-        let scan_ranges = {
-            let scan_ranges = &seq_scan_node.scan_ranges;
-            if scan_ranges.is_empty() {
-                vec![ScanRange::full()]
-            } else {
-                scan_ranges
-                    .iter()
-                    .map(|scan_range| {
-                        let pk_types = table_desc
-                            .pk
-                            .iter()
-                            .map(|order| {
-                                DataType::from(
-                                    table_desc.columns[order.column_index as usize]
-                                        .column_type
-                                        .as_ref()
-                                        .unwrap(),
-                                )
-                            })
-                            .collect_vec();
-                        ScanRange::new(scan_range.clone(), pk_types)
-                    })
-                    .try_collect()?
-            }
-        };
+        let scan_ranges = build_scan_ranges_from_pb(&seq_scan_node.scan_ranges, table_desc)?;
 
         let ordered = seq_scan_node.ordered;
 
@@ -429,55 +327,15 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         limit: Option<u64>,
         histogram: Option<impl Deref<Target = Histogram>>,
     ) {
-        let ScanRange {
-            pk_prefix,
-            next_col_bounds,
-        } = scan_range;
-
-        // The len of a valid pk_prefix should be less than or equal pk's num.
-        let order_type = table.pk_serializer().get_order_types()[pk_prefix.len()];
-        let (start_bound, end_bound) = if order_type.is_ascending() {
-            (next_col_bounds.0, next_col_bounds.1)
-        } else {
-            (next_col_bounds.1, next_col_bounds.0)
-        };
-
-        let start_bound_is_bounded = !matches!(start_bound, Bound::Unbounded);
-        let end_bound_is_bounded = !matches!(end_bound, Bound::Unbounded);
-
-        let build_bound = |other_bound_is_bounded: bool, bound, order_type_nulls| {
-            match bound {
-                Bound::Unbounded => {
-                    if other_bound_is_bounded && order_type_nulls {
-                        // `NULL`s are at the start bound side, we should exclude them to meet SQL semantics.
-                        Bound::Excluded(OwnedRow::new(vec![None]))
-                    } else {
-                        // Both start and end are unbounded, so we need to select all rows.
-                        Bound::Unbounded
-                    }
-                }
-                Bound::Included(x) => Bound::Included(x),
-                Bound::Excluded(x) => Bound::Excluded(x),
-            }
-        };
-        let start_bound = build_bound(
-            end_bound_is_bounded,
-            start_bound,
-            order_type.nulls_are_first(),
-        );
-        let end_bound = build_bound(
-            start_bound_is_bounded,
-            end_bound,
-            order_type.nulls_are_last(),
-        );
-
+        let pk_prefix = scan_range.pk_prefix.clone();
+        let range_bounds = scan_range.convert_to_range_bounds(&table);
         // Range Scan.
         assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
             .batch_chunk_iter_with_pk_bounds(
                 epoch.into(),
                 &pk_prefix,
-                (start_bound, end_bound),
+                range_bounds,
                 ordered,
                 chunk_size,
                 PrefetchOptions::new(limit.is_none(), true),

@@ -938,19 +938,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         &self,
         start_epoch: u64,
         end_epoch: HummockReadEpoch,
-        start_pk: Option<&OwnedRow>,
+        encoded_key_range: (Bound<&Bytes>, Bound<&Bytes>),
         vnode: VirtualNode,
     ) -> StorageResult<impl Stream<Item = StorageResult<(K, ChangeLogRow)>>> {
-        let start_bound = if let Some(start_pk) = start_pk {
-            let mut bytes = BytesMut::new();
-            self.pk_serializer.serialize(start_pk, &mut bytes);
-            let bytes = bytes.freeze();
-            Included(bytes)
-        } else {
-            Unbounded
-        };
-        let table_key_range =
-            prefixed_range_with_vnode::<&Bytes>((start_bound.as_ref(), Unbounded), vnode);
+        let table_key_range = prefixed_range_with_vnode::<&Bytes>(encoded_key_range, vnode);
         let read_options = ReadLogOptions {
             table_id: self.table_id,
         };
@@ -976,8 +967,21 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         start_pk: Option<&OwnedRow>,
         vnode: VirtualNode,
     ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>>> {
+        let start_bound = if let Some(start_pk) = start_pk {
+            let mut bytes = BytesMut::new();
+            self.pk_serializer.serialize(start_pk, &mut bytes);
+            let bytes = bytes.freeze();
+            Included(bytes)
+        } else {
+            Unbounded
+        };
         let stream = self
-            .batch_iter_log_inner::<()>(start_epoch, end_epoch, start_pk, vnode)
+            .batch_iter_log_inner::<()>(
+                start_epoch,
+                end_epoch,
+                (start_bound.as_ref(), Unbounded),
+                vnode,
+            )
             .await?;
         Ok(stream.map_ok(|(_, row)| row))
     }
@@ -987,11 +991,29 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         start_epoch: u64,
         end_epoch: HummockReadEpoch,
         ordered: bool,
+        range_bounds: impl RangeBounds<OwnedRow>,
+        pk_prefix: impl Row,
     ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static> {
+        let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
+        let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
         let vnodes = self.distribution.vnodes().iter_vnodes().collect_vec();
         build_vnode_stream(
-            |vnode| self.batch_iter_log_inner(start_epoch, end_epoch, None, vnode),
-            |vnode| self.batch_iter_log_inner(start_epoch, end_epoch, None, vnode),
+            |vnode| {
+                self.batch_iter_log_inner(
+                    start_epoch,
+                    end_epoch,
+                    (start_key.as_ref(), end_key.as_ref()),
+                    vnode,
+                )
+            },
+            |vnode| {
+                self.batch_iter_log_inner(
+                    start_epoch,
+                    end_epoch,
+                    (start_key.as_ref(), end_key.as_ref()),
+                    vnode,
+                )
+            },
             &vnodes,
             ordered,
         )

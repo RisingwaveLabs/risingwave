@@ -132,6 +132,11 @@ impl TableScan {
             .collect()
     }
 
+    pub(crate) fn out_fields(&self) -> FixedBitSet {
+        let out_fields_vec = self.output_col_idx.clone();
+        FixedBitSet::from_iter(out_fields_vec)
+    }
+
     pub(crate) fn order_names(&self) -> Vec<String> {
         self.table_desc
             .order_column_indices()

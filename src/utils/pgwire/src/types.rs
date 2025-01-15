@@ -23,7 +23,7 @@ use crate::error::{PsqlError, PsqlResult};
 /// A row of data returned from the database by a query.
 #[derive(Debug, Clone)]
 // NOTE: Since we only support simple query protocol, the values are represented as strings.
-pub struct Row(Vec<Option<Bytes>>);
+pub struct Row(pub Vec<Option<Bytes>>);
 
 impl Row {
     /// Create a row from values.
@@ -48,6 +48,14 @@ impl Row {
 
     pub fn take(self) -> Vec<Option<Bytes>> {
         self.0
+    }
+
+    pub fn project(&mut self, indices: &[usize]) -> Row {
+        let mut new_row = Vec::with_capacity(indices.len());
+        for i in indices {
+            new_row.push(self.0[*i].take());
+        }
+        Row(new_row)
     }
 }
 
