@@ -46,6 +46,10 @@ pub fn get_telemetry_risingwave_cloud_uuid() -> Option<String> {
 }
 
 pub async fn do_telemetry_event_report(event_stash: &mut Vec<PbEventMessage>) {
+    if event_stash.is_empty() {
+        return;
+    }
+
     const TELEMETRY_EVENT_REPORT_TYPE: &str = "events"; // the batch report url
     let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_EVENT_REPORT_TYPE).to_owned();
     let batch_message = PbBatchEventMessage {
