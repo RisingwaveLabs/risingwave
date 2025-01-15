@@ -142,17 +142,6 @@ async fn run_compact(
 
 fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, String>> {
     match config.common.catalog_type.as_deref() {
-        Some("storage") | None => Ok(HashMap::from_iter([
-            ("type".to_owned(), "hadoop".to_owned()),
-            (
-                "warehouse".to_owned(),
-                config
-                    .common
-                    .warehouse_path
-                    .clone()
-                    .ok_or_else(|| anyhow!("warehouse unspecified for jdbc catalog"))?,
-            ),
-        ])),
         Some("jdbc") => Ok(HashMap::from_iter(
             [
                 ("type".to_owned(), "jdbc".to_owned()),
@@ -172,6 +161,10 @@ fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, 
                         .clone()
                         .ok_or_else(|| anyhow!("uri unspecified for jdbc catalog"))?,
                 ),
+                (
+                    "http-client.apache.max-connections".to_owned(),
+                    "3000".to_owned(),
+                ),
             ]
             .into_iter()
             .chain(
@@ -182,6 +175,7 @@ fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, 
                     .map(|(k, v)| (k.clone(), v.clone())),
             ),
         )),
+        None => Err(anyhow!("catalog type unspecified")),
         Some(other) => Err(anyhow!("unsupported catalog type {} in compaction", other)),
     }
 }
