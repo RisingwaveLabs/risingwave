@@ -67,7 +67,25 @@ pub struct KafkaSplitEnumerator {
     config: rdkafka::ClientConfig,
 }
 
-impl KafkaSplitEnumerator {}
+impl KafkaSplitEnumerator {
+    async fn drop_consumer_groups(&self, fragment_ids: Vec<u32>) -> ConnectorResult<()> {
+        let admin = build_kafka_admin(&self.config, &self.properties).await?;
+        let group_ids = fragment_ids
+            .iter()
+            .map(|fragment_id| self.properties.group_id(*fragment_id))
+            .collect::<Vec<_>>();
+        let group_ids: Vec<&str> = group_ids.iter().map(|s| s.as_str()).collect();
+        let res = admin
+            .delete_groups(&group_ids, &AdminOptions::default())
+            .await?;
+        tracing::debug!(
+            topic = self.topic,
+            ?fragment_ids,
+            "delete groups result: {res:?}"
+        );
+        Ok(())
+    }
+}
 
 #[async_trait]
 impl SplitEnumerator for KafkaSplitEnumerator {
@@ -170,21 +188,11 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     }
 
     async fn on_drop_fragments(&mut self, fragment_ids: Vec<u32>) -> ConnectorResult<()> {
-        let admin = build_kafka_admin(&self.config, &self.properties).await?;
-        let group_ids = fragment_ids
-            .iter()
-            .map(|fragment_id| self.properties.group_id(*fragment_id))
-            .collect::<Vec<_>>();
-        let group_ids: Vec<&str> = group_ids.iter().map(|s| s.as_str()).collect();
-        let res = admin
-            .delete_groups(&group_ids, &AdminOptions::default())
-            .await?;
-        tracing::debug!(
-            topic = self.topic,
-            ?fragment_ids,
-            "delete groups result: {res:?}"
-        );
-        Ok(())
+        self.drop_consumer_groups(fragment_ids).await
+    }
+
+    async fn on_finish_backfill(&mut self, fragment_ids: Vec<u32>) -> ConnectorResult<()> {
+        self.drop_consumer_groups(fragment_ids).await
     }
 }
 

@@ -182,6 +182,14 @@ impl SourceManagerCore {
         }
 
         for (source_id, fragments) in added_backfill_fragments {
+            // Note: when the backfill fragment is considered created, backfill must be finished.
+            let handle = self.managed_sources.get(&source_id).unwrap_or_else(|| {
+                panic!(
+                    "source {} not found when adding backfill fragments {:?}",
+                    source_id, fragments
+                );
+            });
+            handle.finish_backfill(fragments.iter().map(|(id, _up_id)| *id).collect());
             self.backfill_fragments
                 .entry(source_id)
                 .or_default()
@@ -477,7 +485,8 @@ impl SourceManager {
 }
 
 pub enum SourceChange {
-    /// `CREATE SOURCE` (shared), or `CREATE MV`
+    /// `CREATE SOURCE` (shared), or `CREATE MV`.
+    /// Note this is applied _after_ the job is successfully created (`post_collect` barrier).
     CreateJob {
         added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         added_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
