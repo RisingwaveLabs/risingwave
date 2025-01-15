@@ -41,16 +41,95 @@ pub struct BackwardSstableIterator {
     sstable_store: SstableStoreRef,
 
     stats: StoreLocalStatistic,
+
+    // used for checking if the block is valid, filter out the block that is not in the table-id range
+    read_block_meta_range: (usize, usize),
 }
 
 impl BackwardSstableIterator {
-    pub fn new(sstable: TableHolder, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(
+        sstable: TableHolder,
+        sstable_store: SstableStoreRef,
+        sstable_info_ref: &SstableInfo,
+    ) -> Self {
+        let mut start_idx = 0;
+        let mut end_idx = sstable.meta.block_metas.len() - 1;
+        let read_table_id_range = (
+            *sstable_info_ref.table_ids.first().unwrap(),
+            *sstable_info_ref.table_ids.last().unwrap(),
+        );
+        assert!(
+            read_table_id_range.0 <= read_table_id_range.1,
+            "invalid table id range {} - {}",
+            read_table_id_range.0,
+            read_table_id_range.1
+        );
+        let block_meta_count = sstable.meta.block_metas.len();
+        assert!(block_meta_count > 0);
+        assert!(
+            sstable.meta.block_metas[0].table_id().table_id() <= read_table_id_range.0,
+            "table id {} not found table_ids in block_meta {:?}",
+            read_table_id_range.0,
+            sstable
+                .meta
+                .block_metas
+                .iter()
+                .map(|meta| meta.table_id())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            sstable.meta.block_metas[block_meta_count - 1]
+                .table_id()
+                .table_id()
+                >= read_table_id_range.1,
+            "table id {} not found table_ids in block_meta {:?}",
+            read_table_id_range.1,
+            sstable
+                .meta
+                .block_metas
+                .iter()
+                .map(|meta| meta.table_id())
+                .collect::<Vec<_>>()
+        );
+
+        while start_idx < block_meta_count
+            && sstable.meta.block_metas[start_idx].table_id().table_id() < read_table_id_range.0
+        {
+            start_idx += 1;
+        }
+        // We assume that the table id read must exist in the sstable, otherwise it is a fatal error.
+        assert!(
+            start_idx < block_meta_count,
+            "table id {} not found table_ids in block_meta {:?}",
+            read_table_id_range.0,
+            sstable
+                .meta
+                .block_metas
+                .iter()
+                .map(|meta| meta.table_id())
+                .collect::<Vec<_>>()
+        );
+
+        while end_idx > start_idx
+            && sstable.meta.block_metas[end_idx].table_id().table_id() > read_table_id_range.1
+        {
+            end_idx -= 1;
+        }
+        assert!(
+            end_idx >= start_idx,
+            "end_idx {} < start_idx {} block_meta_count {}",
+            end_idx,
+            start_idx,
+            block_meta_count
+        );
+
         Self {
             block_iter: None,
-            cur_idx: sstable.meta.block_metas.len() - 1,
+            cur_idx: end_idx,
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
+            read_block_meta_range: (start_idx, end_idx),
         }
     }
 
@@ -60,7 +139,7 @@ impl BackwardSstableIterator {
         idx: isize,
         seek_key: Option<FullKey<&[u8]>>,
     ) -> HummockResult<()> {
-        if idx >= self.sst.block_count() as isize || idx < 0 {
+        if idx >= self.sst.block_count() as isize || idx < self.read_block_meta_range.0 as isize {
             self.block_iter = None;
         } else {
             let block = self
@@ -118,7 +197,7 @@ impl HummockIterator for BackwardSstableIterator {
     /// Instead of setting idx to 0th block, a `BackwardSstableIterator` rewinds to the last block
     /// in the sstable.
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(self.sst.block_count() as isize - 1, None)
+        self.seek_idx(self.read_block_meta_range.1 as isize, None)
             .await
     }
 
@@ -163,9 +242,9 @@ impl SstableIteratorType for BackwardSstableIterator {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         _: Arc<SstableIteratorReadOptions>,
-        _sstable_info_ref: &SstableInfo,
+        sstable_info_ref: &SstableInfo,
     ) -> Self {
-        BackwardSstableIterator::new(sstable, sstable_store)
+        BackwardSstableIterator::new(sstable, sstable_store, sstable_info_ref)
     }
 }
 
@@ -177,26 +256,29 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::key::UserKey;
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
-        TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_default_test_sstable, gen_test_sstable_with_table_ids,
+        test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
 
     #[tokio::test]
     async fn test_backward_sstable_iterator() {
         // build remote sstable
         let sstable_store = mock_sstable_store().await;
-        let (handle, _sstable_info) =
+        let (handle, sstable_info) =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
         assert!(handle.meta.block_metas.len() > 10);
-        let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
+        let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store, &sstable_info);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
 
@@ -215,13 +297,13 @@ mod tests {
     #[tokio::test]
     async fn test_backward_sstable_seek() {
         let sstable_store = mock_sstable_store().await;
-        let (sstable, _sstable_info) =
+        let (sstable, sstable_info) =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
-        let mut sstable_iter = BackwardSstableIterator::new(sstable, sstable_store);
+        let mut sstable_iter = BackwardSstableIterator::new(sstable, sstable_store, &sstable_info);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);
@@ -299,5 +381,205 @@ mod tests {
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_read_table_id_range() {
+        {
+            let sstable_store = mock_sstable_store().await;
+            // test key_range right
+            let k1 = {
+                let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+                table_key.extend_from_slice(format!("key_test_{:05}", 1).as_bytes());
+                let uk = UserKey::for_test(TableId::from(1), table_key);
+                FullKey {
+                    user_key: uk,
+                    epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+                }
+            };
+
+            let k2 = {
+                let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+                table_key.extend_from_slice(format!("key_test_{:05}", 2).as_bytes());
+                let uk = UserKey::for_test(TableId::from(2), table_key);
+                FullKey {
+                    user_key: uk,
+                    epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+                }
+            };
+
+            let k3 = {
+                let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+                table_key.extend_from_slice(format!("key_test_{:05}", 3).as_bytes());
+                let uk = UserKey::for_test(TableId::from(3), table_key);
+                FullKey {
+                    user_key: uk,
+                    epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+                }
+            };
+
+            {
+                let kv_pairs = vec![
+                    (k1.clone(), HummockValue::put(test_value_of(1))),
+                    (k2.clone(), HummockValue::put(test_value_of(2))),
+                    (k3.clone(), HummockValue::put(test_value_of(3))),
+                ];
+
+                let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
+                    default_builder_opt_for_test(),
+                    10,
+                    kv_pairs.into_iter(),
+                    sstable_store.clone(),
+                    vec![1, 2, 3],
+                )
+                .await;
+                let mut sstable_iter = BackwardSstableIterator::create(
+                    sstable,
+                    sstable_store.clone(),
+                    Arc::new(SstableIteratorReadOptions::default()),
+                    &SstableInfo::from(SstableInfoInner {
+                        table_ids: vec![1, 2, 3],
+                        ..Default::default()
+                    }),
+                );
+                sstable_iter.rewind().await.unwrap();
+                assert!(sstable_iter.is_valid());
+                assert!(sstable_iter.key().eq(&k3.to_ref()));
+
+                let mut cnt = 0;
+                let mut last_key = k1.clone();
+                while sstable_iter.is_valid() {
+                    last_key = sstable_iter.key().to_vec();
+                    cnt += 1;
+                    sstable_iter.next().await.unwrap();
+                }
+
+                assert_eq!(3, cnt);
+                assert_eq!(last_key, k1.clone());
+            }
+
+            {
+                let kv_pairs = vec![
+                    (k1.clone(), HummockValue::put(test_value_of(1))),
+                    (k2.clone(), HummockValue::put(test_value_of(2))),
+                    (k3.clone(), HummockValue::put(test_value_of(3))),
+                ];
+
+                let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
+                    default_builder_opt_for_test(),
+                    10,
+                    kv_pairs.into_iter(),
+                    sstable_store.clone(),
+                    vec![1, 2, 3],
+                )
+                .await;
+
+                let mut sstable_iter = BackwardSstableIterator::create(
+                    sstable,
+                    sstable_store.clone(),
+                    Arc::new(SstableIteratorReadOptions::default()),
+                    &SstableInfo::from(SstableInfoInner {
+                        table_ids: vec![1, 2],
+                        ..Default::default()
+                    }),
+                );
+                sstable_iter.rewind().await.unwrap();
+                assert!(sstable_iter.is_valid());
+                assert!(sstable_iter.key().eq(&k2.to_ref()));
+
+                let mut cnt = 0;
+                let mut last_key = k1.clone();
+                while sstable_iter.is_valid() {
+                    last_key = sstable_iter.key().to_vec();
+                    cnt += 1;
+                    sstable_iter.next().await.unwrap();
+                }
+
+                assert_eq!(2, cnt);
+                assert_eq!(last_key, k1.clone());
+            }
+
+            {
+                let kv_pairs = vec![
+                    (k1.clone(), HummockValue::put(test_value_of(1))),
+                    (k2.clone(), HummockValue::put(test_value_of(2))),
+                    (k3.clone(), HummockValue::put(test_value_of(3))),
+                ];
+
+                let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
+                    default_builder_opt_for_test(),
+                    10,
+                    kv_pairs.into_iter(),
+                    sstable_store.clone(),
+                    vec![1, 2, 3],
+                )
+                .await;
+
+                let mut sstable_iter = BackwardSstableIterator::create(
+                    sstable,
+                    sstable_store.clone(),
+                    Arc::new(SstableIteratorReadOptions::default()),
+                    &SstableInfo::from(SstableInfoInner {
+                        table_ids: vec![2, 3],
+                        ..Default::default()
+                    }),
+                );
+                sstable_iter.rewind().await.unwrap();
+                assert!(sstable_iter.is_valid());
+                assert!(sstable_iter.key().eq(&k3.to_ref()));
+
+                let mut cnt = 0;
+                let mut last_key = k1.clone();
+                while sstable_iter.is_valid() {
+                    last_key = sstable_iter.key().to_vec();
+                    cnt += 1;
+                    sstable_iter.next().await.unwrap();
+                }
+
+                assert_eq!(2, cnt);
+                assert_eq!(last_key, k2.clone());
+            }
+
+            {
+                let kv_pairs = vec![
+                    (k1.clone(), HummockValue::put(test_value_of(1))),
+                    (k2.clone(), HummockValue::put(test_value_of(2))),
+                    (k3.clone(), HummockValue::put(test_value_of(3))),
+                ];
+
+                let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
+                    default_builder_opt_for_test(),
+                    10,
+                    kv_pairs.into_iter(),
+                    sstable_store.clone(),
+                    vec![1, 2, 3],
+                )
+                .await;
+
+                let mut sstable_iter = BackwardSstableIterator::create(
+                    sstable,
+                    sstable_store.clone(),
+                    Arc::new(SstableIteratorReadOptions::default()),
+                    &SstableInfo::from(SstableInfoInner {
+                        table_ids: vec![2],
+                        ..Default::default()
+                    }),
+                );
+                sstable_iter.rewind().await.unwrap();
+                assert!(sstable_iter.is_valid());
+                assert!(sstable_iter.key().eq(&k2.to_ref()));
+
+                let mut cnt = 0;
+                let mut last_key = k1.clone();
+                while sstable_iter.is_valid() {
+                    last_key = sstable_iter.key().to_vec();
+                    cnt += 1;
+                    sstable_iter.next().await.unwrap();
+                }
+
+                assert_eq!(1, cnt);
+                assert_eq!(last_key, k2.clone());
+            }
+        }
     }
 }
