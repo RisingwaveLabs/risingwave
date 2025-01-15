@@ -110,8 +110,6 @@ pub fn create_source_desc_builder(
         });
     }
 
-    telemetry_source_build(source_type, source_id, &source_info, &with_properties);
-
     SourceDescBuilder::new(
         source_columns.clone(),
         params.env.source_metrics(),

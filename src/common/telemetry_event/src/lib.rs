@@ -69,6 +69,12 @@ pub fn report_event_common(
     attributes: Option<jsonbb::Value>, // any json string
     node: String,
 ) {
+    // REMOVE ME: To find out all report_event calls
+    println!(
+        "report_event_common backtrace:\n{}",
+        std::backtrace::Backtrace::force_capture()
+    );
+
     let event_tracking_id: String;
     if let Some(tracking_id) = TELEMETRY_TRACKING_ID.get() {
         event_tracking_id = tracking_id.to_string();
@@ -90,7 +96,7 @@ pub fn report_event_common(
     );
 }
 
-pub fn request_to_telemetry_event(
+fn request_to_telemetry_event(
     tracking_id: String,
     event_stage: PbTelemetryEventStage,
     event_name: &str,

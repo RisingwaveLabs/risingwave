@@ -20,8 +20,8 @@ use std::env;
 
 use risingwave_pb::telemetry::PbTelemetryClusterType;
 pub use risingwave_telemetry_event::{
-    current_timestamp, post_telemetry_report_pb, report_event_common, request_to_telemetry_event,
-    TelemetryError, TelemetryResult,
+    current_timestamp, post_telemetry_report_pb, report_event_common, TelemetryError,
+    TelemetryResult,
 };
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
