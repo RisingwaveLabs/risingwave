@@ -172,6 +172,7 @@ impl HummockManager {
             );
         }
         let mut next_version_sst_ids = latest_valid_version_sst_ids;
+        let mut sst_ids_to_delete: HashSet<_> = HashSet::default();
         for prev_version_id in version_ids_to_delete {
             let prev_version = {
                 let prev_version = hummock_time_travel_version::Entity::find_by_id(prev_version_id)
@@ -189,20 +190,41 @@ impl HummockManager {
             };
             let sst_ids = prev_version.get_sst_ids();
             // The SST ids deleted by compaction between the 2 versions.
-            let sst_ids_to_delete = &sst_ids - &next_version_sst_ids;
+            sst_ids_to_delete.extend(&sst_ids - &next_version_sst_ids);
+            // Reuse hummock_time_travel_epoch_version_insert_batch_size as threshold.
+            if sst_ids_to_delete.len()
+                >= self
+                    .env
+                    .opts
+                    .hummock_time_travel_epoch_version_insert_batch_size
+            {
+                let res = hummock_sstable_info::Entity::delete_many()
+                    .filter(
+                        hummock_sstable_info::Column::SstId
+                            .is_in(std::mem::take(&mut sst_ids_to_delete)),
+                    )
+                    .exec(&txn)
+                    .await?;
+                tracing::debug!(
+                    "delete {} rows from hummock_sstable_info",
+                    res.rows_affected
+                );
+            }
+            let new_object_ids = prev_version.get_object_ids();
+            object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
+            next_version_sst_ids = sst_ids;
+        }
+        if !sst_ids_to_delete.is_empty() {
             let res = hummock_sstable_info::Entity::delete_many()
                 .filter(hummock_sstable_info::Column::SstId.is_in(sst_ids_to_delete))
                 .exec(&txn)
                 .await?;
-            let new_object_ids = prev_version.get_object_ids();
-            object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             tracing::debug!(
-                prev_version_id,
                 "delete {} rows from hummock_sstable_info",
                 res.rows_affected
             );
-            next_version_sst_ids = sst_ids;
         }
+
         if !object_ids_to_delete.is_empty() {
             // IMPORTANT: object_ids_to_delete may include objects that are still being used by SSTs not included in time travel metadata.
             // So it's crucial to filter out those objects before actually deleting them, i.e. when using `try_take_may_delete_object_ids`.
