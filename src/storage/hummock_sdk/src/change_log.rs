@@ -58,6 +58,10 @@ impl<T> TableChangeLogCommon<T> {
             .flat_map(|epoch_change_log| epoch_change_log.epochs.iter())
             .cloned()
     }
+
+    pub fn change_log_into_iter(self) -> impl Iterator<Item = EpochNewChangeLogCommon<T>> {
+        self.0.into_iter()
+    }
 }
 
 pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;

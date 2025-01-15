@@ -992,11 +992,15 @@ impl HummockVersionReader {
         key_range: TableKeyRange,
         options: ReadLogOptions,
     ) -> HummockResult<ChangeLogIterator> {
-        let change_log = if let Some(change_log) = version.table_change_log.get(&options.table_id) {
-            change_log.filter_epoch(epoch_range).collect_vec()
-        } else {
-            Vec::new()
+        let change_log = {
+            let table_change_logs = version.table_change_log().read();
+            if let Some(change_log) = table_change_logs.get(&options.table_id) {
+                change_log.filter_epoch(epoch_range).cloned().collect_vec()
+            } else {
+                Vec::new()
+            }
         };
+
         if let Some(max_epoch_change_log) = change_log.last() {
             let (_, max_epoch) = epoch_range;
             if !max_epoch_change_log.epochs.contains(&max_epoch) {

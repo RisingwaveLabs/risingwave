@@ -28,7 +28,7 @@ use crate::version::{
 };
 use crate::{CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
-pub type IncompleteHummockVersion = HummockVersionCommon<SstableIdInVersion>;
+pub type IncompleteHummockVersion = HummockVersionCommon<SstableIdInVersion, SstableIdInVersion>;
 
 /// Populates `SstableInfo` for `table_id`.
 /// `SstableInfo` not associated with `table_id` is removed.
@@ -159,7 +159,8 @@ fn rewrite_levels(mut levels: PbLevels, time_travel_table_ids: &HashSet<StateTab
 /// [`IncompleteHummockVersionDelta`] is incomplete because `SSTableInfo` only has the `sst_id` set in the following fields:
 /// - `PbGroupDeltas`
 /// - `ChangeLogDelta`
-pub type IncompleteHummockVersionDelta = HummockVersionDeltaCommon<SstableIdInVersion>;
+pub type IncompleteHummockVersionDelta =
+    HummockVersionDeltaCommon<SstableIdInVersion, SstableIdInVersion>;
 
 /// `SStableInfo` will be stripped.
 impl From<(&HummockVersionDelta, &HashSet<StateTableId>)> for IncompleteHummockVersionDelta {

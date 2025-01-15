@@ -36,7 +36,7 @@ use crate::level::{Level, LevelCommon, Levels, OverlappingLevel};
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
 use crate::version::{
-    GroupDelta, GroupDeltaCommon, HummockVersion, HummockVersionCommon, HummockVersionDelta,
+    GroupDelta, GroupDeltaCommon, HummockVersion, HummockVersionCommon, HummockVersionDeltaCommon,
     HummockVersionStateTableInfo, IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader,
     SstableIdReader,
 };
@@ -50,7 +50,7 @@ pub struct SstDeltaInfo {
 
 pub type BranchedSstInfo = HashMap<CompactionGroupId, Vec<HummockSstableId>>;
 
-impl HummockVersion {
+impl<L> HummockVersionCommon<SstableInfo, L> {
     pub fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
         self.levels
             .get(&compaction_group_id)
@@ -187,7 +187,7 @@ pub fn safe_epoch_read_table_watermarks_impl(
         .collect()
 }
 
-impl HummockVersion {
+impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
     pub fn count_new_ssts_in_group_split(
         &self,
         parent_group_id: CompactionGroupId,
@@ -356,7 +356,10 @@ impl HummockVersion {
             .all(|level| !level.table_infos.is_empty()));
     }
 
-    pub fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo> {
+    pub fn build_sst_delta_infos(
+        &self,
+        version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,
+    ) -> Vec<SstDeltaInfo> {
         let mut infos = vec![];
 
         // Skip trivial move delta for refiller
@@ -459,7 +462,10 @@ impl HummockVersion {
         infos
     }
 
-    pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
+    pub fn apply_version_delta(
+        &mut self,
+        version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,
+    ) {
         assert_eq!(self.id, version_delta.prev_id);
 
         let (changed_table_info, mut is_commit_epoch) = self.state_table_info.apply_delta(
@@ -930,16 +936,10 @@ impl HummockVersion {
     }
 }
 
-impl<T> HummockVersionCommon<T>
+impl<T> HummockVersionCommon<T, T>
 where
     T: SstableIdReader + ObjectIdReader,
 {
-    pub fn get_combined_levels(&self) -> impl Iterator<Item = &'_ LevelCommon<T>> + '_ {
-        self.levels
-            .values()
-            .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
-    }
-
     pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
         self.get_sst_infos().map(|s| s.object_id()).collect()
     }
@@ -1091,6 +1091,14 @@ impl Levels {
             }
         }
         sst_ids.is_empty()
+    }
+}
+
+impl<T, L> HummockVersionCommon<T, L> {
+    pub fn get_combined_levels(&self) -> impl Iterator<Item = &'_ LevelCommon<T>> + '_ {
+        self.levels
+            .values()
+            .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
     }
 }
 
