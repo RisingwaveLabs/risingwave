@@ -210,6 +210,7 @@ pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
 pub trait AnySplitEnumerator: Send {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>>;
     async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
+    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
 }
 
 #[async_trait]
@@ -222,6 +223,10 @@ impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
 
     async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
         SplitEnumerator::on_drop_fragments(self, _fragment_ids).await
+    }
+
+    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
+        SplitEnumerator::on_finish_backfill(self, _fragment_ids).await
     }
 }
 
