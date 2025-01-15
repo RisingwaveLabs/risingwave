@@ -69,7 +69,7 @@ pub(crate) mod tests {
         ConcatIterator, SkipWatermarkIterator, UserIterator,
     };
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
-    use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
+    use risingwave_storage::hummock::test_utils::{gen_test_sstable_info, StateStoreReadTestExt};
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
         BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, FilterBuilder,
