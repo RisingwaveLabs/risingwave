@@ -78,6 +78,7 @@ pub struct ElasticSearchOpenSearchConfig {
     #[serde(default = "default_concurrent_requests")]
     pub concurrent_requests: usize,
 
+    #[serde(default = "default_type")]
     pub r#type: String,
 }
 
@@ -95,6 +96,10 @@ fn default_batch_size_kb() -> usize {
 
 fn default_concurrent_requests() -> usize {
     1024
+}
+
+fn default_type() -> String {
+    "upsert".to_owned()
 }
 
 impl ElasticSearchOpenSearchConfig {
