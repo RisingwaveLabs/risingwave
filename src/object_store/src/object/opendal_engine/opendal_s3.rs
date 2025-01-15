@@ -108,7 +108,7 @@ impl OpendalObjectStore {
         if let Some(nodelay) = config.s3.nodelay.as_ref() {
             client_builder = client_builder.tcp_nodelay(*nodelay);
         }
-
+        #[allow(deprecated)]
         Ok(HttpClient::build(client_builder)?)
     }
 
