@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod consume_upstream;
-mod executor;
-mod state;
-mod utils;
-mod vnode_stream;
+use anyhow::anyhow;
+use tokio::sync::mpsc::UnboundedReceiver;
 
-pub use consume_upstream::UpstreamTableExecutor;
-pub use executor::SnapshotBackfillExecutor;
-use utils::*;
+use crate::executor::{Barrier, StreamExecutorResult};
+
+pub(super) async fn receive_next_barrier(
+    barrier_rx: &mut UnboundedReceiver<Barrier>,
+) -> StreamExecutorResult<Barrier> {
+    Ok(barrier_rx
+        .recv()
+        .await
+        .ok_or_else(|| anyhow!("end of barrier receiver"))?)
+}

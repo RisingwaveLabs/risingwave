@@ -97,6 +97,12 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
             ops,
         }
     }
+
+    pub(super) fn take_finished_vnodes(&mut self) -> HashMap<VirtualNode, usize> {
+        assert!(self.streams.is_empty());
+        assert!(self.data_chunk_builder.is_empty());
+        take(&mut self.finished_vnode)
+    }
 }
 
 impl<St: ChangeLogRowStream> VnodeStream<St> {
