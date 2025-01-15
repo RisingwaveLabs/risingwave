@@ -374,10 +374,6 @@ pub fn start(
                     .meta
                     .developer
                     .hummock_time_travel_sst_info_insert_batch_size,
-                hummock_delta_log_delete_batch_size: config
-                    .meta
-                    .developer
-                    .hummock_delta_log_delete_batch_size,
                 hummock_time_travel_epoch_version_insert_batch_size: config
                     .meta
                     .developer

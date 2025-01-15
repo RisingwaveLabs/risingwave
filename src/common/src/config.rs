@@ -533,9 +533,6 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::hummock_time_travel_sst_info_insert_batch_size")]
     pub hummock_time_travel_sst_info_insert_batch_size: usize,
 
-    #[serde(default = "default::developer::hummock_delta_log_delete_batch_size")]
-    pub hummock_delta_log_delete_batch_size: usize,
-
     #[serde(default = "default::developer::time_travel_vacuum_interval_sec")]
     pub time_travel_vacuum_interval_sec: u64,
 
@@ -2068,10 +2065,6 @@ pub mod default {
 
         pub fn hummock_time_travel_sst_info_insert_batch_size() -> usize {
             100
-        }
-
-        pub fn hummock_delta_log_delete_batch_size() -> usize {
-            512
         }
 
         pub fn time_travel_vacuum_interval_sec() -> u64 {

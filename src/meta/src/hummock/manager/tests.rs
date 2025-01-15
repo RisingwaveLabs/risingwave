@@ -566,23 +566,14 @@ async fn test_hummock_manager_basic() {
             init_version_id + commit_log_count + register_log_count,
         );
     }
-    assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        (0, 0)
-    );
+    assert_eq!(hummock_manager.delete_version_deltas().await.unwrap(), 0);
     assert_eq!(
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
         commit_log_count + register_log_count
     );
     assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        ((commit_log_count + register_log_count) as usize, 0)
+        hummock_manager.delete_version_deltas().await.unwrap(),
+        (commit_log_count + register_log_count) as usize
     );
     hummock_manager
         .unpin_version_before(context_id_1, HummockVersionId::MAX)
@@ -2563,7 +2554,7 @@ async fn test_vacuum() {
         hummock_manager.clone(),
         context_id,
     ));
-    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
+    assert_eq!(hummock_manager.delete_version_deltas().await.unwrap(), 0);
     hummock_manager.pin_version(context_id).await.unwrap();
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let sst_infos = add_test_tables(
@@ -2572,10 +2563,10 @@ async fn test_vacuum() {
         compaction_group_id,
     )
     .await;
-    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
+    assert_eq!(hummock_manager.delete_version_deltas().await.unwrap(), 0);
     hummock_manager.create_version_checkpoint(1).await.unwrap();
-    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 6);
-    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
+    assert_eq!(hummock_manager.delete_version_deltas().await.unwrap(), 6);
+    assert_eq!(hummock_manager.delete_version_deltas().await.unwrap(), 0);
 
     hummock_manager
         .unpin_version_before(context_id, HummockVersionId::MAX)
