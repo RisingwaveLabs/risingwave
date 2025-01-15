@@ -170,6 +170,7 @@ impl GlobalBarrierWorkerContextImpl {
                         }
                         background_jobs
                     };
+
                     tracing::info!("recovered mview progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
@@ -186,12 +187,39 @@ impl GlobalBarrierWorkerContextImpl {
                         background_streaming_jobs.len()
                     );
 
+                    let unreschedulable_jobs = {
+                        let mut unreschedulable_jobs = HashSet::new();
+
+                        for job_id in background_streaming_jobs {
+                            let scan_types = self
+                                .metadata_manager
+                                .get_job_backfill_scan_types(&job_id)
+                                .await?;
+
+                            if scan_types
+                                .values()
+                                .any(|scan_type| !scan_type.is_reschedulable())
+                            {
+                                unreschedulable_jobs.insert(job_id);
+                            }
+                        }
+
+                        unreschedulable_jobs
+                    };
+
+                    if !unreschedulable_jobs.is_empty() {
+                        tracing::info!(
+                            "unreschedulable background jobs: {:?}",
+                            unreschedulable_jobs
+                        );
+                    }
+
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     // FIXME: Transactions should be used.
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     let mut info = if !self.env.opts.disable_automatic_parallelism_control
-                        && background_streaming_jobs.is_empty()
+                        && unreschedulable_jobs.is_empty()
                     {
                         info!("trigger offline scaling");
                         self.scale_actors(&active_streaming_nodes)

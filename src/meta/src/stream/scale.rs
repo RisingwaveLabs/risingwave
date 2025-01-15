@@ -2265,6 +2265,24 @@ impl ScaleController {
 
         Ok(())
     }
+
+    pub async fn resolve_related_no_shuffle_jobs(
+        &self,
+        jobs: &[TableId],
+    ) -> MetaResult<HashSet<TableId>> {
+        let RescheduleWorkingSet { related_jobs, .. } = self
+            .metadata_manager
+            .catalog_controller
+            .resolve_working_set_for_reschedule_tables(
+                jobs.iter().map(|id| id.table_id as _).collect(),
+            )
+            .await?;
+
+        Ok(related_jobs
+            .keys()
+            .map(|id| TableId::new(*id as _))
+            .collect())
+    }
 }
 
 /// At present, for table level scaling, we use the strategy `TableResizePolicy`.
@@ -2357,23 +2375,31 @@ impl GlobalStreamManager {
     /// - `Ok(false)` if no jobs can be scaled;
     /// - `Ok(true)` if some jobs are scaled, and it is possible that there are more jobs can be scaled.
     async fn trigger_parallelism_control(&self) -> MetaResult<bool> {
+        tracing::info!("trigger parallelism control");
+
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+
         let background_streaming_jobs = self
             .metadata_manager
             .list_background_creating_jobs()
             .await?;
 
-        if !background_streaming_jobs.is_empty() {
-            tracing::debug!(
-                "skipping parallelism control due to background jobs {:?}",
-                background_streaming_jobs
+        let skipped_jobs = if !background_streaming_jobs.is_empty() {
+            let jobs = self
+                .scale_controller
+                .resolve_related_no_shuffle_jobs(&background_streaming_jobs)
+                .await?;
+
+            tracing::info!(
+                "skipping parallelism control of background jobs {:?} and associated jobs {:?}",
+                background_streaming_jobs,
+                jobs
             );
-            // skip if there are background creating jobs
-            return Ok(true);
-        }
 
-        tracing::info!("trigger parallelism control");
-
-        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+            jobs
+        } else {
+            HashSet::new()
+        };
 
         let table_parallelisms: HashMap<_, _> = {
             let streaming_parallelisms = self
@@ -2384,6 +2410,7 @@ impl GlobalStreamManager {
 
             streaming_parallelisms
                 .into_iter()
+                .filter(|(table_id, _)| !skipped_jobs.contains(&TableId::new(*table_id as _)))
                 .map(|(table_id, parallelism)| {
                     let table_parallelism = match parallelism {
                         StreamingParallelism::Adaptive => TableParallelism::Adaptive,

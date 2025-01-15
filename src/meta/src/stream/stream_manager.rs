@@ -596,6 +596,24 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
+        let background_jobs = self
+            .metadata_manager
+            .list_background_creating_jobs()
+            .await?;
+
+        if !background_jobs.is_empty() {
+            let related_jobs = self
+                .scale_controller
+                .resolve_related_no_shuffle_jobs(&background_jobs)
+                .await?;
+
+            for job in background_jobs {
+                if related_jobs.contains(&job) {
+                    bail!("Cannot alter the job {} because the related job {} is currently being created", table_id, job.table_id);
+                }
+            }
+        }
+
         let database_id = DatabaseId::new(
             self.metadata_manager
                 .catalog_controller

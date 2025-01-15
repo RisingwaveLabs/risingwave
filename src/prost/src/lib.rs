@@ -32,6 +32,7 @@ use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
+use crate::stream_plan::PbStreamScanType;
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -396,6 +397,19 @@ impl catalog::StreamSourceInfo {
     /// Refer to [`Self::cdc_source_job`] for details.
     pub fn is_shared(&self) -> bool {
         self.cdc_source_job
+    }
+}
+
+impl stream_plan::PbStreamScanType {
+    pub fn is_reschedulable(&self) -> bool {
+        match self {
+            // todo: should this be true?
+            PbStreamScanType::UpstreamOnly => false,
+            PbStreamScanType::ArrangementBackfill => true,
+            // todo: true when stable
+            PbStreamScanType::SnapshotBackfill => false,
+            _ => false,
+        }
     }
 }
 
