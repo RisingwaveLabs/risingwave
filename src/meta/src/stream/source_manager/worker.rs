@@ -70,7 +70,7 @@ pub async fn create_source_worker(
     let connector_properties = extract_prop_from_new_source(source)?;
     let enable_scale_in = connector_properties.enable_drop_split();
     let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
-    let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = {
         let mut worker = ConnectorSourceWorker::create(
             source,
@@ -95,11 +95,11 @@ pub async fn create_source_worker(
                 )
             })??;
 
-        tokio::spawn(async move { worker.run(sync_call_rx).await })
+        tokio::spawn(async move { worker.run(command_rx).await })
     };
     Ok(ConnectorSourceWorkerHandle {
         handle,
-        sync_call_tx,
+        command_tx,
         splits,
         enable_drop_split: enable_scale_in,
         enable_adaptive_splits,
@@ -122,7 +122,7 @@ pub fn create_source_worker_async(
 
     let enable_drop_split = connector_properties.enable_drop_split();
     let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
-    let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = tokio::spawn(async move {
         let mut ticker = time::interval(DEFAULT_SOURCE_WORKER_TICK_INTERVAL);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -148,14 +148,14 @@ pub fn create_source_worker_async(
             }
         };
 
-        worker.run(sync_call_rx).await
+        worker.run(command_rx).await
     });
 
     managed_sources.insert(
         source_id as SourceId,
         ConnectorSourceWorkerHandle {
             handle,
-            sync_call_tx,
+            command_tx,
             splits,
             enable_drop_split,
             enable_adaptive_splits,
@@ -223,18 +223,28 @@ impl ConnectorSourceWorker {
         })
     }
 
-    pub async fn run(
-        &mut self,
-        mut sync_call_rx: UnboundedReceiver<oneshot::Sender<MetaResult<()>>>,
-    ) {
+    pub async fn run(&mut self, mut command_rx: UnboundedReceiver<SourceWorkerCommand>) {
         let mut interval = time::interval(self.period);
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             select! {
                 biased;
-                tx = sync_call_rx.borrow_mut().recv() => {
-                    if let Some(tx) = tx {
-                        let _ = tx.send(self.tick().await);
+                cmd = command_rx.borrow_mut().recv() => {
+                    if let Some(cmd) = cmd {
+                        match cmd {
+                            SourceWorkerCommand::Tick(tx) => {
+                                let _ = tx.send(self.tick().await);
+                            }
+                            SourceWorkerCommand::DropFragments(fragment_ids) => {
+                                if let Err(e) = self.drop_fragments(fragment_ids).await {
+                                    // when error happens, we just log it and ignore
+                                    tracing::warn!(error = %e.as_report(), "error happened when drop fragment");
+                                }
+                            }
+                            SourceWorkerCommand::Terminate => {
+                                return;
+                            }
+                        }
                     }
                 }
                 _ = interval.tick() => {
@@ -272,12 +282,18 @@ impl ConnectorSourceWorker {
 
         Ok(())
     }
+
+    async fn drop_fragments(&mut self, fragment_ids: Vec<FragmentId>) -> MetaResult<()> {
+        self.enumerator.on_drop_fragments(fragment_ids).await?;
+        Ok(())
+    }
 }
 
 /// Handle for a running [`ConnectorSourceWorker`].
 pub struct ConnectorSourceWorkerHandle {
-    pub handle: JoinHandle<()>,
-    pub sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
+    #[expect(dead_code)]
+    handle: JoinHandle<()>,
+    command_tx: UnboundedSender<SourceWorkerCommand>,
     pub splits: SharedSplitMapRef,
     pub enable_drop_split: bool,
     pub enable_adaptive_splits: bool,
@@ -293,6 +309,7 @@ impl ConnectorSourceWorkerHandle {
         source_id: SourceId,
         actors: &HashSet<ActorId>,
     ) -> MetaResult<BTreeMap<Arc<str>, SplitImpl>> {
+        // XXX: when is this None? Can we remove the Option?
         let Some(mut discovered_splits) = self.splits.lock().await.splits.clone() else {
             tracing::info!(
                 "The discover loop for source {} is not ready yet; we'll wait for the next run",
@@ -317,4 +334,50 @@ impl ConnectorSourceWorkerHandle {
 
         Ok(discovered_splits)
     }
+
+    fn send_command(&self, command: SourceWorkerCommand) -> MetaResult<()> {
+        let cmd_str = format!("{:?}", command);
+        self.command_tx
+            .send(command)
+            .with_context(|| format!("failed to send {cmd_str} command to source worker"))?;
+        Ok(())
+    }
+
+    /// Force [`ConnectorSourceWorker::tick()`] to be called.
+    pub async fn force_tick(&self) -> MetaResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send_command(SourceWorkerCommand::Tick(tx))?;
+        rx.await
+            .context("failed to receive tick command response from source worker")?
+            .context("source worker tick failed")?;
+        Ok(())
+    }
+
+    pub fn drop_fragments(&self, fragment_ids: Vec<FragmentId>) {
+        if let Err(e) = self.send_command(SourceWorkerCommand::DropFragments(fragment_ids)) {
+            // ignore drop fragment error, just log it
+            tracing::warn!(error = %e.as_report(), "failed to drop fragments");
+        }
+    }
+
+    pub fn terminate(&self, dropped_fragments: Option<BTreeSet<FragmentId>>) {
+        if let Some(dropped_fragments) = dropped_fragments {
+            self.drop_fragments(dropped_fragments.into_iter().collect());
+        }
+        if let Err(e) = self.send_command(SourceWorkerCommand::Terminate) {
+            // ignore terminate error, just log it
+            tracing::warn!(error = %e.as_report(), "failed to terminate source worker");
+        }
+    }
+}
+
+#[derive(educe::Educe)]
+#[educe(Debug)]
+pub enum SourceWorkerCommand {
+    /// Sync command to force [`ConnectorSourceWorker::tick()`] to be called.
+    Tick(#[educe(Debug(ignore))] oneshot::Sender<MetaResult<()>>),
+    /// Async command to drop a fragment.
+    DropFragments(Vec<FragmentId>),
+    /// Terminate the worker task.
+    Terminate,
 }

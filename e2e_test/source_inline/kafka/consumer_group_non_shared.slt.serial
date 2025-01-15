@@ -1,0 +1,126 @@
+control substitution on
+
+statement ok
+SET streaming_use_shared_source TO false;
+
+# Note either `./risedev rpk` or `rpk` is ok here.
+# risedev-env contains env var RPK_BROKERS, which is read by rpk
+system ok
+rpk topic create test_consumer_group_non_shared -p 3
+
+system ok
+cat <<EOF | rpk topic produce test_consumer_group_non_shared -f "%p %v\\n" -p 0
+0 {"x":"a"}
+1 {"x":"b"}
+2 {"x":"c"}
+EOF
+
+# custom group id prefix
+statement ok
+CREATE SOURCE s(x varchar)
+WITH(
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_consumer_group_non_shared',
+    scan.startup.mode = 'earliest',
+    group.id.prefix = 'my_group_non_shared'
+) FORMAT PLAIN ENCODE JSON;
+
+
+statement ok
+CREATE MATERIALIZED VIEW mv AS SELECT * from s;
+
+query ?
+SELECT * FROM s order by x;
+----
+a
+b
+c
+
+sleep 2s
+
+query ?
+SELECT * FROM mv order by x;
+----
+a
+b
+c
+
+
+# There are 2 consumer groups, 1 for batch query (not listed below), 1 for MV.
+# All of them are "Empty" state with 0 members, because we manually `assign` partitions to them.
+# At the beginning, the MV's consumer group will not occur. They will be created after committing offset to Kafka.
+# (enable.auto.commit defaults to true, and auto.commit.interval.ms defaults to 5s)
+sleep 5s
+
+system ok
+./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv list-members
+----
+0
+
+
+# The lag for MV's group is 0.
+system ok
+./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv list-lags
+----
+0
+
+
+# We try to interfere by creating consumers that subscribing to the topic with the RW's group id.
+system ok
+./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv list-groups | tr ',' '\\n' | xargs -P4 -I {} sh -c "rpk topic consume test_consumer_group_non_shared -g {}" &
+
+# Wait a while for them to subscribe to the topic.
+sleep 15s
+
+
+system ok
+cat <<EOF | rpk topic produce test_consumer_group_non_shared -f "%p %v\\n" -p 0
+0 {"x":"d"}
+1 {"x":"e"}
+2 {"x":"f"}
+EOF
+
+sleep 2s
+
+# Verify that RisingWave's Kafka consumer works independently from the console consumers subscribing to the same group.
+query ?
+SELECT * FROM mv order by x;
+----
+a
+b
+c
+d
+e
+f
+
+
+system ok
+pkill rpk
+
+# Test delete consumer group on drop
+
+# my_group_non_shared: 1 source fragment, 1 batch query
+# We only check my_group_non_shared to avoid interfering with other tests.
+system ok retry 3 backoff 5s
+./e2e_test/source_inline/kafka/consumer_group.mjs count-groups | grep my_group_non_shared
+----
+my_group_non_shared: 2
+
+
+statement ok
+DROP MATERIALIZED VIEW mv;
+
+sleep 1s
+
+system ok retry 3 backoff 5s
+./e2e_test/source_inline/kafka/consumer_group.mjs count-groups | grep my_group_non_shared
+----
+my_group_non_shared: 1
+
+
+
+statement ok
+DROP SOURCE s CASCADE;
+
+system ok
+rpk topic delete test_consumer_group_non_shared
