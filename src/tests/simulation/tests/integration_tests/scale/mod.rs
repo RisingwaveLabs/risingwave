@@ -19,6 +19,7 @@ mod nexmark_chaos;
 mod nexmark_q4;
 mod nexmark_source;
 mod no_shuffle;
+mod resource_group;
 mod schedulability;
 mod shared_source;
 mod singleton_migration;

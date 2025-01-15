@@ -18,6 +18,7 @@ use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
@@ -26,14 +27,16 @@ use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
-    view, ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId,
-    PrivilegeId, SchemaId, SourceId, StreamNode, TableId, UserId, VnodeBitmap, WorkerId,
+    object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
+    user_privilege, view, ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId,
+    I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, TableId, UserId, VnodeBitmap,
+    WorkerId,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
     PbConnection, PbFunction, PbIndex, PbSecret, PbSink, PbSource, PbSubscription, PbTable, PbView,
 };
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
 use risingwave_pb::meta::{
@@ -1295,6 +1298,61 @@ pub async fn rename_relation(
     };
 
     Ok((to_update_relations, old_name))
+}
+
+pub async fn get_database_resource_group<C>(txn: &C, database_id: ObjectId) -> MetaResult<String>
+where
+    C: ConnectionTrait,
+{
+    let database_resource_group: Option<String> = Database::find_by_id(database_id)
+        .select_only()
+        .column(database::Column::ResourceGroup)
+        .into_tuple()
+        .one(txn)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
+
+    Ok(database_resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned()))
+}
+
+pub async fn get_existing_job_resource_group<C>(
+    txn: &C,
+    streaming_job_id: ObjectId,
+) -> MetaResult<String>
+where
+    C: ConnectionTrait,
+{
+    let (job_specific_resource_group, database_resource_group): (Option<String>, Option<String>) =
+        StreamingJob::find_by_id(streaming_job_id)
+            .select_only()
+            .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
+            .column(streaming_job::Column::SpecificResourceGroup)
+            .column(database::Column::ResourceGroup)
+            .into_tuple()
+            .one(txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
+
+    Ok(job_specific_resource_group.unwrap_or_else(|| {
+        database_resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned())
+    }))
+}
+
+pub fn filter_workers_by_resource_group(
+    workers: &HashMap<u32, WorkerNode>,
+    resource_group: &str,
+) -> BTreeSet<WorkerId> {
+    workers
+        .iter()
+        .filter(|&(_, worker)| {
+            worker
+                .resource_group()
+                .map(|node_label| node_label.as_str() == resource_group)
+                .unwrap_or(false)
+        })
+        .map(|(id, _)| (*id as WorkerId))
+        .collect()
 }
 
 /// `rename_relation_refer` updates the definition of relations that refer to the target one,

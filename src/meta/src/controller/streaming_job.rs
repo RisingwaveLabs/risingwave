@@ -74,7 +74,7 @@ use crate::controller::utils::{
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
-use crate::stream::SplitAssignment;
+use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
@@ -88,6 +88,7 @@ impl CatalogController {
         ctx: &StreamContext,
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
+        specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
     ) -> MetaResult<ObjectId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job = streaming_job::ActiveModel {
@@ -97,6 +98,7 @@ impl CatalogController {
             timezone: Set(ctx.timezone.clone()),
             parallelism: Set(streaming_parallelism),
             max_parallelism: Set(max_parallelism as _),
+            specific_resource_group: Set(specific_resource_group),
         };
         job.insert(txn).await?;
 
@@ -115,6 +117,7 @@ impl CatalogController {
         parallelism: &Option<Parallelism>,
         max_parallelism: usize,
         mut dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -191,6 +194,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    specific_resource_group,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -224,6 +228,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    specific_resource_group,
                 )
                 .await?;
                 sink.id = job_id as _;
@@ -241,6 +246,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    specific_resource_group,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -277,6 +283,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    specific_resource_group,
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -308,6 +315,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    specific_resource_group,
                 )
                 .await?;
                 src.id = job_id as _;
@@ -756,6 +764,7 @@ impl CatalogController {
             ctx,
             parallelism,
             max_parallelism,
+            None,
         )
         .await?;
 
@@ -1573,10 +1582,7 @@ impl CatalogController {
     pub async fn post_apply_reschedules(
         &self,
         reschedules: HashMap<FragmentId, Reschedule>,
-        table_parallelism_assignment: HashMap<
-            risingwave_common::catalog::TableId,
-            TableParallelism,
-        >,
+        post_updates: &JobReschedulePostUpdates,
     ) -> MetaResult<()> {
         fn update_actors(
             actors: &mut Vec<ActorId>,
@@ -1873,7 +1879,12 @@ impl CatalogController {
             }
         }
 
-        for (table_id, parallelism) in table_parallelism_assignment {
+        let JobReschedulePostUpdates {
+            parallelism_updates,
+            resource_group_updates,
+        } = post_updates;
+
+        for (table_id, parallelism) in parallelism_updates {
             let mut streaming_job = StreamingJobModel::find_by_id(table_id.table_id() as ObjectId)
                 .one(&txn)
                 .await?
@@ -1882,9 +1893,15 @@ impl CatalogController {
 
             streaming_job.parallelism = Set(match parallelism {
                 TableParallelism::Adaptive => StreamingParallelism::Adaptive,
-                TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n as _),
+                TableParallelism::Fixed(n) => StreamingParallelism::Fixed(*n as _),
                 TableParallelism::Custom => StreamingParallelism::Custom,
             });
+
+            if let Some(resource_group) =
+                resource_group_updates.get(&(table_id.table_id() as ObjectId))
+            {
+                streaming_job.specific_resource_group = Set(resource_group.to_owned());
+            }
 
             streaming_job.update(&txn).await?;
         }

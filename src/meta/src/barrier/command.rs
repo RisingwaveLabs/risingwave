@@ -49,8 +49,10 @@ use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
-use crate::model::{ActorId, DispatcherId, FragmentId, StreamJobFragments, TableParallelism};
-use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
+use crate::model::{ActorId, DispatcherId, FragmentId, StreamJobFragments};
+use crate::stream::{
+    build_actor_connector_splits, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
+};
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
 /// in some fragment, like scaling or migrating.
@@ -300,9 +302,10 @@ pub enum Command {
     /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
     RescheduleFragment {
         reschedules: HashMap<FragmentId, Reschedule>,
-        table_parallelism: HashMap<TableId, TableParallelism>,
-        // should contain the actor ids in upstream and downstream fragment of `reschedules`
+        // Should contain the actor ids in upstream and downstream fragment of `reschedules`
         fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
+        // Used for updating additional metadata after the barrier ends
+        post_updates: JobReschedulePostUpdates,
     },
 
     /// `ReplaceStreamJob` command generates a `Update` barrier with the given `merge_updates`. This is

@@ -65,7 +65,12 @@ impl CatalogReader {
 /// [observer](`crate::observer::FrontendObserverNode`).
 #[async_trait::async_trait]
 pub trait CatalogWriter: Send + Sync {
-    async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()>;
+    async fn create_database(
+        &self,
+        db_name: &str,
+        owner: UserId,
+        resource_group: &str,
+    ) -> Result<()>;
 
     async fn create_schema(
         &self,
@@ -81,6 +86,7 @@ pub trait CatalogWriter: Send + Sync {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> Result<()>;
 
     async fn create_table(
@@ -214,6 +220,13 @@ pub trait CatalogWriter: Send + Sync {
         deferred: bool,
     ) -> Result<()>;
 
+    async fn alter_resource_group(
+        &self,
+        table_id: u32,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()>;
+
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
@@ -232,13 +245,19 @@ pub struct CatalogWriterImpl {
 
 #[async_trait::async_trait]
 impl CatalogWriter for CatalogWriterImpl {
-    async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
+    async fn create_database(
+        &self,
+        db_name: &str,
+        owner: UserId,
+        resource_group: &str,
+    ) -> Result<()> {
         let version = self
             .meta_client
             .create_database(PbDatabase {
                 name: db_name.to_owned(),
                 id: 0,
                 owner,
+                resource_group: resource_group.to_owned(),
             })
             .await?;
         self.wait_version(version).await
@@ -268,11 +287,12 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
-            .create_materialized_view(table, graph, dependencies)
+            .create_materialized_view(table, graph, dependencies, specific_resource_group)
             .await?;
         if matches!(create_type, PbCreateType::Foreground) {
             self.wait_version(version).await?
@@ -578,6 +598,20 @@ impl CatalogWriter for CatalogWriterImpl {
             )
             .await?;
         self.wait_version(version).await
+    }
+
+    async fn alter_resource_group(
+        &self,
+        table_id: u32,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()> {
+        self.meta_client
+            .alter_resource_group(table_id, resource_group, deferred)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
+        Ok(())
     }
 }
 

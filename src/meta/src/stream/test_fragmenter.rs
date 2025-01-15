@@ -19,6 +19,7 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{
@@ -425,12 +426,13 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 }
 
 fn make_cluster_info() -> StreamingClusterInfo {
-    let worker_nodes = std::iter::once((
+    let worker_nodes: HashMap<u32, WorkerNode> = std::iter::once((
         0,
         WorkerNode {
             id: 0,
             property: Some(Property {
                 parallelism: 8,
+                resource_group: Some(DEFAULT_RESOURCE_GROUP.to_owned()),
                 ..Default::default()
             }),
             r#type: WorkerType::ComputeNode.into(),
@@ -438,8 +440,12 @@ fn make_cluster_info() -> StreamingClusterInfo {
         },
     ))
     .collect();
+
+    let schedulable_workers = worker_nodes.keys().cloned().collect();
+
     StreamingClusterInfo {
         worker_nodes,
+        schedulable_workers,
         unschedulable_workers: Default::default(),
     }
 }
@@ -460,6 +466,7 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let actor_graph_builder = ActorGraphBuilder::new(
         job.id(),
+        DEFAULT_RESOURCE_GROUP.to_owned(),
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),

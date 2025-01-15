@@ -524,6 +524,7 @@ message Database {
   uint32 id = 1;
   string name = 2;
   uint32 owner = 3;
+  string resource_group = 4;
 }
 
 message Comment {

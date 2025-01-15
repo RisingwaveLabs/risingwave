@@ -152,6 +152,12 @@ pub enum AlterViewOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET RESOURCE_GROUP TO 'RESOURCE GROUP' [ DEFERRED ]`
+    /// `RESET RESOURCE_GROUP [ DEFERRED ]`
+    SetResourceGroup {
+        resource_group: Option<SetVariableValue>,
+        deferred: bool,
+    },
     /// `SET BACKFILL_RATE_LIMIT TO <rate_limit>`
     SetBackfillRateLimit {
         rate_limit: i32,
@@ -391,6 +397,18 @@ impl fmt::Display for AlterViewOperation {
             }
             AlterViewOperation::SwapRenameView { target_view } => {
                 write!(f, "SWAP WITH {}", target_view)
+            }
+            AlterViewOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                let deferred = if *deferred { " DEFERRED" } else { "" };
+
+                if let Some(resource_group) = resource_group {
+                    write!(f, "SET RESOURCE_GROUP TO {} {}", resource_group, deferred)
+                } else {
+                    write!(f, "RESET RESOURCE_GROUP {}", deferred)
+                }
             }
         }
     }

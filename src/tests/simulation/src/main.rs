@@ -168,6 +168,7 @@ async fn main() {
         } else {
             vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".to_owned()].into()
         },
+        compute_resource_groups: Default::default(),
     };
     let kill_opts = KillOpts {
         kill_meta: false,

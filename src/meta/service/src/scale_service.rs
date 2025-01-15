@@ -15,7 +15,10 @@
 use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
-use risingwave_meta::stream::{RescheduleOptions, ScaleControllerRef, WorkerReschedule};
+use risingwave_meta::stream::{
+    JobReschedulePlan, JobReschedulePostUpdates, RescheduleOptions, ScaleControllerRef,
+    WorkerReschedule,
+};
 use risingwave_meta_model::FragmentId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
@@ -142,26 +145,31 @@ impl ScaleService for ScaleServiceImpl {
             self.stream_manager
                 .reschedule_actors(
                     database_id,
-                    worker_reschedules
-                        .into_iter()
-                        .map(|(fragment_id, reschedule)| {
-                            let PbWorkerReschedule { worker_actor_diff } = reschedule;
-                            (
-                                fragment_id,
-                                WorkerReschedule {
-                                    worker_actor_diff: worker_actor_diff
-                                        .into_iter()
-                                        .map(|(worker_id, diff)| (worker_id as _, diff as _))
-                                        .collect(),
-                                },
-                            )
-                        })
-                        .collect(),
+                    JobReschedulePlan {
+                        reschedules: worker_reschedules
+                            .into_iter()
+                            .map(|(fragment_id, reschedule)| {
+                                let PbWorkerReschedule { worker_actor_diff } = reschedule;
+                                (
+                                    fragment_id,
+                                    WorkerReschedule {
+                                        worker_actor_diff: worker_actor_diff
+                                            .into_iter()
+                                            .map(|(worker_id, diff)| (worker_id as _, diff as _))
+                                            .collect(),
+                                    },
+                                )
+                            })
+                            .collect(),
+                        post_updates: JobReschedulePostUpdates {
+                            parallelism_updates: table_parallelisms,
+                            resource_group_updates: Default::default(),
+                        },
+                    },
                     RescheduleOptions {
                         resolve_no_shuffle_upstream,
                         skip_create_new_actors: false,
                     },
-                    Some(table_parallelisms),
                 )
                 .await?;
         }

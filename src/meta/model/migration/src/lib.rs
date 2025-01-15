@@ -24,12 +24,12 @@ mod m20240820_081248_add_time_travel_per_table_epoch;
 mod m20240911_083152_variable_vnode_count;
 mod m20241001_013810_webhook_source;
 mod m20241016_065621_hummock_gc_history;
-mod m20241022_072553_node_label;
 mod m20241025_062548_singleton_vnode_count;
 mod m20241115_085007_remove_function_type;
 mod m20241120_182555_hummock_add_time_travel_sst_index;
 mod m20241121_101830_table_engine;
 mod m20241125_043732_connection_params;
+mod m20241202_071413_resource_group;
 mod m20241226_074013_clean_watermark_index_in_pk;
 mod utils;
 
@@ -93,12 +93,12 @@ impl MigratorTrait for Migrator {
             Box::new(m20240911_083152_variable_vnode_count::Migration),
             Box::new(m20241001_013810_webhook_source::Migration),
             Box::new(m20241016_065621_hummock_gc_history::Migration),
-            Box::new(m20241022_072553_node_label::Migration),
             Box::new(m20241025_062548_singleton_vnode_count::Migration),
             Box::new(m20241115_085007_remove_function_type::Migration),
             Box::new(m20241120_182555_hummock_add_time_travel_sst_index::Migration),
-            Box::new(m20241121_101830_table_engine::Migration),
             Box::new(m20241125_043732_connection_params::Migration),
+            Box::new(m20241121_101830_table_engine::Migration),
+            Box::new(m20241202_071413_resource_group::Migration),
             Box::new(m20241226_074013_clean_watermark_index_in_pk::Migration),
         ]
     }

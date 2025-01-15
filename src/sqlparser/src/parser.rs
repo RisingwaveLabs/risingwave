@@ -3420,12 +3420,37 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::RESOURCE_GROUP) && materialized {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self
+                        .expected("TO or = after ALTER MATERIALIZED VIEW SET RESOURCE_GROUP");
+                }
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterViewOperation::SetResourceGroup {
+                    resource_group: Some(value),
+                    deferred,
+                }
             } else if materialized
                 && let Some(rate_limit) = self.parse_alter_backfill_rate_limit()?
             {
                 AlterViewOperation::SetBackfillRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT after SET");
+            }
+        } else if self.parse_keyword(Keyword::RESET) {
+            if self.parse_keyword(Keyword::RESOURCE_GROUP) && materialized {
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterViewOperation::SetResourceGroup {
+                    resource_group: None,
+                    deferred,
+                }
+            } else {
+                return self.expected("RESOURCE_GROUP after RESET");
             }
         } else {
             return self.expected(&format!(

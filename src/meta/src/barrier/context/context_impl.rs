@@ -270,12 +270,12 @@ impl CommandContext {
             }
             Command::RescheduleFragment {
                 reschedules,
-                table_parallelism,
+                post_updates,
                 ..
             } => {
                 barrier_manager_context
                     .scale_controller
-                    .post_apply_reschedule(reschedules, table_parallelism)
+                    .post_apply_reschedule(reschedules, post_updates)
                     .await?;
             }
 

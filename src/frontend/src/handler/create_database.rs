@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -73,7 +74,8 @@ pub async fn handle_create_database(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_database(&database_name, database_owner)
+        // TODO: add support for create database with resource_group
+        .create_database(&database_name, database_owner, DEFAULT_RESOURCE_GROUP)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))

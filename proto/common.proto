@@ -56,11 +56,14 @@ message WorkerNode {
     bool is_unschedulable = 3;
     // This is used for frontend node to register its rpc address
     string internal_rpc_host_addr = 4;
-    // Meta may assign labels to worker nodes to partition workload by label.
-    // This is used for serverless backfilling of materialized views.
-    optional string node_label = 5;
+
+    reserved 5;
+    reserved "node_label";
 
     uint32 parallelism = 6;
+
+    // resource group for scheduling
+    optional string resource_group = 7;
   }
   message Resource {
     string rw_version = 1;

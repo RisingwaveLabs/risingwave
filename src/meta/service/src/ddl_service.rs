@@ -24,7 +24,9 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
+use risingwave_meta::model::TableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
+use risingwave_meta::stream::{JobParallelismTarget, JobRescheduleTarget, JobResourceGroupTarget};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, CreateType, Secret, Table};
@@ -272,6 +274,7 @@ impl DdlService for DdlServiceImpl {
                         CreateType::Foreground,
                         None,
                         HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSource`
+                        None,
                     ))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -339,6 +342,7 @@ impl DdlService for DdlServiceImpl {
             CreateType::Foreground,
             affected_table_change,
             dependencies,
+            None,
         );
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -423,6 +427,7 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
         let mview = req.get_materialized_view()?.clone();
         let create_type = mview.get_create_type().unwrap_or(CreateType::Foreground);
+        let specific_resource_group = req.specific_resource_group.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let dependencies = req
             .get_dependencies()
@@ -439,6 +444,7 @@ impl DdlService for DdlServiceImpl {
                 create_type,
                 None,
                 dependencies,
+                specific_resource_group,
             ))
             .await?;
 
@@ -493,6 +499,7 @@ impl DdlService for DdlServiceImpl {
                 CreateType::Foreground,
                 None,
                 HashSet::new(),
+                None,
             ))
             .await?;
 
@@ -580,6 +587,7 @@ impl DdlService for DdlServiceImpl {
                 CreateType::Foreground,
                 None,
                 HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbTable`
+                None,
             ))
             .await?;
 
@@ -895,9 +903,15 @@ impl DdlService for DdlServiceImpl {
         let table_id = req.get_table_id();
         let parallelism = *req.get_parallelism()?;
         let deferred = req.get_deferred();
-
         self.ddl_controller
-            .alter_parallelism(table_id, parallelism, deferred)
+            .reschedule_streaming_job(
+                table_id,
+                JobRescheduleTarget {
+                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
+                    resource_group: JobResourceGroupTarget::Keep,
+                },
+                deferred,
+            )
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))
@@ -1122,6 +1136,30 @@ impl DdlService for DdlServiceImpl {
             status: None,
             version,
         }))
+    }
+
+    async fn alter_resource_group(
+        &self,
+        request: Request<AlterResourceGroupRequest>,
+    ) -> Result<Response<AlterResourceGroupResponse>, Status> {
+        let req = request.into_inner();
+
+        let table_id = req.get_table_id();
+        let deferred = req.get_deferred();
+        let resource_group = req.resource_group;
+
+        self.ddl_controller
+            .reschedule_streaming_job(
+                table_id,
+                JobRescheduleTarget {
+                    parallelism: JobParallelismTarget::Refresh,
+                    resource_group: JobResourceGroupTarget::Update(resource_group),
+                },
+                deferred,
+            )
+            .await?;
+
+        Ok(Response::new(AlterResourceGroupResponse {}))
     }
 }
 

@@ -27,6 +27,7 @@ impl CatalogController {
         let active_model = database::ActiveModel {
             database_id: Set(database_id),
             name: Set(name.to_owned()),
+            ..Default::default()
         };
         let database = active_model.update(&txn).await?;
 

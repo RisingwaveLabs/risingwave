@@ -322,7 +322,7 @@ redundant_explicit_links = "allow"
 lto = "off"
 # use parallel frontend to speed up build
 # TODO: may consider applying to release/production profile as well
-rustflags = ["-Z", "threads=8"]
+#rustflags = ["-Z", "threads=8"]
 
 [profile.release]
 debug = "full"

@@ -432,6 +432,8 @@ define_keywords!(
     REPAIR,
     REPEATABLE,
     REPLACE,
+    RESET,
+    RESOURCE_GROUP,
     RESTRICT,
     RESULT,
     RETURN,

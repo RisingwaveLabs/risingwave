@@ -20,7 +20,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node};
 use risingwave_connector::source::SplitImpl;
-use risingwave_meta_model::{SourceId, WorkerId};
+use risingwave_meta_model::{SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -81,6 +81,26 @@ impl From<TableParallelism> for PbTableParallelism {
 
         Self {
             parallelism: Some(parallelism),
+        }
+    }
+}
+
+impl From<StreamingParallelism> for TableParallelism {
+    fn from(value: StreamingParallelism) -> Self {
+        match value {
+            StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+            StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+            StreamingParallelism::Custom => TableParallelism::Custom,
+        }
+    }
+}
+
+impl From<TableParallelism> for StreamingParallelism {
+    fn from(value: TableParallelism) -> Self {
+        match value {
+            TableParallelism::Adaptive => StreamingParallelism::Adaptive,
+            TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n),
+            TableParallelism::Custom => StreamingParallelism::Custom,
         }
     }
 }

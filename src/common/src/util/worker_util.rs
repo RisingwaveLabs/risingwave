@@ -14,4 +14,4 @@
 
 pub type WorkerNodeId = u32;
 
-pub const DEFAULT_COMPUTE_NODE_LABEL: &str = "default";
+pub const DEFAULT_RESOURCE_GROUP: &str = "default";

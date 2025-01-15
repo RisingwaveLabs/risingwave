@@ -143,6 +143,9 @@ message CreateMaterializedViewRequest {
 
   // The list of object IDs that this materialized view depends on.
   repeated uint32 dependencies = 4;
+
+  // The specific resource group to use for the materialized view. If not set, the database resource group is used.
+  optional string specific_resource_group = 5;
 }
 
 message CreateMaterializedViewResponse {
@@ -269,6 +272,14 @@ message AlterParallelismRequest {
 }
 
 message AlterParallelismResponse {}
+
+message AlterResourceGroupRequest {
+  uint32 table_id = 1;
+  optional string resource_group = 2;
+  bool deferred = 3;
+}
+
+message AlterResourceGroupResponse {}
 
 message AlterOwnerResponse {
   common.Status status = 1;
@@ -549,6 +560,7 @@ service DdlService {
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
   rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
   rpc AlterParallelism(AlterParallelismRequest) returns (AlterParallelismResponse);
+  rpc AlterResourceGroup(AlterResourceGroupRequest) returns (AlterResourceGroupResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);

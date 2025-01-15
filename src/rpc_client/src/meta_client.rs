@@ -396,12 +396,14 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             backfill: PbBackfillType::Regular as _,
             dependencies: dependencies.into_iter().collect(),
+            specific_resource_group,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -577,6 +579,22 @@ impl MetaClient {
         };
 
         self.inner.alter_parallelism(request).await?;
+        Ok(())
+    }
+
+    pub async fn alter_resource_group(
+        &self,
+        table_id: u32,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()> {
+        let request = AlterResourceGroupRequest {
+            table_id,
+            resource_group,
+            deferred,
+        };
+
+        self.inner.alter_resource_group(request).await?;
         Ok(())
     }
 
@@ -2091,6 +2109,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }

@@ -39,6 +39,7 @@ use sea_orm::{
 };
 
 use crate::controller::catalog::CatalogController;
+use crate::controller::utils::get_existing_job_resource_group;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find `no_shuffle` upstream relation graph for target fragments.
@@ -167,6 +168,7 @@ pub struct RescheduleWorkingSet {
     pub fragment_downstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
     pub fragment_upstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
 
+    pub job_resource_groups: HashMap<ObjectId, String>,
     pub related_jobs: HashMap<ObjectId, (streaming_job::Model, String)>,
 }
 
@@ -402,6 +404,12 @@ impl CatalogController {
         let related_job_ids: HashSet<_> =
             fragments.values().map(|fragment| fragment.job_id).collect();
 
+        let mut job_resource_groups = HashMap::new();
+        for &job_id in &related_job_ids {
+            let resource_group = get_existing_job_resource_group(txn, job_id).await?;
+            job_resource_groups.insert(job_id, resource_group);
+        }
+
         let related_job_definitions =
             resolve_streaming_job_definition(txn, &related_job_ids).await?;
 
@@ -433,6 +441,7 @@ impl CatalogController {
             actor_dispatchers,
             fragment_downstreams,
             fragment_upstreams,
+            job_resource_groups,
             related_jobs,
         })
     }
