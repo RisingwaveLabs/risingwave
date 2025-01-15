@@ -401,6 +401,12 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ))?;
 
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Iceberg Count Star",
+            vec![BatchIcebergCountStar::create()],
+            ApplyOrder::TopDown,
+        ))?;
+
         // For iceberg scan, we do iceberg predicate pushdown
         // BatchFilter -> BatchIcebergScan
         let plan = plan.optimize_by_rules(&OptimizationStage::new(

@@ -24,19 +24,21 @@ use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
 use risingwave_common::catalog::{
     Field, Schema, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
 };
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::source::iceberg::{
     IcebergFileScanTaskJsonStrEnum, IcebergProperties, IcebergSplit,
 };
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
 use risingwave_connector::WithOptionsSecResolved;
+use risingwave_expr::expr::LiteralExpression;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::error::BatchError;
 use crate::executor::Executor;
 use crate::monitor::BatchMetrics;
+use crate::ValuesExecutor;
 
 pub enum IcebergFileScanTaskEnum {
     // The scan task of the data file and the position delete file
@@ -45,6 +47,7 @@ pub enum IcebergFileScanTaskEnum {
     EqualityDelete(Vec<FileScanTask>),
     // The scan task of the position delete file
     PositionDelete(Vec<FileScanTask>),
+    CountStar(u64),
 }
 
 impl IcebergFileScanTaskEnum {
@@ -75,6 +78,9 @@ impl IcebergFileScanTaskEnum {
                         .map(|t| t.deserialize())
                         .collect(),
                 )
+            }
+            IcebergFileScanTaskJsonStrEnum::CountStar(count) => {
+                IcebergFileScanTaskEnum::CountStar(count)
             }
         }
     }
@@ -151,6 +157,9 @@ impl IcebergScanExecutor {
             }
             Some(IcebergFileScanTaskEnum::PositionDelete(position_delete_file_scan_tasks)) => {
                 position_delete_file_scan_tasks
+            }
+            Some(IcebergFileScanTaskEnum::CountStar(_)) => {
+                bail!("iceberg scan executor does not support count star")
             }
             None => {
                 bail!("file_scan_tasks must be Some")
@@ -261,6 +270,17 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
         if let ConnectorProperties::Iceberg(iceberg_properties) = config
             && let SplitImpl::Iceberg(split) = &split_list[0]
         {
+            if let IcebergFileScanTaskJsonStrEnum::CountStar(count) = split.files {
+                return Ok(Box::new(ValuesExecutor::new(
+                    vec![vec![Box::new(LiteralExpression::new(
+                        DataType::Int64,
+                        Some(ScalarImpl::Int64(count as i64)),
+                    ))]],
+                    schema,
+                    source.plan_node().get_identity().clone(),
+                    source.context().get_config().developer.chunk_size,
+                )));
+            }
             let iceberg_properties: IcebergProperties = *iceberg_properties;
             let split: IcebergSplit = split.clone();
             let need_seq_num = schema
