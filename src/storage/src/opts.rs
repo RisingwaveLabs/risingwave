@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::config::{
-    extract_storage_memory_config, EvictionConfig, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
+    extract_storage_memory_config_default, EvictionConfig, ObjectStoreConfig, RwConfig,
+    StorageMemoryConfig,
 };
 use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
 use risingwave_common::system_param::system_params_for_test;
@@ -70,8 +71,6 @@ pub struct StorageOpts {
     pub disable_remote_compactor: bool,
     /// Number of tasks shared buffer can upload in parallel.
     pub share_buffer_upload_concurrency: usize,
-    /// Capacity of sstable meta cache.
-    pub compactor_memory_limit_mb: usize,
     /// compactor streaming iterator recreate timeout.
     /// deprecated
     pub compact_iter_recreate_timeout_ms: u64,
@@ -151,7 +150,7 @@ impl Default for StorageOpts {
     fn default() -> Self {
         let c = RwConfig::default();
         let p = system_params_for_test();
-        let s = extract_storage_memory_config(&c);
+        let s = extract_storage_memory_config_default(&c);
         Self::from((&c, &p.into(), &s))
     }
 }
@@ -184,7 +183,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
-            compactor_memory_limit_mb: s.compactor_memory_limit_mb,
             sstable_id_remote_fetch_number: c.storage.sstable_id_remote_fetch_number,
             min_sst_size_for_streaming_upload: c.storage.min_sst_size_for_streaming_upload,
             max_concurrent_compaction_task_number: c.storage.max_concurrent_compaction_task_number,

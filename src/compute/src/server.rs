@@ -235,7 +235,7 @@ pub async fn compute_node_serve(
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
             let memory_limiter = Arc::new(MemoryLimiter::new(
-                storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
+                storage_memory_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
 
             let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));

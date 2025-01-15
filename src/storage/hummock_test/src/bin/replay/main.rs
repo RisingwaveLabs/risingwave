@@ -31,7 +31,7 @@ use clap::Parser;
 use foyer::{Engine, HybridCacheBuilder};
 use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig,
+    extract_storage_memory_config_default, load_config, NoOverride, ObjectStoreConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
@@ -89,7 +89,7 @@ async fn run_replay(args: Args) -> Result<()> {
 
 async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay> {
     let config = load_config(&args.config, NoOverride);
-    let storage_memory_config = extract_storage_memory_config(&config);
+    let storage_memory_config = extract_storage_memory_config_default(&config);
     let system_params_reader =
         SystemParamsReader::from(config.system.clone().into_init_system_params());
 

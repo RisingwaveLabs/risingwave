@@ -66,7 +66,6 @@ pub fn default_opts_for_test() -> StorageOpts {
         block_cache_eviction_config: EvictionConfig::for_test(),
         disable_remote_compactor: false,
         share_buffer_upload_concurrency: 1,
-        compactor_memory_limit_mb: 64,
         sstable_id_remote_fetch_number: 1,
         ..Default::default()
     }
