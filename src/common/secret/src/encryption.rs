@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use aes_gcm::aead::generic_array::GenericArray;
-use aes_gcm::aead::{Aead, AeadCore, KeyInit, OsRng};
-use aes_gcm::Aes128Gcm;
+use aws_lc_rs::aead::{Aad, Nonce, RandomizedNonceKey, AES_128_GCM};
 use serde::{Deserialize, Serialize};
 
 use super::{SecretError, SecretResult};
@@ -28,25 +26,28 @@ pub struct SecretEncryption {
 impl SecretEncryption {
     pub fn encrypt(key: &[u8], plaintext: &[u8]) -> SecretResult<Self> {
         let encrypt_key = Self::fill_key(key);
-        let nonce_array = Aes128Gcm::generate_nonce(&mut OsRng);
-        let cipher = Aes128Gcm::new(encrypt_key.as_slice().into());
-        let ciphertext = cipher
-            .encrypt(&nonce_array, plaintext)
+        let nonce_key = RandomizedNonceKey::new(&AES_128_GCM, &encrypt_key)
+            .map_err(|_| SecretError::AesError)?;
+        let mut in_out = plaintext.to_vec();
+        let nonce = nonce_key
+            .seal_in_place_append_tag(Aad::empty(), &mut in_out)
             .map_err(|_| SecretError::AesError)?;
         Ok(Self {
-            nonce: nonce_array.into(),
-            ciphertext,
+            nonce: *nonce.as_ref(),
+            ciphertext: in_out,
         })
     }
 
     pub fn decrypt(&self, key: &[u8]) -> SecretResult<Vec<u8>> {
         let decrypt_key = Self::fill_key(key);
-        let nonce_array = GenericArray::from_slice(&self.nonce);
-        let cipher = Aes128Gcm::new(decrypt_key.as_slice().into());
-        let plaintext = cipher
-            .decrypt(nonce_array, self.ciphertext.as_slice())
+        let nonce_key = RandomizedNonceKey::new(&AES_128_GCM, &decrypt_key)
             .map_err(|_| SecretError::AesError)?;
-        Ok(plaintext)
+        let mut in_out = self.ciphertext.clone();
+        let nonce = Nonce::assume_unique_for_key(self.nonce);
+        let plaintext = nonce_key
+            .open_in_place(nonce, Aad::empty(), &mut in_out)
+            .map_err(|_| SecretError::AesError)?;
+        Ok(plaintext.to_vec())
     }
 
     fn fill_key(key: &[u8]) -> Vec<u8> {
