@@ -133,3 +133,18 @@ pub fn current_cluster_version() -> String {
         PG_VERSION, RW_VERSION, GIT_SHA
     )
 }
+
+/// Panics if `debug_assertions` is set, otherwise logs a warning.
+///
+/// Note: unlike `panic` which returns `!`, this macro returns `()`,
+/// which cannot be used like `result.unwrap_or_else(|| panic_if_debug!(...))`.
+#[macro_export]
+macro_rules! panic_if_debug {
+    ($($arg:tt)*) => {
+        if cfg!(debug_assertions) {
+            panic!($($arg)*)
+        } else {
+            tracing::warn!($($arg)*)
+        }
+    };
+}

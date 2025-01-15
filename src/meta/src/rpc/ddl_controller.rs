@@ -1256,10 +1256,11 @@ impl DdlController {
             ..
         } = release_ctx;
 
+        let _guard = self.source_manager.pause_tick().await;
         self.stream_manager
             .drop_streaming_jobs(
                 risingwave_common::catalog::DatabaseId::new(database_id as _),
-                removed_actors.into_iter().map(|id| id as _).collect(),
+                removed_actors.iter().map(|id| *id as _).collect(),
                 removed_streaming_job_ids,
                 removed_state_table_ids,
                 removed_fragments.iter().map(|id| *id as _).collect(),

@@ -24,6 +24,7 @@ use std::time::Duration;
 use anyhow::Context;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common::panic_if_debug;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
     fill_adaptive_split, ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo,
@@ -37,7 +38,7 @@ use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex, MutexGuard};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
@@ -236,13 +237,13 @@ impl SourceManagerCore {
                     managed_fragment_ids.remove(fragment_id);
                     dropped_ids.push(*fragment_id);
                 }
-                let handle = self.managed_sources.get(&source_id).unwrap_or_else(|| {
-                    panic!(
-                        "source {} not found when dropping fragment {:?}",
-                        source_id, dropped_ids
+                if let Some(handle) = self.managed_sources.get(&source_id) {
+                    handle.drop_fragments(dropped_ids);
+                } else {
+                    panic_if_debug!(
+                        "source {source_id} not found when dropping fragment {dropped_ids:?}",
                     );
-                });
-                handle.drop_fragments(dropped_ids);
+                }
                 if managed_fragment_ids.is_empty() {
                     entry.remove();
                 }
@@ -256,13 +257,13 @@ impl SourceManagerCore {
                     }
                 }
                 if !dropped_ids.is_empty() {
-                    let handle = self.managed_sources.get(source_id).unwrap_or_else(|| {
-                        panic!(
-                            "source {} not found when dropping fragment {:?}",
-                            source_id, dropped_ids
+                    if let Some(handle) = self.managed_sources.get(source_id) {
+                        handle.drop_fragments(dropped_ids);
+                    } else {
+                        panic_if_debug!(
+                            "source {source_id} not found when dropping fragment {dropped_ids:?}",
                         );
-                    });
-                    handle.drop_fragments(dropped_ids);
+                    }
                 }
             }
         }
@@ -466,6 +467,12 @@ impl SourceManager {
                 );
             }
         }
+    }
+
+    /// Pause the tick loop in source manager until the returned guard is dropped.
+    pub async fn pause_tick(&self) -> MutexGuard<'_, ()> {
+        tracing::debug!("pausing tick lock in source manager");
+        self.paused.lock().await
     }
 }
 
