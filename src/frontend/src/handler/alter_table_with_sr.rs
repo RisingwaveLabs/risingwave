@@ -17,10 +17,8 @@ use fancy_regex::Regex;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
 use risingwave_sqlparser::ast::{FormatEncodeOptions, ObjectName, Statement};
-use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
-use super::alter_source_with_sr::alter_definition_format_encode;
 use super::alter_table_column::fetch_table_catalog_for_alter;
 use super::create_source::schema_has_schema_registry;
 use super::util::SourceSchemaCompatExt;
@@ -29,7 +27,7 @@ use crate::error::{ErrorCode, Result};
 use crate::TableCatalog;
 
 fn get_format_encode_from_table(table: &TableCatalog) -> Result<Option<FormatEncodeOptions>> {
-    let stmt = table.create_sql_ast()?;
+    let stmt = table.create_sql_ast_purified()?;
     let Statement::CreateTable { format_encode, .. } = stmt else {
         unreachable!()
     };
@@ -47,35 +45,26 @@ pub async fn handle_refresh_schema(
         bail_not_implemented!("alter table with incoming sinks");
     }
 
-    let format_encode = {
-        let format_encode = get_format_encode_from_table(&original_table)?;
-        if !format_encode
-            .as_ref()
-            .is_some_and(schema_has_schema_registry)
-        {
-            return Err(ErrorCode::NotSupported(
-                "tables without schema registry cannot refreshed".to_owned(),
-                "try `ALTER TABLE .. ADD/DROP COLUMN ...` instead".to_owned(),
-            )
-            .into());
-        }
-        format_encode.unwrap()
-    };
+    let format_encode = get_format_encode_from_table(&original_table)?;
+    if !format_encode
+        .as_ref()
+        .is_some_and(schema_has_schema_registry)
+    {
+        return Err(ErrorCode::NotSupported(
+            "tables without schema registry cannot be refreshed".to_owned(),
+            "try `ALTER TABLE .. ADD/DROP COLUMN ...` instead".to_owned(),
+        )
+        .into());
+    }
 
-    // NOTE(st1page): since we have not implemented alter format encode for table, it is actually no use.
-    let definition = alter_definition_format_encode(
-        &original_table.definition,
-        format_encode.row_options.clone(),
-    )?;
-
-    let [definition]: [_; 1] = Parser::parse_sql(&definition)
-        .context("unable to parse original table definition")?
-        .try_into()
-        .unwrap();
+    // Not using the purified definition because we want to re-fetch the schema.
+    let definition = original_table
+        .create_sql_ast()
+        .context("unable to parse original table definition")?;
 
     let (source, table, graph, col_index_mapping, job_type) = {
         let result =
-            get_replace_table_plan(&session, table_name, definition, &original_table).await;
+            get_replace_table_plan(&session, table_name, definition, None, &original_table).await;
         match result {
             Ok((source, table, graph, col_index_mapping, job_type)) => {
                 Ok((source, table, graph, col_index_mapping, job_type))

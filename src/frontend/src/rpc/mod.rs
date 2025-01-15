@@ -105,6 +105,7 @@ async fn get_new_table_plan(
         &session,
         table_name,
         new_table_definition,
+        None,
         &original_catalog,
     )
     .await?;
