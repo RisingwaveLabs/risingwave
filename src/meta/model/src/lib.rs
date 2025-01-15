@@ -34,6 +34,7 @@ pub mod compaction_task;
 pub mod connection;
 pub mod database;
 pub mod fragment;
+pub mod fragment_relation;
 pub mod function;
 pub mod hummock_epoch_to_version;
 pub mod hummock_gc_history;
