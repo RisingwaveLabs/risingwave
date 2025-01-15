@@ -135,6 +135,7 @@ impl CatalogController {
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
                 creating_table_finish_notifier: HashMap::new(),
+                dropped_tables: HashMap::new(),
             }),
         };
 
@@ -161,6 +162,8 @@ pub struct CatalogControllerInner {
     /// On notifying, we can remove the entry from this map.
     pub creating_table_finish_notifier:
         HashMap<ObjectId, Vec<Sender<MetaResult<NotificationVersion>>>>,
+    /// Tables have been dropped from the meta store, but the corresponding barrier remains unfinished.
+    pub dropped_tables: HashMap<TableId, PbTable>,
 }
 
 impl CatalogController {
@@ -851,5 +854,22 @@ impl CatalogControllerInner {
             .all(&self.db)
             .await?;
         Ok(table_ids)
+    }
+
+    /// Since the tables have been dropped from both meta store and streaming jobs, this method removes those table copies.
+    /// Returns the removed table copies.
+    pub(crate) fn complete_dropped_tables(
+        &mut self,
+        table_ids: impl Iterator<Item = TableId>,
+    ) -> Vec<PbTable> {
+        let mut res = vec![];
+        for table_id in table_ids {
+            if let Some(t) = self.dropped_tables.remove(&table_id) {
+                res.push(t);
+                continue;
+            }
+            tracing::warn!("table {table_id} not found");
+        }
+        res
     }
 }

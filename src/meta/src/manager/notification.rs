@@ -197,43 +197,9 @@ impl NotificationManager {
             .await
     }
 
-    pub async fn notify_hummock_relation_info(
-        &self,
-        operation: Operation,
-        relation_info: RelationInfo,
-    ) -> NotificationVersion {
-        self.notify_with_version(
-            SubscribeType::Hummock.into(),
-            operation,
-            Info::RelationGroup(RelationGroup {
-                relations: vec![Relation {
-                    relation_info: relation_info.into(),
-                }],
-            }),
-        )
-        .await
-    }
-
     pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.notify_with_version(SubscribeType::Compactor.into(), operation, info)
             .await
-    }
-
-    pub async fn notify_compactor_relation_info(
-        &self,
-        operation: Operation,
-        relation_info: RelationInfo,
-    ) -> NotificationVersion {
-        self.notify_with_version(
-            SubscribeType::Compactor.into(),
-            operation,
-            Info::RelationGroup(RelationGroup {
-                relations: vec![Relation {
-                    relation_info: relation_info.into(),
-                }],
-            }),
-        )
-        .await
     }
 
     pub async fn notify_compute(&self, operation: Operation, info: Info) -> NotificationVersion {
