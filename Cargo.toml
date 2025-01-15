@@ -140,7 +140,7 @@ axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
 axum-extra = "0.9"
 futures-async-stream = "0.2.9"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", version = "0.4.1", features = [
+rdkafka = { package = "madsim-rdkafka", version = "0.4.3", features = [
     "cmake-build",
 ] }
 hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }

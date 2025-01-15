@@ -192,6 +192,10 @@ pub trait SplitEnumerator: Sized + Send {
     async fn new(properties: Self::Properties, context: SourceEnumeratorContextRef)
         -> Result<Self>;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
+    /// Do some cleanup work when a fragment is dropped, e.g., drop Kafka consumer group.
+    async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub type SourceContextRef = Arc<SourceContext>;
@@ -201,6 +205,7 @@ pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
 #[async_trait]
 pub trait AnySplitEnumerator: Send {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>>;
+    async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
 }
 
 #[async_trait]
@@ -209,6 +214,10 @@ impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
         SplitEnumerator::list_splits(self)
             .await
             .map(|s| s.into_iter().map(|s| s.into()).collect())
+    }
+
+    async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
+        SplitEnumerator::on_drop_fragments(self, _fragment_ids).await
     }
 }
 

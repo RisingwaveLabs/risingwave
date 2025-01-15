@@ -229,7 +229,7 @@ impl BarrierScheduler {
         }
     }
 
-    /// Run multiple commands and return when they're all completely finished. It's ensured that
+    /// Run multiple commands and return when they're all completely finished (i.e., collected). It's ensured that
     /// multiple commands are executed continuously.
     ///
     /// Returns the barrier info of each command.
@@ -298,7 +298,7 @@ impl BarrierScheduler {
         .await
     }
 
-    /// Run a command and return when it's completely finished.
+    /// Run a command and return when it's completely finished (i.e., collected).
     ///
     /// Returns the barrier info of the actual command.
     pub async fn run_command(&self, database_id: DatabaseId, command: Command) -> MetaResult<()> {

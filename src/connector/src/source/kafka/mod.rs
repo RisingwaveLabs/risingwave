@@ -181,6 +181,14 @@ impl KafkaProperties {
         self.rdkafka_properties_common.set_client(c);
         self.rdkafka_properties_consumer.set_client(c);
     }
+
+    pub fn group_id(&self, fragment_id: u32) -> String {
+        format!(
+            "{}-{}",
+            self.group_id_prefix.as_deref().unwrap_or("rw-consumer"),
+            fragment_id
+        )
+    }
 }
 
 const KAFKA_ISOLATION_LEVEL: &str = "read_committed";

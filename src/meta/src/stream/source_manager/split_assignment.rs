@@ -108,16 +108,7 @@ impl SourceManager {
                 .with_context(|| format!("could not find source {}", source_id))?;
 
             if handle.splits.lock().await.splits.is_none() {
-                // force refresh source
-                let (tx, rx) = oneshot::channel();
-                handle
-                    .sync_call_tx
-                    .send(tx)
-                    .ok()
-                    .context("failed to send sync call")?;
-                rx.await
-                    .ok()
-                    .context("failed to receive sync call response")??;
+                handle.force_tick().await?;
             }
 
             for fragment_id in fragments {

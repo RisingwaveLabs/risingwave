@@ -25,7 +25,7 @@ async function get_fragment_id_of_mv(mv_name) {
 }
 
 async function list_consumer_groups(fragment_id) {
-  return (await $`rpk group list`)
+  let all_groups = (await $`rpk group list`)
     .toString()
     .trim()
     .split("\n")
@@ -33,10 +33,38 @@ async function list_consumer_groups(fragment_id) {
     .map((line) => {
       const [_broker_id, group_name] = line.split(/\s+/);
       return group_name;
-    })
-    .filter((group_name) => {
-      return group_name.startsWith(`rw-consumer-${fragment_id}`);
     });
+  if (fragment_id) {
+    return all_groups.filter((group_name) => {
+      return group_name.endsWith(`-${fragment_id}`);
+    });
+  } else {
+    return all_groups;
+  }
+}
+
+async function count_consumer_groups() {
+  let map = (await $`rpk group list`)
+    .toString()
+    .trim()
+    .split("\n")
+    .slice(1)
+    .map((line) => {
+      const [_broker_id, group_name] = line.split(/\s+/);
+      console.error(group_name);
+      return group_name.split("-").slice(0, -1).join("-");
+    })
+    .reduce((acc, group_name_prefix) => {
+      acc.set(group_name_prefix, (acc.get(group_name_prefix) || 0) + 1);
+      return acc;
+    }, new Map());
+  let mapAsc = new Map([...map.entries()].sort());
+
+  let res = "";
+  for (const [group_name_prefix, count] of mapAsc) {
+    res += `${group_name_prefix}: ${count}\n`;
+  }
+  return res;
 }
 
 async function describe_consumer_group(group_name) {
@@ -73,9 +101,11 @@ async function list_consumer_group_lags(fragment_id) {
   );
 }
 
-const fragment_id = await get_fragment_id_of_mv(mv);
+const fragment_id = mv ? await get_fragment_id_of_mv(mv) : undefined;
 if (command == "list-groups") {
   echo`${await list_consumer_groups(fragment_id)}`;
+} else if (command == "count-groups") {
+  echo`${await count_consumer_groups()}`;
 } else if (command == "list-members") {
   echo`${await list_consumer_group_members(fragment_id)}`;
 } else if (command == "list-lags") {

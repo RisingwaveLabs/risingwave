@@ -12,17 +12,9 @@ cat <<EOF | rpk topic produce test_consumer_group -f "%p %v\\n" -p 0
 2 {"x":"c"}
 EOF
 
-statement ok
-CREATE SOURCE s(x varchar)
-WITH(
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
-    topic = 'test_consumer_group',
-    scan.startup.mode = 'earliest',
-) FORMAT PLAIN ENCODE JSON;
-
 # custom group id prefix
 statement ok
-CREATE SOURCE s2(x varchar)
+CREATE SOURCE s(x varchar)
 WITH(
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
     topic = 'test_consumer_group',
@@ -33,9 +25,6 @@ WITH(
 
 statement ok
 CREATE MATERIALIZED VIEW mv AS SELECT * from s;
-
-statement ok
-CREATE MATERIALIZED VIEW mv2 AS SELECT * from s2;
 
 query ?
 SELECT * FROM s order by x;
@@ -54,9 +43,18 @@ b
 c
 
 
-# There are 2 consumer groups, 1 for batch query (not listed below), 1 for MV.
+# shared source starts from latest, so we produce more data to ensure consumer group is created.
+system ok
+cat <<EOF | rpk topic produce test_consumer_group -f "%p %v\\n" -p 0
+0 {"x":"d"}
+1 {"x":"e"}
+2 {"x":"f"}
+EOF
+
+
+# There are 2 consumer groups, 1 for batch query (not listed below), 1 for Source.
 # All of them are "Empty" state with 0 members, because we manually `assign` partitions to them.
-# At the beginning, the MV's consumer group will not occur. They will be created after committing offset to Kafka.
+# At the beginning, the Source's consumer group will not occur. They will be created after committing offset to Kafka.
 # (enable.auto.commit defaults to true, and auto.commit.interval.ms defaults to 5s)
 sleep 5s
 
@@ -73,65 +71,27 @@ system ok
 0
 
 
-# We try to interfere by creating consumers that subscribing to the topic with the RW's group id.
-system ok
-./e2e_test/source_inline/kafka/consumer_group.mjs --mv mv list-groups | tr ',' '\\n' | xargs -P4 -I {} sh -c "rpk topic consume test_consumer_group -g {}" &
+# Test delete consumer group on drop
 
-# Wait a while for them to subscribe to the topic.
-sleep 15s
-
-
-system ok
-cat <<EOF | rpk topic produce test_consumer_group -f "%p %v\\n" -p 0
-0 {"x":"d"}
-1 {"x":"e"}
-2 {"x":"f"}
-EOF
-
-sleep 2s
-
-# Verify that RisingWave's Kafka consumer works independently from the console consumers subscribing to the same group.
-query ?
-SELECT * FROM mv order by x;
+# my_group: 1 source fragment, 1 backfill fragment, 1 batch query
+# TODO: drop backfill fragment on backfill finish
+# We only check my_group to avoid interfering with other tests.
+system ok retry 3 backoff 5s
+./e2e_test/source_inline/kafka/consumer_group.mjs count-groups | grep my_group
 ----
-a
-b
-c
-d
-e
-f
-
-
-query ?
-SELECT * FROM mv2 order by x;
-----
-a
-b
-c
-d
-e
-f
+my_group: 3
 
 
 statement ok
 DROP SOURCE s CASCADE;
 
-statement ok
-DROP SOURCE s2 CASCADE;
+sleep 1s
 
-## fragment id is not deterministic so comment out
-# system ok
-# rpk group list
-# ---
-# BROKER  GROUP                   STATE
-# 0       my_group-8              Empty
-# 0       rw-consumer-3           Empty
-# 0       rw-consumer-4294967295  Empty
-# 0       rw-consumer-7           Empty
+system ok retry 3 backoff 5s
+./e2e_test/source_inline/kafka/consumer_group.mjs count-groups | grep my_group
+----
+my_group: 2
 
-
-system ok
-pkill rpk
 
 system ok
 rpk topic delete test_consumer_group

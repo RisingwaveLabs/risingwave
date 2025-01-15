@@ -2336,8 +2336,7 @@ impl GlobalStreamManager {
             fragment_actors,
         };
 
-        tracing::debug!("pausing tick lock in source manager");
-        let _source_pause_guard = self.source_manager.paused.lock().await;
+        let _guard = self.source_manager.pause_tick().await;
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(database_id, command)
