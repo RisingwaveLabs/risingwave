@@ -120,6 +120,8 @@ pub enum AlterTableOperation {
     SwapRenameTable {
         target_table: ObjectName,
     },
+    /// `DROP CONNECTOR`
+    DropConnector,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -337,6 +339,9 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::SwapRenameTable { target_table } => {
                 write!(f, "SWAP WITH {}", target_table)
+            }
+            AlterTableOperation::DropConnector => {
+                write!(f, "DROP CONNECTOR")
             }
         }
     }

@@ -331,6 +331,17 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn replace_table_drop_table_associated_source(
+        &self,
+        table: PbTable,
+        _graph: StreamFragmentGraph,
+        _mapping: ColIndexMapping,
+        _drop_table_associated_source_id: u32,
+    ) -> Result<()> {
+        self.catalog.write().update_table(&table);
+        Ok(())
+    }
+
     async fn replace_source(
         &self,
         source: PbSource,

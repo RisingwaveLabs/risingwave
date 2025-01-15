@@ -76,6 +76,7 @@ use crate::handler::create_source::{
     bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
     handle_addition_columns, UPSTREAM_SOURCE_KEY,
 };
+use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
@@ -1805,22 +1806,50 @@ pub async fn generate_stream_graph_for_replace_table(
     _session: &Arc<SessionImpl>,
     table_name: ObjectName,
     original_catalog: &Arc<TableCatalog>,
-    format_encode: Option<FormatEncodeOptions>,
     handler_args: HandlerArgs,
+    statement: Statement,
     col_id_gen: ColumnIdGenerator,
-    column_defs: Vec<ColumnDef>,
-    wildcard_idx: Option<usize>,
-    constraints: Vec<TableConstraint>,
-    source_watermarks: Vec<SourceWatermark>,
-    append_only: bool,
-    on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
-    cdc_table_info: Option<CdcTableInfo>,
     new_version_columns: Option<Vec<ColumnCatalog>>,
-    include_column_options: IncludeOption,
-    engine: Engine,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+
+    let Statement::CreateTable {
+        columns,
+        constraints,
+        source_watermarks,
+        append_only,
+        on_conflict,
+        with_version_column,
+        wildcard_idx,
+        cdc_table_info,
+        format_encode,
+        include_column_options,
+        engine,
+        with_options,
+        ..
+    } = statement
+    else {
+        panic!("unexpected statement type: {:?}", statement);
+    };
+
+    let format_encode = format_encode
+        .clone()
+        .map(|format_encode| format_encode.into_v2_with_warning());
+
+    let engine = match engine {
+        risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
+        risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
+    };
+
+    let is_drop_connector = {
+        original_catalog.associated_source_id().is_some()
+            && format_encode.is_none()
+            && source_watermarks.is_empty()
+            && include_column_options.is_empty()
+            && with_options
+                .iter()
+                .all(|opt| opt.name.real_value().to_lowercase() != "connector")
+    };
 
     let props = CreateTableProps {
         definition: handler_args.normalized_sql.clone(),
@@ -1837,7 +1866,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 handler_args,
                 ExplainOptions::default(),
                 table_name,
-                column_defs,
+                columns,
                 wildcard_idx,
                 constraints,
                 format_encode,
@@ -1854,7 +1883,7 @@ pub async fn generate_stream_graph_for_replace_table(
             let (plan, table) = gen_create_table_plan(
                 context,
                 table_name,
-                column_defs,
+                columns,
                 constraints,
                 col_id_gen,
                 source_watermarks,
@@ -1872,8 +1901,8 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_table.external_table_name.clone(),
             )?;
 
-            let (columns, pk_names) =
-                bind_cdc_table_schema(&column_defs, &constraints, new_version_columns)?;
+            let (column_catalogs, pk_names) =
+                bind_cdc_table_schema(&columns, &constraints, new_version_columns)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();
@@ -1881,8 +1910,8 @@ pub async fn generate_stream_graph_for_replace_table(
                 context,
                 source,
                 cdc_table.external_table_name.clone(),
-                column_defs,
                 columns,
+                column_catalogs,
                 pk_names,
                 cdc_with_options,
                 col_id_gen,
@@ -1923,7 +1952,7 @@ pub async fn generate_stream_graph_for_replace_table(
         id: original_catalog.id().table_id(),
         ..table
     };
-    if let Some(source_id) = original_catalog.associated_source_id() {
+    if !is_drop_connector && let Some(source_id) = original_catalog.associated_source_id() {
         table.optional_associated_source_id = Some(OptionalAssociatedSourceId::AssociatedSourceId(
             source_id.table_id,
         ));

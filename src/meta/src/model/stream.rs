@@ -619,6 +619,21 @@ impl StreamJobFragments {
             .collect_vec()
     }
 
+    pub fn source_internal_table_id(&self) -> Option<u32> {
+        self.fragments.values().find_map(|fragment| {
+            fragment.actors.iter().find_map(|actor| {
+                if let Some(stream_node) = &actor.nodes
+                    && let Some(NodeBody::Source(source)) = &stream_node.node_body
+                    && let Some(source_inner) = &source.source_inner
+                    && let Some(source_state_table) = &source_inner.state_table
+                {
+                    return Some(source_state_table.id);
+                }
+                None
+            })
+        })
+    }
+
     /// Returns all internal table ids including the mview table.
     pub fn all_table_ids(&self) -> impl Iterator<Item = u32> + '_ {
         self.fragments

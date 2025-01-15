@@ -55,6 +55,7 @@ use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor, PbStreamNode,
 };
+use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -64,7 +65,7 @@ use sea_orm::{
 };
 
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
-use crate::controller::catalog::CatalogController;
+use crate::controller::catalog::{CatalogController, ReleaseContext};
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     build_relation_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
@@ -681,7 +682,6 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
-
         Ok(())
     }
 
@@ -978,6 +978,7 @@ impl CatalogController {
         merge_updates: Vec<PbMergeUpdate>,
         col_index_mapping: Option<ColIndexMapping>,
         sink_into_table_context: SinkIntoTableContext,
+        release_ctx: Option<&ReleaseContext>,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -992,6 +993,11 @@ impl CatalogController {
         )
         .await?;
 
+        let mut notification_objs: Option<(Vec<PbUserInfo>, Vec<PartialObject>)> = None;
+        if let Some(release_ctx) = release_ctx {
+            notification_objs = Some(self.drop_table_associated_source(&txn, release_ctx).await?);
+        }
+
         txn.commit().await?;
 
         // FIXME: Do not notify frontend currently, because frontend nodes might refer to old table
@@ -1001,12 +1007,22 @@ impl CatalogController {
         //     .await;
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Update,
                 NotificationInfo::RelationGroup(PbRelationGroup { relations }),
             )
             .await;
+
+        if let Some((user_infos, to_drop_objects)) = notification_objs {
+            self.notify_users_update(user_infos).await;
+            version = self
+                .notify_frontend(
+                    NotificationOperation::Delete,
+                    build_relation_group_for_delete(to_drop_objects),
+                )
+                .await;
+        }
 
         Ok(version)
     }

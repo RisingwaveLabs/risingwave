@@ -146,6 +146,7 @@ define_keywords!(
     CONNECT,
     CONNECTION,
     CONNECTIONS,
+    CONNECTOR,
     CONSTRAINT,
     CONTAINS,
     CONVERT,

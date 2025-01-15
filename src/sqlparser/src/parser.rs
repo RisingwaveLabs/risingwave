@@ -3168,6 +3168,8 @@ impl Parser<'_> {
                 let column_def = self.parse_column_def()?;
                 AlterTableOperation::AddColumn { column_def }
             }
+        } else if self.parse_keywords(&[Keyword::DROP, Keyword::CONNECTOR]) {
+            AlterTableOperation::DropConnector
         } else if self.parse_keyword(Keyword::RENAME) {
             if self.parse_keyword(Keyword::CONSTRAINT) {
                 let old_name = self.parse_identifier_non_reserved()?;
