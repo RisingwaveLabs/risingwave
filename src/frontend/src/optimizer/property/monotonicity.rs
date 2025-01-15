@@ -186,6 +186,23 @@ impl MonotonicityAnalyzer {
             tz_is_utc // conservative
         }
 
+        fn date_unit_larger_than_day(date_unit: Option<&str>) -> bool {
+            const DAY: &str = "day";
+            const WEEK: &str = "week";
+            const MONTH: &str = "month";
+            const QUARTER: &str = "quarter";
+            const YEAR: &str = "year";
+            const DECADE: &str = "decade";
+            const CENTURY: &str = "century";
+            const MILLENNIUM: &str = "millennium";
+            date_unit.map_or(false, |date_unit| {
+                matches!(
+                    date_unit.to_ascii_lowercase().as_str(),
+                    DAY | WEEK | MONTH | QUARTER | YEAR | DECADE | CENTURY | MILLENNIUM
+                )
+            })
+        }
+
         match func_call.func_type() {
             ExprType::Unspecified => unreachable!(),
             ExprType::Add => match self.visit_binary_op(func_call.inputs()) {
@@ -257,7 +274,13 @@ impl MonotonicityAnalyzer {
                             .as_literal()
                             .and_then(|literal| literal.get_data().as_ref())
                             .map(|tz| tz.as_utf8().as_ref());
-                        if time_zone_is_without_dst(time_zone) {
+                        let date_unit = func_call.inputs()[0]
+                            .as_literal()
+                            .and_then(|literal| literal.get_data().as_ref())
+                            .map(|tz| tz.as_utf8().as_ref());
+                        if time_zone_is_without_dst(time_zone)
+                            || date_unit_larger_than_day(date_unit)
+                        {
                             any
                         } else {
                             Inherent(Unknown)
