@@ -131,6 +131,9 @@ impl<S> TracedStateStore<S> {
 }
 
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
+    // Not trace the FlushedSnapshotReader
+    type FlushedSnapshotReader = S::FlushedSnapshotReader;
+
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
 
@@ -259,6 +262,10 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
 
     fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
         self.inner.get_table_watermark(vnode)
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        self.inner.new_flushed_snapshot_reader()
     }
 }
 

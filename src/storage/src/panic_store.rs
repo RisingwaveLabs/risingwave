@@ -82,6 +82,7 @@ impl StateStoreReadLog for PanicStateStore {
 }
 
 impl LocalStateStore for PanicStateStore {
+    type FlushedSnapshotReader = PanicStateStore;
     type Iter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
     type RevIter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
 
@@ -158,6 +159,10 @@ impl LocalStateStore for PanicStateStore {
 
     fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
         panic!("should not operate on the panic state store!");
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        panic!()
     }
 }
 

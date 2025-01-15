@@ -37,6 +37,7 @@
 #![feature(maybe_uninit_uninit_array)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(iter_from_coroutine)]
+#![feature(trait_upcasting)]
 
 pub mod hummock;
 pub mod memory;

@@ -821,6 +821,8 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
 }
 
 impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
+    type FlushedSnapshotReader = RangeKvStateStore<R>;
+
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
 
@@ -1055,6 +1057,10 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
         // TODO: may store the written table watermark and have a correct implementation
         None
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        self.inner.clone()
     }
 }
 

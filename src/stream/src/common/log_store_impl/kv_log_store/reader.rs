@@ -40,7 +40,7 @@ use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{
     PrefetchOptions, ReadOptions, StateStoreKeyedRowRef, StateStoreRead,
 };
-use risingwave_storage::{StateStore, StateStoreIter};
+use risingwave_storage::StateStoreIter;
 use tokio::sync::watch;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
@@ -117,7 +117,7 @@ impl RewindDelay {
     }
 }
 
-pub struct KvLogStoreReader<S: StateStore> {
+pub struct KvLogStoreReader<S: StateStoreRead> {
     table_id: TableId,
 
     state_store: S,
@@ -153,7 +153,7 @@ pub struct KvLogStoreReader<S: StateStore> {
     rewind_delay: RewindDelay,
 }
 
-impl<S: StateStore> KvLogStoreReader<S> {
+impl<S: StateStoreRead> KvLogStoreReader<S> {
     pub(crate) fn new(
         table_id: TableId,
         state_store: S,
@@ -338,7 +338,7 @@ impl<S: StateStoreRead, F: FnMut() -> bool + Send> StateStoreIter
     }
 }
 
-impl<S: StateStore> KvLogStoreReader<S> {
+impl<S: StateStoreRead + Clone> KvLogStoreReader<S> {
     fn read_persisted_log_store(
         &self,
         last_persisted_epoch: Option<u64>,
@@ -399,7 +399,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
     }
 }
 
-impl<S: StateStore> LogReader for KvLogStoreReader<S> {
+impl<S: StateStoreRead + Clone> LogReader for KvLogStoreReader<S> {
     async fn init(&mut self) -> LogStoreResult<()> {
         let first_write_epoch = self.rx.init().await;
 
