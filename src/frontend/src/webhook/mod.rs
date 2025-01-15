@@ -23,7 +23,11 @@ use axum::routing::post;
 use axum::Router;
 use pgwire::net::Address;
 use pgwire::pg_server::SessionManager;
+use risingwave_common::array::{Array, ArrayBuilder, DataChunk};
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::types::{DataType, JsonbVal, Scalar};
+use risingwave_pb::batch_plan::FastInsertNode;
+use risingwave_pb::catalog::WebhookSourceInfo;
 use risingwave_sqlparser::ast::{Expr, ObjectName};
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -31,9 +35,9 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
 
-use crate::handler::fast_insert::handle_fast_insert;
+// use crate::handler::fast_insert::handle_fast_insert;
 use crate::handler::{handle, HandlerArgs};
-use crate::scheduler::{run_inner_call, run_inner_call_2, FrontendBatchTaskContext};
+use crate::scheduler::{FastInsertExecution, FrontendBatchTaskContext};
 use crate::webhook::utils::{err, Result};
 mod utils;
 
@@ -43,6 +47,12 @@ pub type Service = Arc<WebhookService>;
 const USER: &str = "root";
 
 #[derive(Clone)]
+pub struct TableWebhookContext {
+    pub webhook_source_info: WebhookSourceInfo,
+    pub fast_insert_node: FastInsertNode,
+}
+
+#[derive(Clone)]
 pub struct WebhookService {
     webhook_addr: SocketAddr,
 }
@@ -50,13 +60,20 @@ pub struct WebhookService {
 pub(super) mod handlers {
     use std::net::Ipv4Addr;
 
+    use iceberg::table::Table;
+    use jsonbb::Value;
+    use pgwire::pg_server::Session;
+    use risingwave_common::array::JsonbArrayBuilder;
+    use risingwave_common::catalog::TableId;
+    use risingwave_pb::batch_plan::FastInsertNode;
     use risingwave_pb::catalog::WebhookSourceInfo;
-    use risingwave_sqlparser::ast::{Query, SetExpr, Statement, Value, Values};
+    use risingwave_pb::plan_common::DefaultColumns;
+    // use risingwave_sqlparser::ast::{Query, SetExpr, Statement, Value, Values};
     use utils::{header_map_to_json, verify_signature};
 
     use super::*;
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::session::SESSION_MANAGER;
+    use crate::session::{SessionImpl, SESSION_MANAGER};
 
     pub async fn handle_post_request(
         Extension(_srv): Extension<Service>,
@@ -88,30 +105,18 @@ pub(super) mod handlers {
                     StatusCode::UNAUTHORIZED,
                 )
             })?;
+
         // println!("WKXLOG session created");
+        let TableWebhookContext {
+            webhook_source_info,
+            mut fast_insert_node,
+        } = acquire_table_info(&session, &database, &schema, &table).await?;
+
         let WebhookSourceInfo {
-            secret_ref,
             signature_expr,
-        } = {
-            let search_path = session.config().search_path();
-            let schema_path = SchemaPath::new(Some(schema.as_str()), &search_path, USER);
-
-            let reader = session.env().catalog_reader().read_guard();
-            let (table_catalog, _schema) = reader
-                .get_any_table_by_name(database.as_str(), schema_path, &table)
-                .map_err(|e| err(e, StatusCode::NOT_FOUND))?;
-
-            table_catalog
-                .webhook_info
-                .as_ref()
-                .ok_or_else(|| {
-                    err(
-                        anyhow!("Table `{}` is not with webhook source", table),
-                        StatusCode::FORBIDDEN,
-                    )
-                })?
-                .clone()
-        };
+            secret_ref,
+            ..
+        } = webhook_source_info;
         // println!("WKXLOG webhook source info: {:?}", secret_ref);
 
         // let secret_string = LocalSecretManager::global()
@@ -141,78 +146,75 @@ pub(super) mod handlers {
             ));
         }
 
-        let payload = String::from_utf8(body.to_vec()).map_err(|e| {
-            err(
-                anyhow!(e).context("Failed to parse body"),
-                StatusCode::UNPROCESSABLE_ENTITY,
-            )
-        })?;
-
-        let insert_stmt = Statement::Insert {
-            table_name: ObjectName::from(vec![table.as_str().into()]),
-            columns: vec![],
-            source: Box::new(Query {
-                with: None,
-                body: SetExpr::Values(Values(vec![vec![Expr::Value(Value::SingleQuotedString(
-                    payload,
-                ))]])),
-                order_by: vec![],
-                limit: None,
-                offset: None,
-                fetch: None,
-            }),
-            returning: vec![],
-        };
-
-        // println!("WKXLOG insert_stmt done");
-
-        let _guard = session.txn_begin_implicit();
-        let handler_args =
-            HandlerArgs::new(session.clone(), &insert_stmt, Arc::from("")).map_err(|e| {
-                err(
-                    anyhow!(e).context("Failed to insert into target table"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                )
-            })?;
-
-        let context = FrontendBatchTaskContext::new(session.clone());
-
-        let execution = handle_fast_insert(handler_args, insert_stmt)
-            .await
-            .map_err(|e| {
-                // println!("WKXLOG handle_fast_insert error: {:?}", e);
-                err(
-                    anyhow!(e).context("Failed to insert into target table"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                )
-            })?;
-        let plan = execution.gen_plan().map_err(|e| {
-            err(
-                anyhow!(e).context("Failed to insert into target table"),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            )
-        })?;
-        let epoch = execution.epoch();
-        run_inner_call_2(&plan, epoch, context, session)
-            .await
-            .map_err(|e| {
-                // println!("WKXLOG run_inner_call error: {:?}", e);
-                err(
-                    anyhow!(e).context("Failed to insert into target table"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                )
-            })?;
-
-        // let _rsp = handle(session, insert_stmt, Arc::from(""), vec![])
-        //     .await
-        // .map_err(|e| {
+        // let payload = String::from_utf8(body.to_vec()).map_err(|e| {
         //     err(
-        //         anyhow!(e).context("Failed to insert into target table"),
-        //         StatusCode::INTERNAL_SERVER_ERROR,
+        //         anyhow!(e).context("Failed to parse body"),
+        //         StatusCode::UNPROCESSABLE_ENTITY,
         //     )
         // })?;
 
+        let mut builder = JsonbArrayBuilder::with_type(1, DataType::Jsonb);
+        // TODO(kexiang): handle errors
+        let json_value = Value::from_text(&body.to_vec()).unwrap();
+        let jsonb_val = JsonbVal::from(json_value);
+        // Add 4 ListValues to ArrayBuilder
+        builder.append(Some(jsonb_val.as_scalar_ref()));
+
+        // Use builder to obtain a single (List) column DataChunk
+        let data_chunk = DataChunk::new(vec![builder.finish().into_ref()], 1);
+        fast_insert_node.data_chunk = Some(data_chunk.to_protobuf());
+        // let context = FrontendBatchTaskContext::new(session.clone());
+        let execution =
+            FastInsertExecution::new(fast_insert_node, session.env().clone(), session.clone());
+        let res = execution.my_execute().await.unwrap();
+
         Ok(())
+    }
+
+    async fn acquire_table_info(
+        session: &Arc<SessionImpl>,
+        database: &String,
+        schema: &String,
+        table: &String,
+    ) -> Result<TableWebhookContext> {
+        // println!("WKXLOG session created");
+
+        let search_path = session.config().search_path();
+        let schema_path = SchemaPath::new(Some(schema.as_str()), &search_path, USER);
+
+        let reader = session.env().catalog_reader().read_guard();
+        let (table_catalog, _schema) = reader
+            .get_any_table_by_name(database.as_str(), schema_path, &table)
+            .map_err(|e| err(e, StatusCode::NOT_FOUND))?;
+
+        let webhook_source_info = table_catalog
+            .webhook_info
+            .as_ref()
+            .ok_or_else(|| {
+                err(
+                    anyhow!("Table `{}` is not with webhook source", table),
+                    StatusCode::FORBIDDEN,
+                )
+            })?
+            .clone();
+
+        let fast_insert_node = FastInsertNode {
+            table_id: table_catalog.id().table_id,
+            table_version_id: table_catalog.version_id().expect("table must be versioned"),
+            column_indices: vec![0],
+            data_chunk: None,
+            default_columns: Some(DefaultColumns {
+                default_columns: vec![],
+            }),
+            row_id_index: Some(1),
+            session_id: session.id().0 as u32,
+        };
+
+        let table_webhook_context = TableWebhookContext {
+            webhook_source_info,
+            fast_insert_node,
+        };
+        Ok(table_webhook_context)
     }
 }
 

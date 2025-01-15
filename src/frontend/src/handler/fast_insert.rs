@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::error::BoxedError;
-use risingwave_pb::batch_plan::PlanFragment;
+use risingwave_pb::batch_plan::{FastInsertNode, PlanFragment};
 use risingwave_sqlparser::ast::Statement;
 use tokio::sync::mpsc;
 
@@ -32,56 +32,38 @@ use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::FastInsertExecution;
 use crate::session::SessionImpl;
 
-pub async fn handle_fast_insert(
-    handler_args: HandlerArgs,
-    stmt: Statement,
-) -> Result<FastInsertExecution> {
-    assert!(matches!(stmt, Statement::Insert { .. }));
-    let session = handler_args.session.clone();
+// pub async fn handle_fast_insert(
+//     handler_args: HandlerArgs,
+//     node: FastInsertNode,
+// ) -> Result<FastInsertExecution> {
+//     let session = handler_args.session.clone();
 
-    let plan_fragmenter_result = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
-        gen_batch_plan_fragmenter(&session, plan_result)?
-    };
+//     // Acquire the write guard for DML statements.
+//     // session.txn_write_guard()?;
 
-    let BatchPlanFragmenterResult {
-        plan_fragmenter,
-        stmt_type,
-        read_storage_tables,
-        ..
-    } = plan_fragmenter_result;
-    assert!(matches!(stmt_type, StatementType::INSERT));
+//     gen_fast_insert_plan_inner(session, query, &read_storage_tables)
+// }
 
-    // Acquire the write guard for DML statements.
-    // session.txn_write_guard()?;
+// fn gen_fast_insert_plan_inner(
+//     session: Arc<SessionImpl>,
+//     query: Query,
+//     read_storage_tables: &HashSet<TableId>,
+// ) -> Result<FastInsertExecution> {
+//     let front_env = session.env();
+//     let snapshot = session.pinned_snapshot();
 
-    let query = plan_fragmenter.generate_complete_query().await?;
-    tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
+//     // TODO: Passing sql here
+//     let execution = FastInsertExecution::new(
+//         query,
+//         front_env.clone(),
+//         snapshot.support_barrier_read(),
+//         snapshot.batch_query_epoch(read_storage_tables)?,
+//         session,
+//     );
 
-    gen_fast_insert_plan_inner(session, query, &read_storage_tables)
-}
-
-fn gen_fast_insert_plan_inner(
-    session: Arc<SessionImpl>,
-    query: Query,
-    read_storage_tables: &HashSet<TableId>,
-) -> Result<FastInsertExecution> {
-    let front_env = session.env();
-    let snapshot = session.pinned_snapshot();
-
-    // TODO: Passing sql here
-    let execution = FastInsertExecution::new(
-        query,
-        front_env.clone(),
-        snapshot.support_barrier_read(),
-        snapshot.batch_query_epoch(read_storage_tables)?,
-        session,
-    );
-
-    // Ok(execution.gen_plan()?)
-    Ok(execution)
-}
+//     // Ok(execution.gen_plan()?)
+//     Ok(execution)
+// }
 
 // pub async fn run_fast_insert(plan: PlanFragment) -> Result<()> {
 //     let compute_runtime = self.front_env.compute_runtime();
