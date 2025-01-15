@@ -217,44 +217,54 @@ pub async fn list_data_directory(
     }
 }
 
-/// Extracts valid column indices from a Parquet file schema based on the user's requested schema.
+/// Extracts a suitable `ProjectionMask` from a Parquet file schema based on the user's requested schema.
 ///
-/// This function is used for column pruning of Parquet files. It calculates the intersection
-/// between the columns in the currently read Parquet file and the schema provided by the user.
-/// This is useful for reading a `RecordBatch` with the appropriate `ProjectionMask`, ensuring that
-/// only the necessary columns are read.
+/// This function is utilized for column pruning of Parquet files. It checks the user's requested schema
+/// against the schema of the currently read Parquet file. If the provided `columns` are `None`
+/// or if the Parquet file contains nested data types, it returns `ProjectionMask::all()`. Otherwise,
+/// it returns only the columns where both the data type and column name match the requested schema,
+/// facilitating efficient reading of the `RecordBatch`.
 ///
 /// # Parameters
-/// - `columns`: A vector of `Column` representing the user's requested schema.
+/// - `columns`: An optional vector of `Column` representing the user's requested schema.
 /// - `metadata`: A reference to `FileMetaData` containing the schema and metadata of the Parquet file.
 ///
 /// # Returns
-/// - A `ConnectorResult<Vec<usize>>`, which contains the indices of the valid columns in the
-///   Parquet file schema that match the requested schema. If an error occurs during processing,
-///   it returns an appropriate error.
-pub fn extract_valid_column_indices(
-    rw_columns: Vec<Column>,
+/// - A `ConnectorResult<ProjectionMask>`, which represents the valid columns in the Parquet file schema
+///   that correspond to the requested schema. If an error occurs during processing, it returns an
+///   appropriate error.
+pub fn get_project_mask(
+    columns: Option<Vec<Column>>,
     metadata: &FileMetaData,
-) -> ConnectorResult<Vec<usize>> {
-    let parquet_column_names = metadata
-        .schema_descr()
-        .columns()
-        .iter()
-        .map(|c| c.name())
-        .collect_vec();
+) -> ConnectorResult<ProjectionMask> {
+    match columns {
+        Some(rw_columns) => {
+            let parquet_column_names = metadata
+                .schema_descr()
+                .columns()
+                .iter()
+                .map(|c| c.name())
+                .collect_vec();
 
-    let converted_arrow_schema =
-        parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata())
-            .map_err(anyhow::Error::from)?;
+            let converted_arrow_schema =
+                parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata())
+                    .map_err(anyhow::Error::from)?;
+            if parquet_column_names.len() != converted_arrow_schema.fields().len() {
+                // `parquet_column_names` contains all the flattened columns,
+                // while `converted_arrow_schema` includes columns that have not been flattened.
+                // If the lengths of these two collections are different, it indicates that the
+                // parquet file contains nested types(e.g. `Struct` data type). In this case, column pruning will not be performed.
+                return Ok(ProjectionMask::all());
+            }
 
-    let valid_column_indices: Vec<usize> = rw_columns
+            let valid_column_indices: Vec<usize> = rw_columns
     .iter()
     .filter_map(|column| {
         parquet_column_names
             .iter()
             .position(|&name| name == column.name)
             .and_then(|pos| {
-                let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_udf::DataType = converted_arrow_schema.field(pos).data_type();
+                let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_udf::DataType = converted_arrow_schema.field_with_name(&column.name).ok()?.data_type();
                 let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
 
                 if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
@@ -265,7 +275,13 @@ pub fn extract_valid_column_indices(
             })
     })
     .collect();
-    Ok(valid_column_indices)
+            Ok(ProjectionMask::leaves(
+                metadata.schema_descr(),
+                valid_column_indices,
+            ))
+        }
+        None => Ok(ProjectionMask::all()),
+    }
 }
 
 /// Reads a specified Parquet file and converts its content into a stream of chunks.
@@ -289,13 +305,7 @@ pub async fn read_parquet_file(
     let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
 
     let file_metadata = parquet_metadata.file_metadata();
-    let projection_mask = match rw_columns {
-        Some(columns) => {
-            let column_indices = extract_valid_column_indices(columns, file_metadata)?;
-            ProjectionMask::leaves(file_metadata.schema_descr(), column_indices)
-        }
-        None => ProjectionMask::all(),
-    };
+    let projection_mask = get_project_mask(rw_columns, file_metadata)?;
 
     // For the Parquet format, we directly convert from a record batch to a stream chunk.
     // Therefore, the offset of the Parquet file represents the current position in terms of the number of rows read from the file.
