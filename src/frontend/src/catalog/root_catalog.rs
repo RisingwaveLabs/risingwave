@@ -690,6 +690,10 @@ impl Catalog {
         Err(CatalogError::NotFound("table id", table_id.to_string()))
     }
 
+    pub fn iter_tables(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_id.values()
+    }
+
     pub fn get_schema_by_table_id(
         &self,
         db_name: &str,
