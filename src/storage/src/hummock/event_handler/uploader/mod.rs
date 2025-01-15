@@ -34,7 +34,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::UintGauge;
 use risingwave_common::must_match;
 use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarks, VnodeWatermark, WatermarkDirection,
+    TableWatermarks, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
 use task_manager::{TaskManager, UploadingTaskStatus};
@@ -336,6 +336,7 @@ impl TableUnsyncData {
         epoch: HummockEpoch,
         table_watermarks: Vec<VnodeWatermark>,
         direction: WatermarkDirection,
+        watermark_type: WatermarkSerdeType,
     ) {
         if table_watermarks.is_empty() {
             return;
@@ -361,10 +362,15 @@ impl TableUnsyncData {
             }
         }
         match &mut self.table_watermarks {
-            Some((prev_direction, prev_watermarks)) => {
+            Some((prev_direction, prev_watermarks, prev_watermark_type)) => {
                 assert_eq!(
                     *prev_direction, direction,
                     "table id {} new watermark direction not match with previous",
+                    self.table_id
+                );
+                assert_eq!(
+                    *prev_watermark_type, watermark_type,
+                    "table id {} new watermark watermark_type not match with previous",
                     self.table_id
                 );
                 match prev_watermarks.entry(epoch) {
@@ -386,6 +392,7 @@ impl TableUnsyncData {
                 self.table_watermarks = Some((
                     direction,
                     BTreeMap::from_iter([(epoch, (table_watermarks, vnode_bitmap))]),
+                    watermark_type,
                 ));
             }
         }
@@ -398,20 +405,28 @@ impl UploaderData {
         table_id: TableId,
         direction: WatermarkDirection,
         watermarks: impl Iterator<Item = (HummockEpoch, Vec<VnodeWatermark>)>,
+        watermark_type: WatermarkSerdeType,
     ) {
         let mut table_watermarks: Option<TableWatermarks> = None;
         for (epoch, watermarks) in watermarks {
             match &mut table_watermarks {
                 Some(prev_watermarks) => {
+                    assert_eq!(prev_watermarks.direction, direction);
+                    assert_eq!(prev_watermarks.watermark_type, watermark_type);
                     prev_watermarks.add_new_epoch_watermarks(
                         epoch,
                         Arc::from(watermarks),
                         direction,
+                        watermark_type,
                     );
                 }
                 None => {
-                    table_watermarks =
-                        Some(TableWatermarks::single_epoch(epoch, watermarks, direction));
+                    table_watermarks = Some(TableWatermarks::single_epoch(
+                        epoch,
+                        watermarks,
+                        direction,
+                        watermark_type,
+                    ));
                 }
             }
         }
@@ -628,6 +643,7 @@ struct TableUnsyncData {
     table_watermarks: Option<(
         WatermarkDirection,
         BTreeMap<HummockEpoch, (Vec<VnodeWatermark>, BitmapBuilder)>,
+        WatermarkSerdeType,
     )>,
     spill_tasks: BTreeMap<HummockEpoch, VecDeque<UploadingTaskId>>,
     unsync_epochs: BTreeMap<HummockEpoch, ()>,
@@ -671,6 +687,7 @@ impl TableUnsyncData {
         Option<(
             WatermarkDirection,
             impl Iterator<Item = (HummockEpoch, Vec<VnodeWatermark>)>,
+            WatermarkSerdeType,
         )>,
         impl Iterator<Item = UploadingTaskId>,
         BTreeMap<HummockEpoch, ()>,
@@ -692,14 +709,11 @@ impl TableUnsyncData {
                 .map(move |(instance_id, data)| (*instance_id, data.sync(epoch))),
             self.table_watermarks
                 .as_mut()
-                .map(|(direction, watermarks)| {
-                    let watermarks = take_before_epoch(watermarks, epoch);
-                    (
-                        *direction,
-                        watermarks
-                            .into_iter()
-                            .map(|(epoch, (watermarks, _))| (epoch, watermarks)),
-                    )
+                .map(|(direction, watermarks, watermark_type)| {
+                    let watermarks = take_before_epoch(watermarks, epoch)
+                        .into_iter()
+                        .map(|(epoch, (watermarks, _))| (epoch, watermarks));
+                    (*direction, watermarks, *watermark_type)
                 }),
             take_before_epoch(&mut self.spill_tasks, epoch)
                 .into_values()
@@ -737,7 +751,7 @@ impl TableUnsyncData {
         self.instance_data
             .values()
             .for_each(|instance_data| instance_data.assert_after_epoch(epoch));
-        if let Some((_, watermarks)) = &self.table_watermarks
+        if let Some((_, watermarks, _)) = &self.table_watermarks
             && let Some((oldest_epoch, _)) = watermarks.first_key_value()
         {
             assert_gt!(*oldest_epoch, epoch);
@@ -892,8 +906,8 @@ impl UnsyncData {
                 table_data.stopped_next_epoch = Some(next_epoch);
             }
         }
-        if let Some((direction, table_watermarks)) = opts.table_watermarks {
-            table_data.add_table_watermarks(epoch, table_watermarks, direction);
+        if let Some((direction, table_watermarks, watermark_type)) = opts.table_watermarks {
+            table_data.add_table_watermarks(epoch, table_watermarks, direction, watermark_type);
         }
     }
 
@@ -1029,12 +1043,13 @@ impl UploaderData {
                             true
                         }
                     });
-                    if let Some((direction, watermarks)) = table_watermarks {
+                    if let Some((direction, watermarks, watermark_type)) = table_watermarks {
                         Self::add_table_watermarks(
                             &mut all_table_watermarks,
                             *table_id,
                             direction,
                             watermarks,
+                            watermark_type,
                         );
                     }
                     for task_id in task_ids {

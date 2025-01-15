@@ -52,6 +52,18 @@ impl OrderedRowSerde {
         }
     }
 
+    #[must_use]
+    pub fn index(&self, idx: usize) -> Cow<'_, Self> {
+        if 1 == self.order_types.len() {
+            Cow::Borrowed(self)
+        } else {
+            Cow::Owned(Self {
+                schema: vec![self.schema[idx].clone()],
+                order_types: vec![self.order_types[idx]],
+            })
+        }
+    }
+
     /// Note: prefer [`Row::memcmp_serialize`] if possible.
     pub fn serialize(&self, row: impl Row, append_to: impl BufMut) {
         self.serialize_datums(row.iter(), append_to)

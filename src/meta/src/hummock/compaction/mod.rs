@@ -174,6 +174,8 @@ impl CompactStatus {
     pub fn is_trivial_reclaim(task: &CompactTask) -> bool {
         // Currently all VnodeWatermark tasks are trivial reclaim.
         if task.task_type == TaskType::VnodeWatermark {
+            assert!(task.input_ssts.len() == 2);
+            assert!(task.input_ssts[1].table_infos.is_empty());
             return true;
         }
         let exist_table_ids = HashSet::<u32>::from_iter(task.existing_table_ids.clone());

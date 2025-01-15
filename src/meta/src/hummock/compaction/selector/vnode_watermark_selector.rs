@@ -76,7 +76,7 @@ fn safe_epoch_read_table_watermarks(
     state_table_info: &HummockVersionStateTableInfo,
     member_table_ids: &BTreeSet<TableId>,
 ) -> BTreeMap<TableId, ReadTableWatermark> {
-    safe_epoch_read_table_watermarks_impl(&safe_epoch_table_watermarks_impl(
+    safe_epoch_read_table_watermarks_impl(safe_epoch_table_watermarks_impl(
         table_watermarks,
         state_table_info,
         &member_table_ids

@@ -482,9 +482,11 @@ mod tests {
             .create_sst_writer(object_id, writer_opts);
 
         let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         ));
 
         let mut builder = SstableBuilder::new(

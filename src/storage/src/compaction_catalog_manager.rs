@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::{VirtualNode, VnodeCountCompat};
@@ -314,13 +315,23 @@ impl CompactionCatalogManager {
 
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         let mut table_id_to_vnode = HashMap::new();
+        let mut table_id_to_watermark_serde = HashMap::new();
+
         {
             let guard = self.table_id_to_catalog.read();
             table_ids.retain(|table_id| match guard.get(table_id) {
                 Some(table_catalog) => {
+                    // filter-key-extractor
                     multi_filter_key_extractor
                         .register(*table_id, FilterKeyExtractorImpl::from_table(table_catalog));
+
+                    // vnode
                     table_id_to_vnode.insert(*table_id, table_catalog.vnode_count());
+
+                    // watermark
+                    table_id_to_watermark_serde
+                        .insert(*table_id, build_watermark_col_serde(table_catalog));
+
                     false
                 }
 
@@ -346,9 +357,16 @@ impl CompactionCatalogManager {
                     let table_id = table.id;
                     let key_extractor = FilterKeyExtractorImpl::from_table(&table);
                     let vnode = table.vnode_count();
+                    let watermark_serde = build_watermark_col_serde(&table);
                     guard.insert(table_id, table);
+                    // filter-key-extractor
                     multi_filter_key_extractor.register(table_id, key_extractor);
+
+                    // vnode
                     table_id_to_vnode.insert(table_id, vnode);
+
+                    // watermark
+                    table_id_to_watermark_serde.insert(table_id, watermark_serde);
                 }
             }
         }
@@ -356,6 +374,7 @@ impl CompactionCatalogManager {
         Ok(Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         )))
     }
 
@@ -365,15 +384,23 @@ impl CompactionCatalogManager {
     ) -> CompactionCatalogAgentRef {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         let mut table_id_to_vnode = HashMap::new();
+        let mut table_id_to_watermark_serde = HashMap::new();
         for (table_id, table_catalog) in table_catalogs {
+            // filter-key-extractor
             multi_filter_key_extractor
                 .register(table_id, FilterKeyExtractorImpl::from_table(&table_catalog));
+
+            // vnode
             table_id_to_vnode.insert(table_id, table_catalog.vnode_count());
+
+            // watermark
+            table_id_to_watermark_serde.insert(table_id, build_watermark_col_serde(&table_catalog));
         }
 
         Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         ))
     }
 }
@@ -384,16 +411,25 @@ impl CompactionCatalogManager {
 pub struct CompactionCatalogAgent {
     filter_key_extractor_manager: FilterKeyExtractorImpl,
     table_id_to_vnode: HashMap<StateTableId, usize>,
+    // table_id ->(pk_prefix_serde, clean_watermark_col_serde, watermark_col_idx)
+    // cache for reduce serde build
+    table_id_to_watermark_serde:
+        HashMap<StateTableId, Option<(OrderedRowSerde, OrderedRowSerde, usize)>>,
 }
 
 impl CompactionCatalogAgent {
     pub fn new(
         filter_key_extractor_manager: FilterKeyExtractorImpl,
         table_id_to_vnode: HashMap<StateTableId, usize>,
+        table_id_to_watermark_serde: HashMap<
+            StateTableId,
+            Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
+        >,
     ) -> Self {
         Self {
             filter_key_extractor_manager,
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         }
     }
 
@@ -401,6 +437,7 @@ impl CompactionCatalogAgent {
         Self {
             filter_key_extractor_manager: FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor),
             table_id_to_vnode: Default::default(),
+            table_id_to_watermark_serde: Default::default(),
         }
     }
 
@@ -408,14 +445,20 @@ impl CompactionCatalogAgent {
         let full_key_filter_key_extractor =
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor);
 
-        let table_id_to_vnode = table_ids
+        let table_id_to_vnode: HashMap<u32, usize> = table_ids
             .into_iter()
             .map(|table_id| (table_id, VirtualNode::COUNT_FOR_TEST))
+            .collect();
+
+        let table_id_to_watermark_serde = table_id_to_vnode
+            .keys()
+            .map(|table_id| (*table_id, None))
             .collect();
 
         Arc::new(CompactionCatalogAgent::new(
             full_key_filter_key_extractor,
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         ))
     }
 }
@@ -435,6 +478,22 @@ impl CompactionCatalogAgent {
         })
     }
 
+    pub fn watermark_serde(
+        &self,
+        table_id: StateTableId,
+    ) -> Option<(OrderedRowSerde, OrderedRowSerde, usize)> {
+        self.table_id_to_watermark_serde
+            .get(&table_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "table_id not found {} all_table_ids {:?}",
+                    table_id,
+                    self.table_id_to_watermark_serde.keys()
+                )
+            })
+            .clone()
+    }
+
     pub fn table_id_to_vnode_ref(&self) -> &HashMap<StateTableId, usize> {
         &self.table_id_to_vnode
     }
@@ -446,6 +505,53 @@ impl CompactionCatalogAgent {
 
 pub type CompactionCatalogManagerRef = Arc<CompactionCatalogManager>;
 pub type CompactionCatalogAgentRef = Arc<CompactionCatalogAgent>;
+
+fn build_watermark_col_serde(
+    table_catalog: &Table,
+) -> Option<(OrderedRowSerde, OrderedRowSerde, usize)> {
+    match table_catalog.clean_watermark_index_in_pk {
+        None => {
+            // non watermark table or watermark column is the first column (pk_prefix_watermark)
+            None
+        }
+
+        Some(clean_watermark_index_in_pk) => {
+            use risingwave_common::types::DataType;
+            let table_columns: Vec<ColumnDesc> = table_catalog
+                .columns
+                .iter()
+                .map(|col| col.column_desc.as_ref().unwrap().into())
+                .collect();
+
+            let pk_data_types: Vec<DataType> = table_catalog
+                .pk
+                .iter()
+                .map(|col_order| {
+                    table_columns[col_order.column_index as usize]
+                        .data_type
+                        .clone()
+                })
+                .collect();
+
+            let pk_order_types = table_catalog
+                .pk
+                .iter()
+                .map(|col_order| OrderType::from_protobuf(col_order.get_order_type().unwrap()))
+                .collect_vec();
+
+            assert_eq!(pk_data_types.len(), pk_order_types.len());
+            let pk_serde = OrderedRowSerde::new(pk_data_types, pk_order_types);
+            let watermark_col_serde = pk_serde
+                .index(clean_watermark_index_in_pk as usize)
+                .into_owned();
+            Some((
+                pk_serde,
+                watermark_col_serde,
+                clean_watermark_index_in_pk as usize,
+            ))
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

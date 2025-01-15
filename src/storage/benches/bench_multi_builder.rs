@@ -90,7 +90,16 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
             TableId::default().into(),
             VirtualNode::COUNT_FOR_TEST,
         )]);
-        let builder = SstableBuilder::for_test(id, writer, self.options.clone(), table_id_to_vnode);
+
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+
+        let builder = SstableBuilder::for_test(
+            id,
+            writer,
+            self.options.clone(),
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        );
 
         Ok(builder)
     }

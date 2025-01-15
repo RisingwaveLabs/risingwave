@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bytes::{Bytes, BytesMut};
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -136,10 +137,15 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
         writer: W,
         options: SstableBuilderOptions,
         table_id_to_vnode: HashMap<StateTableId, usize>,
+        table_id_to_watermark_serde: HashMap<
+            u32,
+            Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
+        >,
     ) -> Self {
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         ));
 
         Self::new(
@@ -737,7 +743,14 @@ pub(super) mod tests {
         };
 
         let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
-        let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt, table_id_to_vnode);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+        let b = SstableBuilder::for_test(
+            0,
+            mock_sst_writer(&opt),
+            opt,
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        );
 
         b.finish().await.unwrap();
     }
@@ -747,7 +760,14 @@ pub(super) mod tests {
         let opt = default_builder_opt_for_test();
 
         let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
-        let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt, table_id_to_vnode);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+        let mut b = SstableBuilder::for_test(
+            0,
+            mock_sst_writer(&opt),
+            opt,
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        );
 
         for i in 0..TEST_KEYS_COUNT {
             b.add_for_test(
@@ -787,6 +807,7 @@ pub(super) mod tests {
         // build remote table
         let sstable_store = mock_sstable_store().await;
         let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
         let sst_info = gen_test_sstable_impl::<Vec<u8>, F>(
             opts,
             0,
@@ -794,6 +815,7 @@ pub(super) mod tests {
             sstable_store.clone(),
             CachePolicy::NotFill,
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         )
         .await;
         let table = sstable_store
@@ -850,10 +872,12 @@ pub(super) mod tests {
             (2, VirtualNode::COUNT_FOR_TEST),
             (3, VirtualNode::COUNT_FOR_TEST),
         ]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(1, None), (2, None), (3, None)]);
 
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::Multi(filter),
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         ));
 
         let mut builder = SstableBuilder::new(

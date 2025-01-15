@@ -149,6 +149,9 @@ message TableWatermarks {
 
   // The direction of the table watermark.
   bool is_ascending = 2;
+
+  // The table watermark is non-pk prefix table watermark.
+  bool is_non_pk_prefix = 3;
 }
 
 message EpochNewChangeLog {

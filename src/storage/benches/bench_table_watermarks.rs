@@ -25,7 +25,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarks, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
+    TableWatermarks, TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -101,6 +101,7 @@ fn gen_committed_table_watermarks(
             })
             .collect(),
         direction: WatermarkDirection::Ascending,
+        watermark_type: WatermarkSerdeType::PkPrefix,
     }
 }
 

@@ -540,15 +540,22 @@ pub fn start_compactor(
                                     let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success;
 
                                     if enable_check_compaction_result && need_check_task {
-                                        match check_compaction_result(&compact_task, context.clone())
-                                            .await
-                                        {
+                                        let compact_table_ids = compact_task.build_compact_table_ids();
+                                        match compaction_catalog_manager_ref.acquire(compact_table_ids).await {
+                                            Ok(compaction_catalog_agent_ref) =>  {
+                                                match check_compaction_result(&compact_task, context.clone(), compaction_catalog_agent_ref).await
+                                                {
+                                                    Err(e) => {
+                                                        tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}",compact_task.task_id);
+                                                    }
+                                                    Ok(true) => (),
+                                                    Ok(false) => {
+                                                        panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
+                                                    }
+                                                }
+                                            },
                                             Err(e) => {
-                                                tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}",compact_task.task_id);
-                                            }
-                                            Ok(true) => (),
-                                            Ok(false) => {
-                                                panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
+                                                tracing::warn!(error = %e.as_report(), "failed to acquire compaction catalog agent");
                                             }
                                         }
                                     }
@@ -691,7 +698,7 @@ pub fn start_shared_compactor(
                                         compact_task,
                                         rx,
                                         Box::new(shared_compactor_object_id_manager),
-                                        compaction_catalog_agent_ref,
+                                        compaction_catalog_agent_ref.clone(),
                                     )
                                     .await;
                                     shutdown.lock().unwrap().remove(&task_id);
@@ -712,7 +719,7 @@ pub fn start_shared_compactor(
                                             let enable_check_compaction_result = context.storage_opts.check_compaction_result;
                                             let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success;
                                             if enable_check_compaction_result && need_check_task {
-                                                match check_compaction_result(&compact_task, context.clone()).await {
+                                                match check_compaction_result(&compact_task, context.clone(),compaction_catalog_agent_ref).await {
                                                     Err(e) => {
                                                         tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}", task_id);
                                                     },

@@ -48,6 +48,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
+use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     compact_task_to_string, statistics_compact_task, CompactionGroupId, HummockCompactionTaskId,
@@ -728,6 +729,22 @@ impl HummockManager {
                 }
             }
 
+            let table_watermarks = version
+                .latest_version()
+                .table_watermarks
+                .iter()
+                .filter_map(|(table_id, table_watermarks)| {
+                    if matches!(
+                        table_watermarks.watermark_type,
+                        WatermarkSerdeType::PkPrefix,
+                    ) {
+                        Some((*table_id, table_watermarks.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
             while let Some(compact_task) = compact_status.get_compact_task(
                 version
                     .latest_version()
@@ -742,7 +759,7 @@ impl HummockManager {
                 selector,
                 &table_id_to_option,
                 developer_config.clone(),
-                &version.latest_version().table_watermarks,
+                &table_watermarks,
                 &version.latest_version().state_table_info,
             ) {
                 let target_level_id = compact_task.input.target_level as u32;

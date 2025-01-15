@@ -101,7 +101,7 @@ fn should_delete_key_by_watermark(
     let Some(w) = watermark.vnode_watermarks.get(&vnode) else {
         return false;
     };
-    watermark.direction.filter_by_watermark(key, w)
+    watermark.direction.key_filter_by_watermark(key, w)
 }
 
 #[cfg(test)]

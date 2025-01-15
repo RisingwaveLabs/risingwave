@@ -42,7 +42,9 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range_with_vnode, start_bound_of_excluded_prefix, CopyFromSlice,
     TableKey, TableKeyRange,
 };
-use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_hummock_sdk::table_watermark::{
+    VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
@@ -158,6 +160,8 @@ pub struct StateTableInner<
     output_indices: Vec<usize>,
 
     op_consistency_level: StateTableOpConsistencyLevel,
+
+    clean_watermark_index_in_pk: Option<i32>,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -441,23 +445,28 @@ where
         );
 
         // Restore persisted table watermark.
-        let prefix_deser = if pk_indices.is_empty() {
+        let watermark_serde = if pk_indices.is_empty() {
             None
         } else {
-            Some(pk_serde.prefix(1))
+            match table_catalog.clean_watermark_index_in_pk {
+                None => Some(pk_serde.index(0)),
+                Some(clean_watermark_index_in_pk) => {
+                    Some(pk_serde.index(clean_watermark_index_in_pk as usize))
+                }
+            }
         };
         let max_watermark_of_vnodes = distribution
             .vnodes()
             .iter_vnodes()
             .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
             .max();
-        let committed_watermark = if let Some(deser) = prefix_deser
+        let committed_watermark = if let Some(deser) = watermark_serde
             && let Some(max_watermark) = max_watermark_of_vnodes
         {
-            let deserialized = deser
-                .deserialize(&max_watermark)
-                .ok()
-                .and_then(|row| row[0].clone());
+            let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
+                assert!(row.len() == 1);
+                row[0].clone()
+            });
             if deserialized.is_none() {
                 tracing::error!(
                     vnodes = ?distribution.vnodes(),
@@ -523,6 +532,7 @@ where
             output_indices,
             i2o_mapping,
             op_consistency_level: state_table_op_consistency_level,
+            clean_watermark_index_in_pk: table_catalog.clean_watermark_index_in_pk,
         }
     }
 
@@ -1035,7 +1045,8 @@ where
                     for entry in merged_stream.take(self.watermark_cache.capacity()) {
                         let keyed_row = entry?;
                         let pk = self.pk_serde.deserialize(keyed_row.key())?;
-                        if !pk.is_null_at(0) {
+                        // watermark column should be part of the pk
+                        if !pk.is_null_at(self.clean_watermark_index_in_pk.unwrap_or(0) as usize) {
                             pks.push(pk);
                         }
                     }
@@ -1058,16 +1069,31 @@ where
     }
 
     /// Commit pending watermark and return vnode bitmap-watermark pairs to seal.
-    fn commit_pending_watermark(&mut self) -> Option<(WatermarkDirection, Vec<VnodeWatermark>)> {
+    fn commit_pending_watermark(
+        &mut self,
+    ) -> Option<(WatermarkDirection, Vec<VnodeWatermark>, WatermarkSerdeType)> {
         let watermark = self.pending_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
         });
 
-        let prefix_serializer = if self.pk_indices().is_empty() {
+        let watermark_serializer = if self.pk_indices().is_empty() {
             None
         } else {
-            Some(self.pk_serde.prefix(1))
+            match self.clean_watermark_index_in_pk {
+                None => Some(self.pk_serde.index(0)),
+                Some(clean_watermark_index_in_pk) => {
+                    Some(self.pk_serde.index(clean_watermark_index_in_pk as usize))
+                }
+            }
+        };
+
+        let watermark_type = match self.clean_watermark_index_in_pk {
+            None => WatermarkSerdeType::PkPrefix,
+            Some(clean_watermark_index_in_pk) => match clean_watermark_index_in_pk {
+                0 => WatermarkSerdeType::PkPrefix,
+                _ => WatermarkSerdeType::NonPkPrefix,
+            },
         };
 
         let should_clean_watermark = match watermark {
@@ -1095,31 +1121,34 @@ where
         let watermark_suffix = watermark.as_ref().map(|watermark| {
             serialize_pk(
                 row::once(Some(watermark.clone())),
-                prefix_serializer.as_ref().unwrap(),
+                watermark_serializer.as_ref().unwrap(),
             )
         });
 
-        let mut seal_watermark: Option<(WatermarkDirection, VnodeWatermark)> = None;
+        let mut seal_watermark: Option<(WatermarkDirection, VnodeWatermark, WatermarkSerdeType)> =
+            None;
 
         // Compute Delete Ranges
         if should_clean_watermark && let Some(watermark_suffix) = watermark_suffix {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes().iter_vnodes().collect_vec()
             }, "delete range");
-            if prefix_serializer
+
+            let order_type = watermark_serializer
                 .as_ref()
                 .unwrap()
                 .get_order_types()
-                .first()
-                .unwrap()
-                .is_ascending()
-            {
+                .get(0)
+                .unwrap();
+
+            if order_type.is_ascending() {
                 seal_watermark = Some((
                     WatermarkDirection::Ascending,
                     VnodeWatermark::new(
                         self.vnodes().clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref()),
                     ),
+                    watermark_type,
                 ));
             } else {
                 seal_watermark = Some((
@@ -1128,6 +1157,7 @@ where
                         self.vnodes().clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref()),
                     ),
+                    watermark_type,
                 ));
             }
         }
@@ -1144,7 +1174,9 @@ where
             self.watermark_cache.clear();
         }
 
-        seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]))
+        seal_watermark.map(|(direction, watermark, is_non_pk_prefix)| {
+            (direction, vec![watermark], is_non_pk_prefix)
+        })
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {

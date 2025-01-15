@@ -25,6 +25,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::EvictionConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -162,7 +163,14 @@ pub async fn gen_test_sstable_data(
         TableId::default().table_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
-    let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts, table_id_to_vnode);
+    let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+    let mut b = SstableBuilder::for_test(
+        0,
+        mock_sst_writer(&opts),
+        opts,
+        table_id_to_vnode,
+        table_id_to_watermark_serde,
+    );
     for (key, value) in kv_iter {
         b.add_for_test(key.to_ref(), value.as_slice())
             .await
@@ -233,6 +241,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
     table_id_to_vnode: HashMap<u32, usize>,
+    table_id_to_watermark_serde: HashMap<u32, Option<(OrderedRowSerde, OrderedRowSerde, usize)>>,
 ) -> SstableInfo {
     let writer_opts = SstableWriterOptions {
         capacity_hint: None,
@@ -246,6 +255,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
         FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
         table_id_to_vnode,
+        table_id_to_watermark_serde,
     ));
 
     let mut b = SstableBuilder::<_, F>::new(
@@ -283,6 +293,10 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
         TableId::default().table_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
+
+    let table_id_to_watermark_serde =
+        HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+
     let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
@@ -290,6 +304,7 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
         sstable_store.clone(),
         CachePolicy::NotFill,
         table_id_to_vnode,
+        table_id_to_watermark_serde,
     )
     .await;
 
@@ -310,9 +325,10 @@ pub async fn gen_test_sstable_with_table_ids<B: AsRef<[u8]> + Clone + Default + 
     table_ids: Vec<StateTableId>,
 ) -> (TableHolder, SstableInfo) {
     let table_id_to_vnode = table_ids
-        .into_iter()
-        .map(|table_id| (table_id, VirtualNode::COUNT_FOR_TEST))
+        .iter()
+        .map(|table_id| (*table_id, VirtualNode::COUNT_FOR_TEST))
         .collect();
+    let table_id_to_watermark_serde = table_ids.iter().map(|table_id| (*table_id, None)).collect();
 
     let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
@@ -321,6 +337,7 @@ pub async fn gen_test_sstable_with_table_ids<B: AsRef<[u8]> + Clone + Default + 
         sstable_store.clone(),
         CachePolicy::NotFill,
         table_id_to_vnode,
+        table_id_to_watermark_serde,
     )
     .await;
 
@@ -344,6 +361,10 @@ pub async fn gen_test_sstable_info<B: AsRef<[u8]> + Clone + Default + Eq>(
         TableId::default().table_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
+
+    let table_id_to_watermark_serde =
+        HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+
     gen_test_sstable_impl::<_, BlockedXor16FilterBuilder>(
         opts,
         object_id,
@@ -351,6 +372,7 @@ pub async fn gen_test_sstable_info<B: AsRef<[u8]> + Clone + Default + Eq>(
         sstable_store,
         CachePolicy::NotFill,
         table_id_to_vnode,
+        table_id_to_watermark_serde,
     )
     .await
 }
@@ -366,6 +388,10 @@ pub async fn gen_test_sstable_with_range_tombstone(
         TableId::default().table_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
+
+    let table_id_to_watermark_serde =
+        HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+
     gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
@@ -373,6 +399,7 @@ pub async fn gen_test_sstable_with_range_tombstone(
         sstable_store.clone(),
         CachePolicy::Fill(CacheHint::Normal),
         table_id_to_vnode,
+        table_id_to_watermark_serde,
     )
     .await
 }

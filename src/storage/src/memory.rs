@@ -1003,13 +1003,15 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
             next_epoch,
             prev_epoch
         );
+
         self.inner
             .table_next_epochs
             .lock()
             .entry(self.table_id)
             .or_default()
             .insert(prev_epoch, next_epoch);
-        if let Some((direction, watermarks)) = opts.table_watermarks {
+
+        if let Some((direction, watermarks, _watermark_type)) = opts.table_watermarks {
             let delete_ranges = watermarks
                 .iter()
                 .flat_map(|vnode_watermark| {

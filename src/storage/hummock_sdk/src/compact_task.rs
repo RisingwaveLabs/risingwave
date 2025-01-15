@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::size_of;
 
 use itertools::Itertools;
@@ -22,6 +22,7 @@ use risingwave_pb::hummock::{
     PbCompactTask, PbKeyRange, PbTableOption, PbTableSchema, PbTableStats, PbValidationTask,
 };
 
+use crate::compaction_group::StateTableId;
 use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
@@ -111,6 +112,48 @@ impl CompactTask {
                 .values()
                 .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
                 .sum::<usize>()
+    }
+}
+
+impl CompactTask {
+    // The compact task may need to reclaim key with TTL
+    pub fn contains_ttl(&self) -> bool {
+        self.table_options
+            .iter()
+            .any(|(_, table_option)| table_option.retention_seconds.is_some_and(|ttl| ttl > 0))
+    }
+
+    // The compact task may need to reclaim key with range tombstone
+    pub fn contains_range_tombstone(&self) -> bool {
+        self.input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .any(|sst| sst.range_tombstone_count > 0)
+    }
+
+    // The compact task may need to reclaim key with split sst
+    pub fn contains_split_sst(&self) -> bool {
+        self.input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .any(|sst| sst.sst_id != sst.object_id)
+    }
+
+    pub fn get_table_ids_from_input_ssts(&self) -> impl Iterator<Item = StateTableId> {
+        self.input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .flat_map(|sst| sst.table_ids.clone())
+            .sorted()
+            .unique()
+    }
+
+    // filter the table-id that in existing_table_ids with the table-id in compact-task
+    pub fn build_compact_table_ids(&self) -> Vec<StateTableId> {
+        let existing_table_ids: HashSet<u32> = HashSet::from_iter(self.existing_table_ids.clone());
+        self.get_table_ids_from_input_ssts()
+            .filter(|table_id| existing_table_ids.contains(table_id))
+            .collect()
     }
 }
 

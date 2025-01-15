@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
+    TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::get_compaction_group_id_by_table_id;
@@ -2268,6 +2268,7 @@ async fn test_table_watermark() {
                 table_watermarks: Some((
                     WatermarkDirection::Ascending,
                     vec![VnodeWatermark::new(vnode_bitmap, gen_inner_key(watermark1))],
+                    WatermarkSerdeType::PkPrefix,
                 )),
                 switch_op_consistency_level: None,
             },
@@ -2595,6 +2596,7 @@ async fn test_table_watermark() {
                 table_watermarks: Some((
                     WatermarkDirection::Ascending,
                     vec![VnodeWatermark::new(vnode_bitmap, gen_inner_key(5))],
+                    WatermarkSerdeType::PkPrefix,
                 )),
                 switch_op_consistency_level: None,
             },

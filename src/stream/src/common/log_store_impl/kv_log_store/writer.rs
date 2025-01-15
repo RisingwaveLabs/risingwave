@@ -23,7 +23,9 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
-use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_hummock_sdk::table_watermark::{
+    VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+};
 use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
 use tokio::sync::watch;
 
@@ -179,7 +181,11 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         self.state_store.seal_current_epoch(
             next_epoch,
             SealCurrentEpochOptions {
-                table_watermarks: Some((WatermarkDirection::Ascending, watermark)),
+                table_watermarks: Some((
+                    WatermarkDirection::Ascending,
+                    watermark,
+                    WatermarkSerdeType::PkPrefix,
+                )),
                 switch_op_consistency_level: None,
             },
         );

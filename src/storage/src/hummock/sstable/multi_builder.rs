@@ -385,7 +385,15 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
             TableId::default().table_id(),
             VirtualNode::COUNT_FOR_TEST,
         )]);
-        let builder = SstableBuilder::for_test(id, writer, self.options.clone(), table_id_to_vnode);
+        let table_id_to_watermark_serde =
+            HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+        let builder = SstableBuilder::for_test(
+            id,
+            writer,
+            self.options.clone(),
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        );
 
         Ok(builder)
     }
@@ -588,9 +596,12 @@ mod tests {
                 BTreeMap::from([(1_u32, 4_u32), (2_u32, 4_u32), (3_u32, 4_u32)]);
 
             let table_id_to_vnode = HashMap::from_iter(vec![(1, 64), (2, 128), (3, 256)]);
+            let table_id_to_watermark_serde =
+                HashMap::from_iter(vec![(1, None), (2, None), (3, None)]);
             let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
                 FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
                 table_id_to_vnode,
+                table_id_to_watermark_serde,
             ));
 
             let mut builder = CapacitySplitTableBuilder::new(

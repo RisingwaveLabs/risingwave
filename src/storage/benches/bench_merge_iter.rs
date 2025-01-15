@@ -14,13 +14,16 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::executor::block_on;
 use risingwave_hummock_sdk::key::TableKey;
+use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::iterator::{
-    Forward, HummockIterator, HummockIteratorUnion, MergeIterator, SkipWatermarkIterator,
+    Forward, HummockIterator, HummockIteratorUnion, MergeIterator,
+    NonPkPrefixSkipWatermarkIterator, SkipWatermarkIterator,
 };
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator, SharedBufferValue,
@@ -108,10 +111,20 @@ fn criterion_benchmark(c: &mut Criterion) {
         },
     );
 
-    let merge_iter = RefCell::new(SkipWatermarkIterator::new(
-        MergeIterator::new(gen_interleave_shared_buffer_batch_iter(10000, 100)),
-        BTreeMap::new(),
-    ));
+    let combine_iter = {
+        let iter = SkipWatermarkIterator::new(
+            MergeIterator::new(gen_interleave_shared_buffer_batch_iter(10000, 100)),
+            BTreeMap::new(),
+        );
+
+        NonPkPrefixSkipWatermarkIterator::new(
+            iter,
+            BTreeMap::new(),
+            Arc::new(CompactionCatalogAgent::dummy()),
+        )
+    };
+
+    let merge_iter = RefCell::new(combine_iter);
     c.bench_with_input(
         BenchmarkId::new("bench-merge-iter-skip-empty-watermark", "unordered"),
         &merge_iter,
