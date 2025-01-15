@@ -18,6 +18,7 @@ use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
 use crate::error::Result;
+use crate::user::has_access_to_object;
 
 #[derive(Fields)]
 struct RwSubscription {
@@ -39,6 +40,9 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSubscriptio
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
+    let current_user = user_reader
+        .get_user_by_name(&reader.auth_context.user_name)
+        .expect("user not found");
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
@@ -46,6 +50,14 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSubscriptio
         .flat_map(|schema| {
             schema
                 .iter_subscription()
+                .filter(|s| {
+                    has_access_to_object(
+                        current_user,
+                        &schema.name,
+                        s.id.subscription_id,
+                        s.owner.user_id,
+                    )
+                })
                 .map(|subscription| RwSubscription {
                     id: subscription.id.subscription_id as i32,
                     name: subscription.name.clone(),

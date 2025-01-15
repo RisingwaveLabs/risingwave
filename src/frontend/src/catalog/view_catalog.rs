@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, SYS_CATALOG_START_ID};
 use risingwave_pb::catalog::PbView;
 
 use super::{OwnedByUserCatalog, ViewId};
@@ -60,6 +60,11 @@ impl ViewCatalog {
         } else {
             format!("CREATE VIEW {}.{} AS {}", schema, self.name, self.sql)
         }
+    }
+
+    /// Returns true if this view is a system view.
+    pub fn is_system_view(&self) -> bool {
+        self.id >= SYS_CATALOG_START_ID as u32
     }
 }
 

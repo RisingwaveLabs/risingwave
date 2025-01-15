@@ -21,6 +21,7 @@ use crate::catalog::system_catalog::rw_catalog::rw_sources::serialize_props_with
 use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
 use crate::error::Result;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
+use crate::user::has_access_to_object;
 
 #[derive(Fields)]
 struct RwSink {
@@ -50,59 +51,70 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
+    let current_user = user_reader
+        .get_user_by_name(&reader.auth_context.user_name)
+        .expect("user not found");
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_sink().map(|sink| {
-                let connector_props = serialize_props_with_secret(
-                    schema,
-                    WithOptionsSecResolved::new(sink.properties.clone(), sink.secret_refs.clone()),
-                )
-                .into();
-                let format_encode_options = sink
-                    .format_desc
-                    .as_ref()
-                    .map(|desc| {
-                        serialize_props_with_secret(
-                            schema,
-                            WithOptionsSecResolved::new(
-                                desc.options.clone(),
-                                desc.secret_refs.clone(),
-                            ),
-                        )
-                    })
-                    .unwrap_or_else(jsonbb::Value::null)
+            schema
+                .iter_sink()
+                .filter(|s| {
+                    has_access_to_object(current_user, &schema.name, s.id.sink_id, s.owner.user_id)
+                })
+                .map(|sink| {
+                    let connector_props = serialize_props_with_secret(
+                        schema,
+                        WithOptionsSecResolved::new(
+                            sink.properties.clone(),
+                            sink.secret_refs.clone(),
+                        ),
+                    )
                     .into();
-                RwSink {
-                    id: sink.id.sink_id as i32,
-                    name: sink.name.clone(),
-                    schema_id: schema.id() as i32,
-                    owner: sink.owner.user_id as i32,
-                    connector: sink
-                        .properties
-                        .get(UPSTREAM_SOURCE_KEY)
-                        .cloned()
-                        .unwrap_or("".to_owned())
-                        .to_uppercase(),
-                    sink_type: sink.sink_type.to_proto().as_str_name().into(),
-                    connection_id: sink.connection_id.map(|id| id.connection_id() as i32),
-                    definition: sink.create_sql(),
-                    acl: get_acl_items(
-                        &Object::SinkId(sink.id.sink_id),
-                        false,
-                        &users,
-                        username_map,
-                    ),
-                    initialized_at: sink.initialized_at_epoch.map(|e| e.as_timestamptz()),
-                    created_at: sink.created_at_epoch.map(|e| e.as_timestamptz()),
-                    initialized_at_cluster_version: sink.initialized_at_cluster_version.clone(),
-                    created_at_cluster_version: sink.created_at_cluster_version.clone(),
-                    connector_props,
-                    format_encode_options,
-                }
-            })
+                    let format_encode_options = sink
+                        .format_desc
+                        .as_ref()
+                        .map(|desc| {
+                            serialize_props_with_secret(
+                                schema,
+                                WithOptionsSecResolved::new(
+                                    desc.options.clone(),
+                                    desc.secret_refs.clone(),
+                                ),
+                            )
+                        })
+                        .unwrap_or_else(jsonbb::Value::null)
+                        .into();
+                    RwSink {
+                        id: sink.id.sink_id as i32,
+                        name: sink.name.clone(),
+                        schema_id: schema.id() as i32,
+                        owner: sink.owner.user_id as i32,
+                        connector: sink
+                            .properties
+                            .get(UPSTREAM_SOURCE_KEY)
+                            .cloned()
+                            .unwrap_or("".to_owned())
+                            .to_uppercase(),
+                        sink_type: sink.sink_type.to_proto().as_str_name().into(),
+                        connection_id: sink.connection_id.map(|id| id.connection_id() as i32),
+                        definition: sink.create_sql(),
+                        acl: get_acl_items(
+                            &Object::SinkId(sink.id.sink_id),
+                            false,
+                            &users,
+                            username_map,
+                        ),
+                        initialized_at: sink.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                        created_at: sink.created_at_epoch.map(|e| e.as_timestamptz()),
+                        initialized_at_cluster_version: sink.initialized_at_cluster_version.clone(),
+                        created_at_cluster_version: sink.created_at_cluster_version.clone(),
+                        connector_props,
+                        format_encode_options,
+                    }
+                })
         })
         .collect())
 }

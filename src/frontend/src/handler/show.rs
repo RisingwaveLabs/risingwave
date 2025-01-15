@@ -39,6 +39,7 @@ use crate::handler::create_connection::print_connection_params;
 use crate::handler::HandlerArgs;
 use crate::session::cursor_manager::SubscriptionCursor;
 use crate::session::SessionImpl;
+use crate::user::has_access_to_object;
 
 pub fn get_columns_from_table(
     session: &SessionImpl,
@@ -630,44 +631,67 @@ pub fn handle_show_create_object(
         Binder::resolve_schema_qualified_name(&database, name.clone())?;
     let schema_name = schema_name.unwrap_or(DEFAULT_SCHEMA_NAME.to_owned());
     let schema = catalog_reader.get_schema_by_name(&database, &schema_name)?;
+    let user_reader = session.env().user_info_reader().read_guard();
+    let current_user = user_reader
+        .get_user_by_name(&session.user_name())
+        .expect("user not found");
     let sql = match show_create_type {
         ShowCreateType::MaterializedView => {
             let mv = schema
                 .get_created_table_by_name(&object_name)
-                .filter(|t| t.is_mview())
+                .filter(|t| {
+                    t.is_mview()
+                        && has_access_to_object(current_user, &schema.name, t.id.table_id, t.owner)
+                })
                 .ok_or_else(|| CatalogError::NotFound("materialized view", name.to_string()))?;
             mv.create_sql()
         }
         ShowCreateType::View => {
             let view = schema
                 .get_view_by_name(&object_name)
+                .filter(|v| {
+                    v.is_system_view()
+                        || has_access_to_object(current_user, &schema.name, v.id, v.owner)
+                })
                 .ok_or_else(|| CatalogError::NotFound("view", name.to_string()))?;
             view.create_sql(schema.name())
         }
         ShowCreateType::Table => {
             let table = schema
                 .get_created_table_by_name(&object_name)
-                .filter(|t| t.is_user_table())
+                .filter(|t| {
+                    t.is_user_table()
+                        && has_access_to_object(current_user, &schema.name, t.id.table_id, t.owner)
+                })
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
             table.create_sql_purified()
         }
         ShowCreateType::Sink => {
             let sink = schema
                 .get_sink_by_name(&object_name)
+                .filter(|s| {
+                    has_access_to_object(current_user, &schema.name, s.id.sink_id, s.owner.user_id)
+                })
                 .ok_or_else(|| CatalogError::NotFound("sink", name.to_string()))?;
             sink.create_sql()
         }
         ShowCreateType::Source => {
             let source = schema
                 .get_source_by_name(&object_name)
-                .filter(|s| s.associated_table_id.is_none())
+                .filter(|s| {
+                    s.associated_table_id.is_none()
+                        && has_access_to_object(current_user, &schema.name, s.id, s.owner)
+                })
                 .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
             source.create_sql_purified()
         }
         ShowCreateType::Index => {
             let index = schema
                 .get_created_table_by_name(&object_name)
-                .filter(|t| t.is_index())
+                .filter(|t| {
+                    t.is_index()
+                        && has_access_to_object(current_user, &schema.name, t.id.table_id, t.owner)
+                })
                 .ok_or_else(|| CatalogError::NotFound("index", name.to_string()))?;
             index.create_sql()
         }
@@ -677,6 +701,14 @@ pub fn handle_show_create_object(
         ShowCreateType::Subscription => {
             let subscription = schema
                 .get_subscription_by_name(&object_name)
+                .filter(|s| {
+                    has_access_to_object(
+                        current_user,
+                        &schema.name,
+                        s.id.subscription_id,
+                        s.owner.user_id,
+                    )
+                })
                 .ok_or_else(|| CatalogError::NotFound("subscription", name.to_string()))?;
             subscription.create_sql()
         }

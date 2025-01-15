@@ -197,4 +197,16 @@ impl UserCatalog {
         }
         action_map.values().all(|&found| found)
     }
+
+    pub fn check_object_visibility(&self, obj_id: u32) -> bool {
+        if self.is_super {
+            return true;
+        }
+
+        // `Select` and `Execute` are the minimum required privileges for object visibility.
+        // `Execute` is required for functions.
+        self.object_acls.get(&obj_id).map_or(false, |acl_set| {
+            acl_set.has_mode(AclMode::Select) || acl_set.has_mode(AclMode::Execute)
+        })
+    }
 }
