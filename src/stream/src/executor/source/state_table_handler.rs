@@ -159,13 +159,14 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             Some(Self::string_to_scalar(key.deref())),
             Some(ScalarImpl::Jsonb(value)),
         ];
+        tracing::info!("writing file {:?} into state table.", key.clone());
         match self.get(key).await? {
             Some(prev_row) => {
-                tracing::info!("Update file {:?} into state table.", key);
+                tracing::info!("Update state table.", key.clone());
                 self.state_table.update(prev_row, row);
             }
             None => {
-                tracing::info!("Insert file {:?} into state table.", key);
+                tracing::info!("Insert into state table.", key.clone());
                 self.state_table.insert(row);
             }
         }
