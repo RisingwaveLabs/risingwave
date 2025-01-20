@@ -350,8 +350,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             .rows()
                                             .map(|row| {
                                                 let filename = row.datum_at(0).unwrap().into_utf8();
-
-                                                let size = row.datum_at(2).unwrap().into_int64();
+                                                
+                                                let size: i64 = row.datum_at(2).unwrap().into_int64();
                                                 OpendalFsSplit::<Src>::new(
                                                     filename.to_owned(),
                                                     0,
@@ -373,6 +373,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     .unwrap();
                             debug_assert_eq!(mapping.len(), 1);
                             if let Some((split_id, offset)) = mapping.into_iter().next() {
+                                tracing::info!("Reading file {:?} from state table.", split_id);
                                 let row = state_store_handler
                                     .get(split_id.clone())
                                     .await?
@@ -387,6 +388,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 };
                                 if offset.parse::<usize>().unwrap() >= fs_split.size {
                                     splits_on_fetch -= 1;
+                                    tracing::info!("Delete file {:?} in state table.", split_id);
                                     state_store_handler.delete(split_id).await?;
                                 } else {
                                     state_store_handler

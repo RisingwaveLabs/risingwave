@@ -80,7 +80,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                 Some(Ok(object)) => {
                     let name = object.path().to_string();
                     let om = object.metadata();
-
+                    tracing::info!("List file {:?} from object store.", name);
                     let t = match om.last_modified() {
                         Some(t) => t,
                         None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),

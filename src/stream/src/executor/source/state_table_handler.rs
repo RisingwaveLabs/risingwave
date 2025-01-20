@@ -161,9 +161,11 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         ];
         match self.get(key).await? {
             Some(prev_row) => {
+                tracing::info!("Update file {:?} into state table.", key);
                 self.state_table.update(prev_row, row);
             }
             None => {
+                tracing::info!("Insert file {:?} into state table.", key);
                 self.state_table.insert(row);
             }
         }
