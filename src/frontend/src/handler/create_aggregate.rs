@@ -15,7 +15,7 @@
 use anyhow::Context;
 use either::Either;
 use risingwave_common::catalog::FunctionId;
-use risingwave_expr::sig::{CreateFunctionOptions, UdfKind};
+use risingwave_expr::sig::{CreateOptions, UdfKind};
 use risingwave_pb::catalog::function::{AggregateFunction, Kind};
 use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::ast::DataType as AstDataType;
@@ -105,7 +105,7 @@ pub async fn handle_create_aggregate(
     };
 
     let create_fn = risingwave_expr::sig::find_udf_impl(&language, None, link)?.create_fn;
-    let output = create_fn(CreateFunctionOptions {
+    let output = create_fn(CreateOptions {
         kind: UdfKind::Aggregate,
         name: &function_name,
         arg_names: &arg_names,
@@ -127,7 +127,7 @@ pub async fn handle_create_aggregate(
         return_type: Some(return_type.into()),
         language,
         runtime,
-        identifier: Some(output.identifier),
+        identifier: Some(output.name_in_runtime),
         link: link.map(|s| s.to_owned()),
         body: output.body,
         compressed_binary: output.compressed_binary,

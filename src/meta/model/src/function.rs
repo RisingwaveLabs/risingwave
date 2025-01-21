@@ -44,7 +44,8 @@ pub struct Model {
     pub language: String,
     pub runtime: Option<String>,
     pub link: Option<String>,
-    pub identifier: Option<String>,
+    /// XXX(rc): This is re-interpreted as `name_in_runtime`.
+    pub identifier: Option<String>, // TODO(): migrate for language = rust/wasm, set to `name`
     pub body: Option<String>,
     pub compressed_binary: Option<Vec<u8>>,
     pub kind: FunctionKind,

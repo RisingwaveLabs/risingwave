@@ -605,12 +605,9 @@ message UserDefinedFunction {
   string language = 4;
   // The link to the external function service.
   optional string link = 5;
-  // An unique identifier to the function.
-  // - If `link` is not empty, the name of the function in the external function service.
-  // - If `language` is `rust` or `wasm`, the name of the function in the wasm binary file.
-  // - If `language` is `javascript`, the name of the function.
+  // XXX(rc): This is re-interpreted as `name_in_runtime`.
   optional string identifier = 6;
-  // - If `language` is `javascript`, the source code of the function.
+  // - If `language` is `javascript` or `python`, the source code of the function.
   optional string body = 7;
   // - If `language` is `rust` or `wasm`, the zstd-compressed wasm binary.
   optional bytes compressed_binary = 10;
