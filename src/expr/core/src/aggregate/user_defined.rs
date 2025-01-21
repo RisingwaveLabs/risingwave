@@ -23,7 +23,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::expr::PbUserDefinedFunctionMetadata;
 
 use super::*;
-use crate::sig::{UdfImpl, UdfKind, BuildOptions};
+use crate::sig::{BuildOptions, UdfImpl, UdfKind};
 
 #[derive(Debug)]
 pub struct UserDefinedAggregateFunction {
@@ -149,7 +149,7 @@ pub fn new_user_defined(
     let arg_schema = Arc::new(Schema::new(
         arg_types
             .iter()
-            .map(|t| arrow_convert.to_arrow_field("", &t))
+            .map(|t| arrow_convert.to_arrow_field("", t))
             .try_collect::<_, Fields, _>()?,
     ));
 

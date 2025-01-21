@@ -30,7 +30,7 @@ use risingwave_pb::expr::ExprNode;
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
-use crate::sig::{UdfImpl, UdfKind, BuildOptions};
+use crate::sig::{BuildOptions, UdfImpl, UdfKind};
 use crate::{bail, ExprError, Result};
 
 #[derive(Debug)]
