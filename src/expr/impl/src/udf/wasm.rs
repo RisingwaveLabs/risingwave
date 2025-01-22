@@ -18,8 +18,10 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use arrow_udf_wasm::Runtime;
+use educe::Educe;
 use futures_util::StreamExt;
 use itertools::Itertools;
+use risingwave_common::must_match;
 use risingwave_common::types::DataType;
 use risingwave_expr::sig::{BuildOptions, UdfKind};
 
@@ -48,18 +50,19 @@ fn create_wasm(opts: CreateOptions<'_>) -> Result<CreateFunctionOutput> {
         bail!("USING must be specified")
     };
 
-    let mut runtime = create_wasm_runtime(&wasm_binary)?;
+    let runtime = create_wasm_runtime(&wasm_binary)?;
     if runtime.abi_version().0 <= 2 {
         bail!("legacy arrow-udf is no longer supported. please update arrow-udf to 0.3+");
     }
 
+    let name_in_runtime = opts.name.to_owned();
     let arg_type_names = opts.arg_types.iter().map(datatype_name).collect::<Vec<_>>();
     let return_type_name = datatype_name(opts.return_type);
     match opts.kind {
         UdfKind::Scalar | UdfKind::Table => {
             // test if the function exists in the wasm binary
-            runtime.add_function(
-                opts.name,
+            _ = runtime.find_function(
+                &name_in_runtime,
                 &arg_type_names,
                 &return_type_name,
                 opts.kind.is_table(),
@@ -72,7 +75,7 @@ fn create_wasm(opts: CreateOptions<'_>) -> Result<CreateFunctionOutput> {
 
     let compressed_binary = Some(zstd::stream::encode_all(&*wasm_binary, 0)?);
     Ok(CreateFunctionOutput {
-        name_in_runtime: opts.name.to_owned(),
+        name_in_runtime,
         body: None,
         compressed_binary,
     })
@@ -82,15 +85,17 @@ fn create_rust(opts: CreateOptions<'_>) -> Result<CreateFunctionOutput> {
     if opts.using_link.is_some() {
         bail!("USING is not supported for rust function");
     }
+    let name_in_runtime = opts.name.to_owned();
 
     let prelude = "use arrow_udf::{{function, types::*}};";
     let export_macro = if opts
         .arg_types
         .iter()
-        .chain(std::iter::once(opts.return_type).all(|t| !t.is_struct()))
+        .chain(std::iter::once(opts.return_type))
+        .all(|t| !t.is_struct())
     {
         let identifier_v1 = wasm_identifier_v1(
-            opts.name,
+            &name_in_runtime,
             opts.arg_types,
             opts.return_type,
             opts.kind.is_table(),
@@ -120,15 +125,15 @@ fn create_rust(opts: CreateOptions<'_>) -> Result<CreateFunctionOutput> {
     .unwrap()
     .context("failed to build rust function")?;
 
-    let mut runtime = create_wasm_runtime(&wasm_binary)?;
+    let runtime = create_wasm_runtime(&wasm_binary)?;
 
     let arg_type_names = opts.arg_types.iter().map(datatype_name).collect::<Vec<_>>();
     let return_type_name = datatype_name(opts.return_type);
     match opts.kind {
         UdfKind::Scalar | UdfKind::Table => {
             // test if the function exists in the wasm binary
-            runtime.add_function(
-                opts.name,
+            _ = runtime.find_function(
+                &name_in_runtime,
                 &arg_type_names,
                 &return_type_name,
                 opts.kind.is_table(),
@@ -141,7 +146,7 @@ fn create_rust(opts: CreateOptions<'_>) -> Result<CreateFunctionOutput> {
 
     let compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_slice(), 0)?);
     Ok(CreateFunctionOutput {
-        name_in_runtime: opts.name.to_owned(),
+        name_in_runtime,
         body,
         compressed_binary,
     })
@@ -153,40 +158,43 @@ fn build(opts: BuildOptions<'_>) -> Result<Box<dyn UdfImpl>> {
         .context("compressed binary is required")?;
     let wasm_binary =
         zstd::stream::decode_all(compressed_binary).context("failed to decompress wasm binary")?;
-    let mut runtime = create_wasm_runtime(&wasm_binary)?;
+    let runtime = create_wasm_runtime(&wasm_binary)?;
 
     let arg_type_names = opts.arg_types.iter().map(datatype_name).collect::<Vec<_>>();
     let return_type_name = datatype_name(opts.return_type);
     match opts.kind {
         UdfKind::Scalar | UdfKind::Table => {
-            runtime.add_function(
+            let func = runtime.find_function(
                 opts.name_in_runtime,
                 &arg_type_names,
                 &return_type_name,
                 opts.kind.is_table(),
             )?;
+            Ok(Box::new(WasmFunction {
+                runtime,
+                name: opts.name_in_runtime.to_owned(),
+                func,
+            }))
         }
         UdfKind::Aggregate => {
             todo!("wasm/rust udaf");
         }
     }
-
-    Ok(Box::new(WasmFunction {
-        runtime,
-        name: opts.name_in_runtime.to_owned(),
-    }))
 }
 
-#[derive(Debug)]
+#[derive(Educe)]
+#[educe(Debug)]
 struct WasmFunction {
     runtime: Runtime,
     name: String,
+    #[educe(Debug(ignore))]
+    func: arrow_udf_wasm::Function,
 }
 
 #[async_trait::async_trait]
 impl UdfImpl for WasmFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
-        self.runtime.call(&self.name, input)
+        self.runtime.call(&self.func, input)
     }
 
     async fn call_table_function<'a>(
@@ -194,7 +202,7 @@ impl UdfImpl for WasmFunction {
         input: &'a RecordBatch,
     ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
         self.runtime
-            .call_table_function(&self.name, input)
+            .call_table_function(&self.func, input)
             .map(|s| futures_util::stream::iter(s).boxed())
     }
 
@@ -244,7 +252,7 @@ fn wasm_identifier_v1(
     )
 }
 
-/// Convert a data type to string used in identifier.
+/// Convert a data type to string used in `arrow-udf-wasm`.
 fn datatype_name(ty: &DataType) -> String {
     match ty {
         DataType::Boolean => "boolean".to_owned(),
