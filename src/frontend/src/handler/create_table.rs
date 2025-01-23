@@ -1512,6 +1512,18 @@ pub async fn create_iceberg_engine_table(
         ErrorCode::InternalError("failed to parse the meta store endpoint".to_owned())
     })?;
     let meta_store_backend = meta_store_endpoint.scheme().to_owned();
+    let Ok(meta_store_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
+        bail!("failed to parse meta backend: {}", meta_store_backend);
+    };
+    match meta_store_backend {
+        MetaBackend::Postgres | MetaBackend::Mysql => {}
+        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
+            bail!(
+                "Unsupported meta backend for iceberg engine table: {:?}",
+                meta_store_backend
+            );
+        }
+    }
     let meta_store_user = meta_store_endpoint.username().to_owned();
     let meta_store_password = meta_store_endpoint
         .password()
@@ -1532,10 +1544,6 @@ pub async fn create_iceberg_engine_table(
         .path()
         .trim_start_matches('/')
         .to_owned();
-
-    let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
-        bail!("failed to parse meta backend: {}", meta_store_backend);
-    };
 
     let rw_db_name = session
         .env()
@@ -1625,7 +1633,7 @@ pub async fn create_iceberg_engine_table(
         into_table_name: None,
     };
 
-    let catalog_uri = match meta_backend {
+    let catalog_uri = match meta_store_backend {
         MetaBackend::Postgres => {
             format!(
                 "jdbc:postgresql://{}:{}/{}",
@@ -1642,12 +1650,7 @@ pub async fn create_iceberg_engine_table(
                 meta_store_database.clone()
             )
         }
-        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
-            bail!(
-                "Unsupported meta backend for iceberg engine table: {}",
-                meta_store_backend
-            );
-        }
+        _ => unreachable!(),
     };
 
     let warehouse_path = format!(
