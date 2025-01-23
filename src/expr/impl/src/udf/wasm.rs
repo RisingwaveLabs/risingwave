@@ -59,13 +59,16 @@ fn create_wasm(opts: CreateOptions<'_>) -> Result<CreateFunctionOutput> {
     let arg_type_names = opts.arg_types.iter().map(datatype_name).collect::<Vec<_>>();
     let return_type_name = datatype_name(opts.return_type);
     match opts.kind {
-        UdfKind::Scalar | UdfKind::Table => {
+        UdfKind::Scalar => {
             // test if the function exists in the wasm binary
-            _ = runtime.find_function(
+            _ = runtime.find_function(&name_in_runtime, &arg_type_names, &return_type_name)?;
+        }
+        UdfKind::Table => {
+            // test if the function exists in the wasm binary
+            _ = runtime.find_table_function(
                 &name_in_runtime,
                 &arg_type_names,
                 &return_type_name,
-                opts.kind.is_table(),
             )?;
         }
         UdfKind::Aggregate => {
@@ -130,13 +133,16 @@ fn create_rust(opts: CreateOptions<'_>) -> Result<CreateFunctionOutput> {
     let arg_type_names = opts.arg_types.iter().map(datatype_name).collect::<Vec<_>>();
     let return_type_name = datatype_name(opts.return_type);
     match opts.kind {
-        UdfKind::Scalar | UdfKind::Table => {
+        UdfKind::Scalar => {
             // test if the function exists in the wasm binary
-            _ = runtime.find_function(
+            _ = runtime.find_function(&name_in_runtime, &arg_type_names, &return_type_name)?;
+        }
+        UdfKind::Table => {
+            // test if the function exists in the wasm binary
+            _ = runtime.find_table_function(
                 &name_in_runtime,
                 &arg_type_names,
                 &return_type_name,
-                opts.kind.is_table(),
             )?;
         }
         UdfKind::Aggregate => {
@@ -163,14 +169,22 @@ fn build(opts: BuildOptions<'_>) -> Result<Box<dyn UdfImpl>> {
     let arg_type_names = opts.arg_types.iter().map(datatype_name).collect::<Vec<_>>();
     let return_type_name = datatype_name(opts.return_type);
     match opts.kind {
-        UdfKind::Scalar | UdfKind::Table => {
-            let func = runtime.find_function(
+        UdfKind::Scalar => {
+            let func =
+                runtime.find_function(opts.name_in_runtime, &arg_type_names, &return_type_name)?;
+            Ok(Box::new(WasmFunction {
+                runtime,
+                name: opts.name_in_runtime.to_owned(),
+                func,
+            }))
+        }
+        UdfKind::Table => {
+            let func = runtime.find_table_function(
                 opts.name_in_runtime,
                 &arg_type_names,
                 &return_type_name,
-                opts.kind.is_table(),
             )?;
-            Ok(Box::new(WasmFunction {
+            Ok(Box::new(WasmTableFunction {
                 runtime,
                 name: opts.name_in_runtime.to_owned(),
                 func,
@@ -188,13 +202,41 @@ struct WasmFunction {
     runtime: Runtime,
     name: String,
     #[educe(Debug(ignore))]
-    func: arrow_udf_wasm::Function,
+    func: arrow_udf_wasm::FunctionHandle,
 }
 
 #[async_trait::async_trait]
 impl UdfImpl for WasmFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
         self.runtime.call(&self.func, input)
+    }
+
+    async fn call_table_function<'a>(
+        &'a self,
+        _input: &'a RecordBatch,
+    ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
+        unreachable!("this is not a table function")
+    }
+
+    fn is_legacy(&self) -> bool {
+        // see <https://github.com/risingwavelabs/risingwave/pull/16619> for details
+        self.runtime.abi_version().0 <= 2
+    }
+}
+
+#[derive(Educe)]
+#[educe(Debug)]
+struct WasmTableFunction {
+    runtime: Runtime,
+    name: String,
+    #[educe(Debug(ignore))]
+    func: arrow_udf_wasm::TableFunctionHandle,
+}
+
+#[async_trait::async_trait]
+impl UdfImpl for WasmTableFunction {
+    async fn call(&self, _input: &RecordBatch) -> Result<RecordBatch> {
+        unreachable!("this is not a scalar function")
     }
 
     async fn call_table_function<'a>(
