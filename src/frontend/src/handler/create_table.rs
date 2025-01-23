@@ -1658,33 +1658,37 @@ pub async fn create_iceberg_engine_table(
         s3_bucket, data_directory, iceberg_catalog_name
     );
 
-    let mut sink_handler_args = handler_args.clone();
-    let mut with = BTreeMap::new();
-    with.insert("connector".to_owned(), "iceberg".to_owned());
-
-    with.insert("primary_key".to_owned(), pks.join(","));
-    with.insert("type".to_owned(), "upsert".to_owned());
-    with.insert("catalog.type".to_owned(), "jdbc".to_owned());
-    with.insert("warehouse.path".to_owned(), warehouse_path.clone());
-    if let Some(s3_endpoint) = s3_endpoint.clone() {
-        with.insert("s3.endpoint".to_owned(), s3_endpoint);
+    let mut with_common = BTreeMap::new();
+    with_common.insert("connector".to_owned(), "iceberg".to_owned());
+    with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
+    with_common.insert("warehouse.path".to_owned(), warehouse_path.clone());
+    if let Some(s3_endpoint) = s3_endpoint {
+        with_common.insert("s3.endpoint".to_owned(), s3_endpoint.clone());
     }
     if let Some(s3_ak) = s3_ak.clone() {
-        with.insert("s3.access.key".to_owned(), s3_ak.clone());
+        with_common.insert("s3.access.key".to_owned(), s3_ak.clone());
     }
     if let Some(s3_sk) = s3_sk.clone() {
-        with.insert("s3.secret.key".to_owned(), s3_sk.clone());
+        with_common.insert("s3.secret.key".to_owned(), s3_sk.clone());
     }
-    with.insert("s3.region".to_owned(), s3_region.clone());
-    with.insert("catalog.uri".to_owned(), catalog_uri.clone());
-    with.insert("catalog.jdbc.user".to_owned(), meta_store_user.clone());
-    with.insert(
+    with_common.insert("s3.region".to_owned(), s3_region.clone());
+    with_common.insert("catalog.uri".to_owned(), catalog_uri.clone());
+    with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user.clone());
+    with_common.insert(
         "catalog.jdbc.password".to_owned(),
         meta_store_password.clone(),
     );
-    with.insert("catalog.name".to_owned(), iceberg_catalog_name.clone());
-    with.insert("database.name".to_owned(), iceberg_database_name.clone());
-    with.insert("table.name".to_owned(), iceberg_table_name.clone());
+    with_common.insert("catalog.name".to_owned(), iceberg_catalog_name.clone());
+    with_common.insert("database.name".to_owned(), iceberg_database_name.clone());
+    with_common.insert("table.name".to_owned(), iceberg_table_name.clone());
+
+    with_common.insert("enable_config_load".to_owned(), "true".to_owned());
+
+    let mut sink_handler_args = handler_args.clone();
+    let mut with_sink = with_common.clone();
+
+    with_sink.insert("primary_key".to_owned(), pks.join(","));
+    with_sink.insert("type".to_owned(), "upsert".to_owned());
     let commit_checkpoint_interval = handler_args
         .with_options
         .get(COMMIT_CHECKPOINT_INTERVAL)
@@ -1711,13 +1715,12 @@ pub async fn create_iceberg_engine_table(
         bail!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")
     }
 
-    with.insert(
+    with_sink.insert(
         COMMIT_CHECKPOINT_INTERVAL.to_owned(),
         commit_checkpoint_interval.to_string(),
     );
-    with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
-    with.insert("enable_config_load".to_owned(), "true".to_owned());
-    sink_handler_args.with_options = WithOptions::new_with_options(with);
+    with_sink.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
+    sink_handler_args.with_options = WithOptions::new_with_options(with_sink);
 
     let mut source_name = table_name.clone();
     *source_name.0.last_mut().unwrap() = Ident::from(
@@ -1737,31 +1740,9 @@ pub async fn create_iceberg_engine_table(
     };
 
     let mut source_handler_args = handler_args.clone();
-    let mut with = BTreeMap::new();
-    with.insert("connector".to_owned(), "iceberg".to_owned());
-    with.insert("catalog.type".to_owned(), "jdbc".to_owned());
-    with.insert("warehouse.path".to_owned(), warehouse_path.clone());
-    if let Some(s3_endpoint) = s3_endpoint {
-        with.insert("s3.endpoint".to_owned(), s3_endpoint.clone());
-    }
-    if let Some(s3_ak) = s3_ak.clone() {
-        with.insert("s3.access.key".to_owned(), s3_ak.clone());
-    }
-    if let Some(s3_sk) = s3_sk.clone() {
-        with.insert("s3.secret.key".to_owned(), s3_sk.clone());
-    }
-    with.insert("s3.region".to_owned(), s3_region.clone());
-    with.insert("catalog.uri".to_owned(), catalog_uri.clone());
-    with.insert("catalog.jdbc.user".to_owned(), meta_store_user.clone());
-    with.insert(
-        "catalog.jdbc.password".to_owned(),
-        meta_store_password.clone(),
-    );
-    with.insert("catalog.name".to_owned(), iceberg_catalog_name.clone());
-    with.insert("database.name".to_owned(), iceberg_database_name.clone());
-    with.insert("table.name".to_owned(), iceberg_table_name.clone());
-    with.insert("enable_config_load".to_owned(), "true".to_owned());
-    source_handler_args.with_options = WithOptions::new_with_options(with);
+    let with_source = with_common;
+
+    source_handler_args.with_options = WithOptions::new_with_options(with_source);
 
     // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
     // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.

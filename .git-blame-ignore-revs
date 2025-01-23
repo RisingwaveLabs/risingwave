@@ -48,3 +48,6 @@ c583e2c6c054764249acf484438c7bf7197765f4
 
 # refactor: split catalog to smaller files (#19870)
 d6341b74be3f1913cc93993a95c147999df1ff74
+
+# refactor: add 2 pedantic clippy lints for strings (#19614)
+119e17eee482b6add5d5cb6ceb3b84326bf5ce68
