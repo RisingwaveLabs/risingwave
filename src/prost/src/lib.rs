@@ -537,6 +537,11 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
     }
 }
 
+impl expr::UdfProtoVersion {
+    /// The latest version of UDF expression proto message.
+    pub const LATEST: Self = Self::NameInRuntime;
+}
+
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};

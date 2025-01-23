@@ -597,6 +597,20 @@ message WindowFunction {
 // Note: due to historic reasons, UserDefinedFunction is a oneof variant parallel to FunctionCall,
 // while UserDefinedFunctionMetadata is embedded as a field in TableFunction and AggCall.
 
+enum UdfProtoVersion {
+  // Versions before introducing this enum.
+  UDF_PROTO_VERSION_UNSPECIFIED = 0;
+  // Begin from this version, we re-interpret `identifier` as `name_in_runtime`.
+  UDF_PROTO_VERSION_NAME_IN_RUNTIME = 1;
+
+  // IMPORTANT:
+  // Don't forget to change `UdfProtoVersion::LATEST` in `prost/src/lib.rs` to the latest version
+  // when adding new versions to this enum.
+
+  // Only used for tests.
+  UDF_PROTO_VERSION_MAX = 2147483647;
+}
+
 message UserDefinedFunction {
   repeated ExprNode children = 1;
   string name = 2;
@@ -605,7 +619,7 @@ message UserDefinedFunction {
   string language = 4;
   // The link to the external function service.
   optional string link = 5;
-  // XXX(rc): This is re-interpreted as `name_in_runtime`.
+  // This is re-interpreted as `name_in_runtime`.
   optional string identifier = 6;
   // - If `language` is `javascript` or `python`, the source code of the function.
   optional string body = 7;
@@ -616,6 +630,8 @@ message UserDefinedFunction {
   optional string runtime = 11;
   reserved 12;
   reserved "function_type";
+
+  UdfProtoVersion version = 1000;
 }
 
 // Additional information for user defined table/aggregate functions.
@@ -625,10 +641,13 @@ message UserDefinedFunctionMetadata {
   data.DataType return_type = 13;
   string language = 4;
   optional string link = 5;
+  // This is re-interpreted as `name_in_runtime`.
   optional string identifier = 6;
   optional string body = 7;
   optional bytes compressed_binary = 10;
   optional string runtime = 11;
   reserved 12;
   reserved "function_type";
+
+  UdfProtoVersion version = 1000;
 }

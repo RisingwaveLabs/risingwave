@@ -20,7 +20,7 @@ use risingwave_common::array::arrow::arrow_schema_udf::{Field, Fields, Schema, S
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_pb::expr::PbUserDefinedFunctionMetadata;
+use risingwave_pb::expr::{PbUdfProtoVersion, PbUserDefinedFunctionMetadata};
 
 use super::*;
 use crate::sig::{BuildOptions, UdfImpl, UdfKind};
@@ -123,11 +123,26 @@ pub fn new_user_defined(
     return_type: &DataType,
     udf: &PbUserDefinedFunctionMetadata,
 ) -> Result<BoxedAggregateFunction> {
-    let name_in_runtime = udf.get_identifier()?;
     let arg_types = udf.arg_types.iter().map(|t| t.into()).collect::<Vec<_>>();
     let language = udf.language.as_str();
     let runtime = udf.runtime.as_deref();
     let link = udf.link.as_deref();
+
+    // `identifier` field is re-interpreted as `name_in_runtime`.
+    if udf.version() < PbUdfProtoVersion::NameInRuntime {
+        assert_ne!(
+            language, "rust",
+            "Rust UDAF was not supported yet before this version"
+        );
+        assert_ne!(
+            language, "wasm",
+            "WASM UDAF was not supported yet before this version"
+        );
+    }
+    let name_in_runtime = udf
+        .identifier
+        .as_ref()
+        .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
 
     let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
     let runtime = build_fn(BuildOptions {

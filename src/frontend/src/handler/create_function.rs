@@ -18,7 +18,7 @@ use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::StructType;
 use risingwave_expr::sig::{CreateOptions, UdfKind};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
-use risingwave_pb::catalog::Function;
+use risingwave_pb::catalog::PbFunction;
 
 use super::*;
 use crate::{bind_data_type, Binder};
@@ -154,7 +154,7 @@ pub async fn handle_create_function(
         using_base64_decoded: base64_decoded.as_deref(),
     })?;
 
-    let function = Function {
+    let function = PbFunction {
         id: FunctionId::placeholder().0,
         schema_id,
         database_id,
@@ -165,7 +165,7 @@ pub async fn handle_create_function(
         return_type: Some(return_type.into()),
         language,
         runtime,
-        identifier: Some(output.name_in_runtime),
+        name_in_runtime: Some(output.name_in_runtime),
         link: link.map(|s| s.to_owned()),
         body: output.body,
         compressed_binary: output.compressed_binary,

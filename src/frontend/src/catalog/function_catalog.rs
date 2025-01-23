@@ -18,7 +18,7 @@ use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::catalog::PbFunction;
-use risingwave_pb::expr::PbUserDefinedFunctionMetadata;
+use risingwave_pb::expr::{PbUdfProtoVersion, PbUserDefinedFunctionMetadata};
 
 use crate::catalog::OwnedByUserCatalog;
 
@@ -33,7 +33,7 @@ pub struct FunctionCatalog {
     pub return_type: DataType,
     pub language: String,
     pub runtime: Option<String>,
-    pub identifier: Option<String>,
+    pub name_in_runtime: Option<String>,
     pub body: Option<String>,
     pub link: Option<String>,
     pub compressed_binary: Option<Vec<u8>>,
@@ -71,7 +71,7 @@ impl From<&PbFunction> for FunctionCatalog {
             return_type: prost.return_type.as_ref().expect("no return type").into(),
             language: prost.language.clone(),
             runtime: prost.runtime.clone(),
-            identifier: prost.identifier.clone(),
+            name_in_runtime: prost.name_in_runtime.clone(),
             body: prost.body.clone(),
             link: prost.link.clone(),
             compressed_binary: prost.compressed_binary.clone(),
@@ -89,9 +89,10 @@ impl From<&FunctionCatalog> for PbUserDefinedFunctionMetadata {
             language: c.language.clone(),
             runtime: c.runtime.clone(),
             link: c.link.clone(),
-            identifier: c.identifier.clone(),
+            identifier: c.name_in_runtime.clone(),
             body: c.body.clone(),
             compressed_binary: c.compressed_binary.clone(),
+            version: PbUdfProtoVersion::LATEST as _,
         }
     }
 }

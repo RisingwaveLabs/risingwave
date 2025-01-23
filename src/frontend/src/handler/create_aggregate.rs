@@ -127,7 +127,7 @@ pub async fn handle_create_aggregate(
         return_type: Some(return_type.into()),
         language,
         runtime,
-        identifier: Some(output.name_in_runtime),
+        name_in_runtime: Some(output.name_in_runtime),
         link: link.map(|s| s.to_owned()),
         body: output.body,
         compressed_binary: output.compressed_binary,

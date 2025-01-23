@@ -44,8 +44,7 @@ pub struct Model {
     pub language: String,
     pub runtime: Option<String>,
     pub link: Option<String>,
-    /// XXX(rc): This is re-interpreted as `name_in_runtime`.
-    pub identifier: Option<String>, // TODO(): migrate for language = rust/wasm, set to `name`
+    pub name_in_runtime: Option<String>,
     pub body: Option<String>,
     pub compressed_binary: Option<Vec<u8>>,
     pub kind: FunctionKind,
@@ -103,7 +102,7 @@ impl From<PbFunction> for ActiveModel {
             language: Set(function.language),
             runtime: Set(function.runtime),
             link: Set(function.link),
-            identifier: Set(function.identifier),
+            name_in_runtime: Set(function.name_in_runtime),
             body: Set(function.body),
             compressed_binary: Set(function.compressed_binary),
             kind: Set(function.kind.unwrap().into()),

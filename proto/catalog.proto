@@ -324,8 +324,8 @@ message Function {
   data.DataType return_type = 6;
   string language = 7;
   optional string link = 8;
-  // XXX(rc): This is re-interpreted as `name_in_runtime`.
-  optional string identifier = 10;
+  // The function name in the runtime / on the remote side that is bound to the UDF created in RisingWave.
+  optional string name_in_runtime = 10;
   // The source code of the function.
   optional string body = 14;
   // The zstd-compressed binary of the function.

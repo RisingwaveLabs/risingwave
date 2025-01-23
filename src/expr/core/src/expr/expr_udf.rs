@@ -26,7 +26,7 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr_context::FRAGMENT_ID;
-use risingwave_pb::expr::ExprNode;
+use risingwave_pb::expr::{ExprNode, PbUdfProtoVersion};
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
@@ -169,12 +169,27 @@ impl Build for UserDefinedFunction {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
         let name = udf.get_name();
-        let name_in_runtime = udf.get_identifier()?;
         let arg_types = udf.arg_types.iter().map(|t| t.into()).collect::<Vec<_>>();
 
         let language = udf.language.as_str();
         let runtime = udf.runtime.as_deref();
         let link = udf.link.as_deref();
+
+        let name_in_runtime = if udf.version() < PbUdfProtoVersion::NameInRuntime {
+            if language == "rust" || language == "wasm" {
+                // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
+                // is not used any more. The real bound function name should be the same
+                // as `name`.
+                Some(name)
+            } else {
+                // `identifier`s of other UDFs already mean `name_in_runtime` before `NameInRuntime`.
+                udf.identifier.as_ref()
+            }
+        } else {
+            // after `PbUdfProtoVersion::NameInRuntime`, `identifier` means `name_in_runtime`
+            udf.identifier.as_ref()
+        }
+        .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
 
         // lookup UDF builder
         let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
