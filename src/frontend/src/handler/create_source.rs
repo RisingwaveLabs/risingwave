@@ -19,7 +19,6 @@ use std::sync::LazyLock;
 use anyhow::{anyhow, Context};
 use either::Either;
 use external_schema::debezium::extract_debezium_avro_table_pk_columns;
-use external_schema::iceberg::check_iceberg_source;
 use external_schema::nexmark::check_nexmark_schema;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
@@ -28,8 +27,7 @@ use rand::Rng;
 use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
-    ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+    debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, TableId,
     INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME, ROWID_PREFIX,
 };
 use risingwave_common::license::Feature;
@@ -576,7 +574,7 @@ pub(super) fn bind_source_watermark(
 ///
 /// One should only call this function after all properties of all columns are resolved, like
 /// generated column descriptors.
-pub(super) async fn check_format_encode(
+pub(super) fn check_format_encode(
     props: &WithOptionsSecResolved,
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
@@ -587,10 +585,6 @@ pub(super) async fn check_format_encode(
 
     if connector == NEXMARK_CONNECTOR {
         check_nexmark_schema(props, row_id_index, columns)
-    } else if connector == ICEBERG_CONNECTOR {
-        Ok(check_iceberg_source(props, columns)
-            .await
-            .map_err(|err| ProtocolError(err.to_report_string()))?)
     } else {
         Ok(())
     }
@@ -839,7 +833,7 @@ pub async fn bind_create_source_or_table_with_connector(
         sql_columns_defs.to_vec(),
         &pk_col_ids,
     )?;
-    check_format_encode(&with_properties, row_id_index, &columns).await?;
+    check_format_encode(&with_properties, row_id_index, &columns)?;
 
     let definition = handler_args.normalized_sql.clone();
 

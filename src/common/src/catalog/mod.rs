@@ -98,6 +98,7 @@ pub fn default_key_column_name_version_mapping(version: &ColumnDescVersion) -> &
 /// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
 pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
+/// RisingWave iceberg table engine will create the column `_risingwave_iceberg_row_id` in the iceberg table..
 pub const RISINGWAVE_ICEBERG_ROW_ID: &str = "_risingwave_iceberg_row_id";
 pub fn is_system_schema(schema_name: &str) -> bool {
     SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
