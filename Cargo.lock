@@ -792,8 +792,7 @@ dependencies = [
 [[package]]
 name = "arrow-udf-wasm"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c143f92f4ce7950d99096f9afa954f9de90fa640c7c404cf524a0373e63f8af"
+source = "git+https://github.com/arrow-udf/arrow-udf?rev=09f1276#09f1276cb6dad537e787a7d6ff5139c21216b531"
 dependencies = [
  "anyhow",
  "arrow-array 53.2.0",
@@ -802,6 +801,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.0",
  "genawaiter2",
+ "itertools 0.14.0",
  "once_cell",
  "tempfile",
  "wasi-common",

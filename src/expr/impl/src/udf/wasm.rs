@@ -21,6 +21,7 @@ use arrow_udf_wasm::Runtime;
 use educe::Educe;
 use futures_util::StreamExt;
 use itertools::Itertools;
+use risingwave_common::array::arrow::{UdfArrowConvert, UdfToArrow};
 use risingwave_common::must_match;
 use risingwave_common::types::DataType;
 use risingwave_expr::sig::{BuildOptions, UdfKind};
@@ -56,20 +57,23 @@ fn create_wasm(opts: CreateOptions<'_>) -> Result<CreateFunctionOutput> {
     }
 
     let name_in_runtime = opts.name.to_owned();
-    let arg_type_names = opts.arg_types.iter().map(datatype_name).collect::<Vec<_>>();
-    let return_type_name = datatype_name(opts.return_type);
+    let convert = UdfArrowConvert {
+        legacy: runtime_is_legacy(&runtime),
+    };
+    let arg_types: Vec<_> = opts
+        .arg_types
+        .iter()
+        .map(|ty| convert.to_arrow_field("", ty))
+        .try_collect()?;
+    let return_type = convert.to_arrow_field("", opts.return_type)?;
     match opts.kind {
         UdfKind::Scalar => {
             // test if the function exists in the wasm binary
-            _ = runtime.find_function(&name_in_runtime, &arg_type_names, &return_type_name)?;
+            _ = runtime.find_function(&name_in_runtime, arg_types, return_type)?;
         }
         UdfKind::Table => {
             // test if the function exists in the wasm binary
-            _ = runtime.find_table_function(
-                &name_in_runtime,
-                &arg_type_names,
-                &return_type_name,
-            )?;
+            _ = runtime.find_table_function(&name_in_runtime, arg_types, return_type)?;
         }
         UdfKind::Aggregate => {
             todo!("wasm udaf");
@@ -130,20 +134,23 @@ fn create_rust(opts: CreateOptions<'_>) -> Result<CreateFunctionOutput> {
 
     let runtime = create_wasm_runtime(&wasm_binary)?;
 
-    let arg_type_names = opts.arg_types.iter().map(datatype_name).collect::<Vec<_>>();
-    let return_type_name = datatype_name(opts.return_type);
+    let convert = UdfArrowConvert {
+        legacy: runtime_is_legacy(&runtime),
+    };
+    let arg_types: Vec<_> = opts
+        .arg_types
+        .iter()
+        .map(|ty| convert.to_arrow_field("", ty))
+        .try_collect()?;
+    let return_type = convert.to_arrow_field("", opts.return_type)?;
     match opts.kind {
         UdfKind::Scalar => {
             // test if the function exists in the wasm binary
-            _ = runtime.find_function(&name_in_runtime, &arg_type_names, &return_type_name)?;
+            _ = runtime.find_function(&name_in_runtime, arg_types, return_type)?;
         }
         UdfKind::Table => {
             // test if the function exists in the wasm binary
-            _ = runtime.find_table_function(
-                &name_in_runtime,
-                &arg_type_names,
-                &return_type_name,
-            )?;
+            _ = runtime.find_table_function(&name_in_runtime, arg_types, return_type)?;
         }
         UdfKind::Aggregate => {
             todo!("rust udaf");
@@ -166,12 +173,18 @@ fn build(opts: BuildOptions<'_>) -> Result<Box<dyn UdfImpl>> {
         zstd::stream::decode_all(compressed_binary).context("failed to decompress wasm binary")?;
     let runtime = create_wasm_runtime(&wasm_binary)?;
 
-    let arg_type_names = opts.arg_types.iter().map(datatype_name).collect::<Vec<_>>();
-    let return_type_name = datatype_name(opts.return_type);
+    let convert = UdfArrowConvert {
+        legacy: runtime_is_legacy(&runtime),
+    };
+    let arg_types: Vec<_> = opts
+        .arg_types
+        .iter()
+        .map(|ty| convert.to_arrow_field("", ty))
+        .try_collect()?;
+    let return_type = convert.to_arrow_field("", opts.return_type)?;
     match opts.kind {
         UdfKind::Scalar => {
-            let func =
-                runtime.find_function(opts.name_in_runtime, &arg_type_names, &return_type_name)?;
+            let func = runtime.find_function(opts.name_in_runtime, arg_types, return_type)?;
             Ok(Box::new(WasmFunction {
                 runtime,
                 name: opts.name_in_runtime.to_owned(),
@@ -179,11 +192,7 @@ fn build(opts: BuildOptions<'_>) -> Result<Box<dyn UdfImpl>> {
             }))
         }
         UdfKind::Table => {
-            let func = runtime.find_table_function(
-                opts.name_in_runtime,
-                &arg_type_names,
-                &return_type_name,
-            )?;
+            let func = runtime.find_table_function(opts.name_in_runtime, arg_types, return_type)?;
             Ok(Box::new(WasmTableFunction {
                 runtime,
                 name: opts.name_in_runtime.to_owned(),
@@ -219,8 +228,7 @@ impl UdfImpl for WasmFunction {
     }
 
     fn is_legacy(&self) -> bool {
-        // see <https://github.com/risingwavelabs/risingwave/pull/16619> for details
-        self.runtime.abi_version().0 <= 2
+        runtime_is_legacy(&self.runtime)
     }
 }
 
@@ -249,8 +257,7 @@ impl UdfImpl for WasmTableFunction {
     }
 
     fn is_legacy(&self) -> bool {
-        // see <https://github.com/risingwavelabs/risingwave/pull/16619> for details
-        self.runtime.abi_version().0 <= 2
+        runtime_is_legacy(&self.runtime)
     }
 }
 
@@ -276,6 +283,11 @@ fn create_wasm_runtime(binary: &[u8]) -> Result<Runtime> {
     Ok(runtime)
 }
 
+fn runtime_is_legacy(runtime: &Runtime) -> bool {
+    // see <https://github.com/risingwavelabs/risingwave/pull/16619> for details
+    runtime.abi_version().0 <= 2
+}
+
 /// Generate a function identifier in v0.1 format from the function signature.
 /// NOTE(rc): Although we have moved the function signature construction to `arrow-udf`, we
 /// still need this to generate the `#[function]` macro call for simple functions.
@@ -285,6 +297,37 @@ fn wasm_identifier_v1(
     ret: &DataType,
     table_function: bool,
 ) -> String {
+    /// Convert a data type to string used in `arrow-udf-wasm`.
+    fn datatype_name(ty: &DataType) -> String {
+        match ty {
+            DataType::Boolean => "boolean".to_owned(),
+            DataType::Int16 => "int16".to_owned(),
+            DataType::Int32 => "int32".to_owned(),
+            DataType::Int64 => "int64".to_owned(),
+            DataType::Float32 => "float32".to_owned(),
+            DataType::Float64 => "float64".to_owned(),
+            DataType::Date => "date32".to_owned(),
+            DataType::Time => "time64".to_owned(),
+            DataType::Timestamp => "timestamp".to_owned(),
+            DataType::Timestamptz => "timestamptz".to_owned(),
+            DataType::Interval => "interval".to_owned(),
+            DataType::Decimal => "decimal".to_owned(),
+            DataType::Jsonb => "json".to_owned(),
+            DataType::Serial => "serial".to_owned(),
+            DataType::Int256 => "int256".to_owned(),
+            DataType::Bytea => "binary".to_owned(),
+            DataType::Varchar => "string".to_owned(),
+            DataType::List(inner) => format!("{}[]", datatype_name(inner)),
+            DataType::Struct(s) => format!(
+                "struct<{}>",
+                s.iter()
+                    .map(|(name, ty)| format!("{}:{}", name, datatype_name(ty)))
+                    .join(",")
+            ),
+            DataType::Map(_m) => todo!("map in wasm udf"),
+        }
+    }
+
     format!(
         "{}({}){}{}",
         name,
@@ -292,35 +335,4 @@ fn wasm_identifier_v1(
         if table_function { "->>" } else { "->" },
         datatype_name(ret)
     )
-}
-
-/// Convert a data type to string used in `arrow-udf-wasm`.
-fn datatype_name(ty: &DataType) -> String {
-    match ty {
-        DataType::Boolean => "boolean".to_owned(),
-        DataType::Int16 => "int16".to_owned(),
-        DataType::Int32 => "int32".to_owned(),
-        DataType::Int64 => "int64".to_owned(),
-        DataType::Float32 => "float32".to_owned(),
-        DataType::Float64 => "float64".to_owned(),
-        DataType::Date => "date32".to_owned(),
-        DataType::Time => "time64".to_owned(),
-        DataType::Timestamp => "timestamp".to_owned(),
-        DataType::Timestamptz => "timestamptz".to_owned(),
-        DataType::Interval => "interval".to_owned(),
-        DataType::Decimal => "decimal".to_owned(),
-        DataType::Jsonb => "json".to_owned(),
-        DataType::Serial => "serial".to_owned(),
-        DataType::Int256 => "int256".to_owned(),
-        DataType::Bytea => "binary".to_owned(),
-        DataType::Varchar => "string".to_owned(),
-        DataType::List(inner) => format!("{}[]", datatype_name(inner)),
-        DataType::Struct(s) => format!(
-            "struct<{}>",
-            s.iter()
-                .map(|(name, ty)| format!("{}:{}", name, datatype_name(ty)))
-                .join(",")
-        ),
-        DataType::Map(_m) => todo!("map in wasm udf"),
-    }
 }
