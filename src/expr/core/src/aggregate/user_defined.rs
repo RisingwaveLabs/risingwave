@@ -20,7 +20,7 @@ use risingwave_common::array::arrow::arrow_schema_udf::{Field, Fields, Schema, S
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_pb::expr::{PbUdfProtoVersion, PbUserDefinedFunctionMetadata};
+use risingwave_pb::expr::{PbUdfExprVersion, PbUserDefinedFunctionMetadata};
 
 use super::*;
 use crate::sig::{BuildOptions, UdfImpl, UdfKind};
@@ -129,7 +129,7 @@ pub fn new_user_defined(
     let link = udf.link.as_deref();
 
     // `identifier` field is re-interpreted as `name_in_runtime`.
-    if udf.version() < PbUdfProtoVersion::NameInRuntime {
+    if udf.version() < PbUdfExprVersion::NameInRuntime {
         assert_ne!(
             language, "rust",
             "Rust UDAF was not supported yet before this version"

@@ -19,7 +19,7 @@ use risingwave_common::array::arrow::arrow_schema_udf::{Fields, Schema, SchemaRe
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
 use risingwave_common::array::I32Array;
 use risingwave_common::bail;
-use risingwave_pb::expr::PbUdfProtoVersion;
+use risingwave_pb::expr::PbUdfExprVersion;
 
 use super::*;
 use crate::sig::{BuildOptions, UdfImpl, UdfKind};
@@ -131,7 +131,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
     let runtime = udf.runtime.as_deref();
     let link = udf.link.as_deref();
 
-    let name_in_runtime = if udf.version() < PbUdfProtoVersion::NameInRuntime {
+    let name_in_runtime = if udf.version() < PbUdfExprVersion::NameInRuntime {
         if language == "rust" || language == "wasm" {
             // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
             // is not used any more. And unfortunately, we don't have the original name
@@ -152,7 +152,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             udf.identifier.as_deref()
         }
     } else {
-        // after `PbUdfProtoVersion::NameInRuntime`, `identifier` means `name_in_runtime`
+        // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
         udf.identifier.as_deref()
     }
     .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");

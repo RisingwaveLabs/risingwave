@@ -17,7 +17,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::PbUdfProtoVersion;
+use risingwave_pb::expr::PbUdfExprVersion;
 
 use super::{Expr, ExprDisplay, ExprImpl};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
@@ -57,7 +57,7 @@ impl UserDefinedFunction {
             return_type,
             language: udf.language.clone(),
             runtime: udf.runtime.clone(),
-            name_in_runtime: if udf.version() < PbUdfProtoVersion::NameInRuntime {
+            name_in_runtime: if udf.version() < PbUdfExprVersion::NameInRuntime {
                 if udf.language == "rust" || udf.language == "wasm" {
                     // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
                     // is not used any more. The real bound function name should be the same
@@ -68,7 +68,7 @@ impl UserDefinedFunction {
                     udf.identifier.clone()
                 }
             } else {
-                // after `PbUdfProtoVersion::NameInRuntime`, `identifier` means `name_in_runtime`
+                // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
                 udf.identifier.clone()
             },
             body: udf.body.clone(),
@@ -112,7 +112,7 @@ impl Expr for UserDefinedFunction {
                 body: self.catalog.body.clone(),
                 compressed_binary: self.catalog.compressed_binary.clone(),
                 always_retry_on_network_error: self.catalog.always_retry_on_network_error,
-                version: PbUdfProtoVersion::LATEST as _,
+                version: PbUdfExprVersion::LATEST as _,
             }))),
         }
     }

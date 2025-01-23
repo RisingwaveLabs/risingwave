@@ -597,18 +597,18 @@ message WindowFunction {
 // Note: due to historic reasons, UserDefinedFunction is a oneof variant parallel to FunctionCall,
 // while UserDefinedFunctionMetadata is embedded as a field in TableFunction and AggCall.
 
-enum UdfProtoVersion {
+enum UdfExprVersion {
   // Versions before introducing this enum.
-  UDF_PROTO_VERSION_UNSPECIFIED = 0;
+  UDF_EXPR_VERSION_UNSPECIFIED = 0;
   // Begin from this version, we re-interpret `identifier` as `name_in_runtime`.
-  UDF_PROTO_VERSION_NAME_IN_RUNTIME = 1;
+  UDF_EXPR_VERSION_NAME_IN_RUNTIME = 1;
 
   // IMPORTANT:
-  // Don't forget to change `UdfProtoVersion::LATEST` in `prost/src/lib.rs` to the latest version
+  // Don't forget to change `UdfExprVersion::LATEST` in `prost/src/lib.rs` to the latest version
   // when adding new versions to this enum.
 
   // Only used for tests.
-  UDF_PROTO_VERSION_MAX = 2147483647;
+  UDF_EXPR_VERSION_MAX = 2147483647;
 }
 
 message UserDefinedFunction {
@@ -631,7 +631,7 @@ message UserDefinedFunction {
   reserved 12;
   reserved "function_type";
 
-  UdfProtoVersion version = 1000;
+  UdfExprVersion version = 1000;
 }
 
 // Additional information for user defined table/aggregate functions.
@@ -649,5 +649,5 @@ message UserDefinedFunctionMetadata {
   reserved 12;
   reserved "function_type";
 
-  UdfProtoVersion version = 1000;
+  UdfExprVersion version = 1000;
 }

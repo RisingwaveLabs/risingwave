@@ -18,7 +18,7 @@ use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::catalog::PbFunction;
-use risingwave_pb::expr::{PbUdfProtoVersion, PbUserDefinedFunctionMetadata};
+use risingwave_pb::expr::{PbUdfExprVersion, PbUserDefinedFunctionMetadata};
 
 use crate::catalog::OwnedByUserCatalog;
 
@@ -92,7 +92,7 @@ impl From<&FunctionCatalog> for PbUserDefinedFunctionMetadata {
             identifier: c.name_in_runtime.clone(),
             body: c.body.clone(),
             compressed_binary: c.compressed_binary.clone(),
-            version: PbUdfProtoVersion::LATEST as _,
+            version: PbUdfExprVersion::LATEST as _,
         }
     }
 }
