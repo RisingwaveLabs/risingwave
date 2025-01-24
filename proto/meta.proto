@@ -97,6 +97,8 @@ message TableFragments {
     // supported, in which case a default value of 256 (or 1 for singleton) should be used.
     // Use `VnodeCountCompat::vnode_count` to access it.
     optional uint32 maybe_vnode_count = 8;
+
+    stream_plan.StreamNode nodes = 9;
   }
   // The id of the streaming job.
   uint32 table_id = 1;
@@ -218,7 +220,6 @@ message ListTableFragmentsRequest {
 message ListTableFragmentsResponse {
   message ActorInfo {
     uint32 id = 1;
-    stream_plan.StreamNode node = 2;
     repeated stream_plan.Dispatcher dispatcher = 3;
   }
   message FragmentInfo {
@@ -258,6 +259,7 @@ message ListFragmentDistributionResponse {
     uint32 fragment_type_mask = 6;
     uint32 parallelism = 7;
     uint32 vnode_count = 8;
+    stream_plan.StreamNode node = 9;
   }
   repeated FragmentDistribution distributions = 1;
 }

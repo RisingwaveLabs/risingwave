@@ -966,7 +966,7 @@ message StreamActor {
 
   uint32 actor_id = 1;
   uint32 fragment_id = 2;
-  StreamNode nodes = 3;
+  StreamNode nodes = 3 [deprecated = true];
   repeated Dispatcher dispatcher = 4;
   // The actors that send messages to this actor.
   // Note that upstream actor ids are also stored in the proto of merge nodes.

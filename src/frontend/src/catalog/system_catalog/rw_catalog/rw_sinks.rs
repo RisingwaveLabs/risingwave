@@ -112,11 +112,8 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
     "rw_catalog.rw_sink_decouple",
     "WITH decoupled_sink_internal_table_ids AS (
         SELECT
-            distinct (node->'sink'->'table'->'id')::int as internal_table_id
-        FROM rw_catalog.rw_actor_infos actor
-            JOIN
-                rw_catalog.rw_fragments fragment
-            ON actor.fragment_id = fragment.fragment_id
+            (node->'sink'->'table'->'id')::int as internal_table_id
+        FROM rw_catalog.rw_fragments
         WHERE
             'SINK' = any(flags)
             AND

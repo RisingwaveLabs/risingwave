@@ -82,6 +82,16 @@ impl InflightDatabaseInfo {
     pub fn contains_job(&self, job_id: TableId) -> bool {
         self.jobs.contains_key(&job_id)
     }
+
+    pub fn fragment(&self, fragment_id: FragmentId) -> &InflightFragmentInfo {
+        let job_id = self.fragment_location[&fragment_id];
+        self.jobs
+            .get(&job_id)
+            .expect("should exist")
+            .fragment_infos
+            .get(&fragment_id)
+            .expect("should exist")
+    }
 }
 
 impl InflightDatabaseInfo {

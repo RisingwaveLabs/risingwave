@@ -1009,14 +1009,9 @@ impl DatabaseCheckpointControl {
                     "must not set previously"
                 );
             }
-            for stream_actor in info
-                .stream_job_fragments
-                .fragments
-                .values_mut()
-                .flat_map(|fragment| fragment.actors.iter_mut())
-            {
+            for fragment in info.stream_job_fragments.fragments.values_mut() {
                 fill_snapshot_backfill_epoch(
-                    stream_actor.nodes.as_mut().expect("should exist"),
+                    fragment.nodes.as_mut().expect("should exist"),
                     &snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch,
                 )?;
             }

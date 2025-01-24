@@ -42,7 +42,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
-use super::info::{CommandFragmentChanges, InflightStreamingJobInfo};
+use super::info::{CommandFragmentChanges, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::utils::collect_resp_info;
 use crate::barrier::InflightSubscriptionInfo;
@@ -50,7 +50,8 @@ use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
-    ActorId, DispatcherId, FragmentId, StreamActorWithUpstreams, StreamJobFragments,
+    ActorId, DispatcherId, FragmentId, StreamActorWithUpstreams, StreamJobActorsToCreate,
+    StreamJobFragments,
 };
 use crate::stream::{
     build_actor_connector_splits, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
@@ -121,6 +122,8 @@ impl ReplaceStreamJobPlan {
             let fragment_change = CommandFragmentChanges::NewFragment(
                 self.streaming_job.id().into(),
                 InflightFragmentInfo {
+                    fragment_id: fragment.fragment_id,
+                    nodes: fragment.nodes.clone().unwrap(),
                     actors: fragment
                         .actors
                         .iter()
@@ -208,6 +211,8 @@ impl CreateStreamingJobCommandInfo {
                 (
                     fragment.fragment_id,
                     InflightFragmentInfo {
+                        fragment_id: fragment.fragment_id,
+                        nodes: fragment.nodes.clone().unwrap(),
                         actors: fragment
                             .actors
                             .iter()
@@ -955,7 +960,10 @@ impl Command {
         mutation
     }
 
-    pub fn actors_to_create(&self) -> Option<HashMap<WorkerId, Vec<StreamActorWithUpstreams>>> {
+    pub fn actors_to_create(
+        &self,
+        graph_info: &InflightDatabaseInfo,
+    ) -> Option<StreamJobActorsToCreate> {
         match self {
             Command::CreateStreamingJob { info, job_type } => {
                 let mut map = match job_type {
@@ -974,13 +982,25 @@ impl Command {
                 Some(map)
             }
             Command::RescheduleFragment { reschedules, .. } => {
-                let mut map: HashMap<WorkerId, Vec<_>> = HashMap::new();
-                for (actor, status) in reschedules
-                    .values()
-                    .flat_map(|reschedule| reschedule.newly_created_actors.iter())
+                let mut map: HashMap<WorkerId, HashMap<_, (_, Vec<_>)>> = HashMap::new();
+                for (fragment_id, actor, status) in
+                    reschedules.iter().flat_map(|(fragment_id, reschedule)| {
+                        reschedule
+                            .newly_created_actors
+                            .iter()
+                            .map(|(actors, status)| (*fragment_id, actors, status))
+                    })
                 {
                     let worker_id = status.location.as_ref().unwrap().worker_node_id as _;
-                    map.entry(worker_id).or_default().push(actor.clone());
+                    map.entry(worker_id)
+                        .or_default()
+                        .entry(fragment_id)
+                        .or_insert_with(|| {
+                            let node = graph_info.fragment(fragment_id).nodes.clone();
+                            (node, vec![])
+                        })
+                        .1
+                        .push(actor.clone());
                 }
                 Some(map)
             }

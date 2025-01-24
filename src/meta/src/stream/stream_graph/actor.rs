@@ -302,12 +302,7 @@ impl FragmentActorBuilder {
 
 impl ActorBuilder {
     /// Build an actor after all the upstreams and downstreams are processed.
-    fn build(
-        self,
-        job: &StreamingJob,
-        expr_context: ExprContext,
-        nodes: StreamNode,
-    ) -> MetaResult<StreamActor> {
+    fn build(self, job: &StreamingJob, expr_context: ExprContext) -> MetaResult<StreamActor> {
         // Only fill the definition when debug assertions enabled, otherwise use name instead.
         #[cfg(not(debug_assertions))]
         let mview_definition = job.name();
@@ -319,7 +314,7 @@ impl ActorBuilder {
             StreamActor {
                 actor_id: self.actor_id.as_global_id(),
                 fragment_id: self.fragment_id.as_global_id(),
-                nodes: Some(nodes),
+                nodes: None,
                 dispatcher: self.downstreams.into_values().collect(),
                 upstream_actor_id: vec![],
                 vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
@@ -873,7 +868,8 @@ impl ActorGraphBuilder {
 
         // Serialize the graph into a map of sealed fragments.
         let (graph, actor_upstreams) = {
-            let mut fragment_actors: HashMap<GlobalFragmentId, Vec<StreamActor>> = HashMap::new();
+            let mut fragment_actors: HashMap<GlobalFragmentId, (StreamNode, Vec<StreamActor>)> =
+                HashMap::new();
             let mut fragment_actor_upstreams: BTreeMap<_, FragmentActorUpstreams> = BTreeMap::new();
 
             // As all fragments are processed, we can now `build` the actors where the `Exchange`
@@ -886,10 +882,13 @@ impl ActorGraphBuilder {
                 fragment_actors
                     .try_insert(
                         fragment_id,
-                        builders
-                            .into_values()
-                            .map(|builder| builder.build(job, expr_context.clone(), node.clone()))
-                            .try_collect()?,
+                        (
+                            node,
+                            builders
+                                .into_values()
+                                .map(|builder| builder.build(job, expr_context.clone()))
+                                .try_collect()?,
+                        ),
                     )
                     .expect("non-duplicate");
             }
@@ -897,11 +896,14 @@ impl ActorGraphBuilder {
             (
                 fragment_actors
                     .into_iter()
-                    .map(|(fragment_id, actors)| {
+                    .map(|(fragment_id, (stream_node, actors))| {
                         let distribution = self.distributions[&fragment_id].clone();
-                        let fragment =
-                            self.fragment_graph
-                                .seal_fragment(fragment_id, actors, distribution);
+                        let fragment = self.fragment_graph.seal_fragment(
+                            fragment_id,
+                            actors,
+                            distribution,
+                            stream_node,
+                        );
                         let fragment_id = fragment_id.as_global_id();
                         (fragment_id, fragment)
                     })

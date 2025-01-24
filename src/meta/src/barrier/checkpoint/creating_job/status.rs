@@ -18,7 +18,6 @@ use std::mem::take;
 
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model::WorkerId;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::barrier_complete_response::{
@@ -28,7 +27,7 @@ use tracing::warn;
 
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
-use crate::model::StreamActorWithUpstreams;
+use crate::model::StreamJobActorsToCreate;
 
 #[derive(Debug)]
 pub(super) struct CreateMviewLogStoreProgressTracker {
@@ -110,7 +109,7 @@ pub(super) enum CreatingStreamingJobStatus {
         pending_non_checkpoint_barriers: Vec<u64>,
         /// Info of the first barrier: (`actors_to_create`, `mutation`)
         /// Take the mutation out when injecting the first barrier
-        initial_barrier_info: Option<(HashMap<WorkerId, Vec<StreamActorWithUpstreams>>, Mutation)>,
+        initial_barrier_info: Option<(StreamJobActorsToCreate, Mutation)>,
     },
     /// The creating job is consuming log store.
     ///
@@ -126,7 +125,7 @@ pub(super) enum CreatingStreamingJobStatus {
 
 pub(super) struct CreatingJobInjectBarrierInfo {
     pub barrier_info: BarrierInfo,
-    pub new_actors: Option<HashMap<WorkerId, Vec<StreamActorWithUpstreams>>>,
+    pub new_actors: Option<StreamJobActorsToCreate>,
     pub mutation: Option<Mutation>,
 }
 
@@ -252,10 +251,7 @@ impl CreatingStreamingJobStatus {
     pub(super) fn new_fake_barrier(
         prev_epoch_fake_physical_time: &mut u64,
         pending_non_checkpoint_barriers: &mut Vec<u64>,
-        initial_barrier_info: &mut Option<(
-            HashMap<WorkerId, Vec<StreamActorWithUpstreams>>,
-            Mutation,
-        )>,
+        initial_barrier_info: &mut Option<(StreamJobActorsToCreate, Mutation)>,
         is_checkpoint: bool,
     ) -> CreatingJobInjectBarrierInfo {
         {

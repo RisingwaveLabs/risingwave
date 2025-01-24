@@ -525,28 +525,32 @@ async fn test_graph_builder() -> MetaResult<()> {
                 .first()
                 .map_or(&vec![], |d| d.get_downstream_actor_id()),
         );
-        let mut node = actor.get_nodes().unwrap();
+    }
+    for fragment in stream_job_fragments.fragments() {
+        let mut node = fragment.get_nodes().unwrap();
         while !node.get_input().is_empty() {
             node = node.get_input().first().unwrap();
         }
         match node.get_node_body().unwrap() {
             NodeBody::Merge(merge_node) => {
-                assert_eq!(
-                    expected_upstream
-                        .get(&actor.get_actor_id())
-                        .unwrap()
-                        .iter()
-                        .collect::<HashSet<_>>(),
-                    actor_upstreams
-                        .get(&actor.fragment_id)
-                        .unwrap()
-                        .get(&actor.actor_id)
-                        .unwrap()
-                        .get(&merge_node.upstream_fragment_id)
-                        .unwrap()
-                        .iter()
-                        .collect::<HashSet<_>>(),
-                );
+                for actor in &fragment.actors {
+                    assert_eq!(
+                        expected_upstream
+                            .get(&actor.get_actor_id())
+                            .unwrap()
+                            .iter()
+                            .collect::<HashSet<_>>(),
+                        actor_upstreams
+                            .get(&actor.fragment_id)
+                            .unwrap()
+                            .get(&actor.actor_id)
+                            .unwrap()
+                            .get(&merge_node.upstream_fragment_id)
+                            .unwrap()
+                            .iter()
+                            .collect::<HashSet<_>>(),
+                    );
+                }
             }
             NodeBody::Source(_) => {
                 // check nothing.

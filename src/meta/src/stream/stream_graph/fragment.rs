@@ -894,7 +894,7 @@ impl CompleteStreamFragmentGraph {
                             {
                                 // Resolve the required output columns from the upstream materialized view.
                                 let (dist_key_indices, output_indices) = {
-                                    let nodes = upstream_fragment.actors[0].get_nodes().unwrap();
+                                    let nodes = upstream_fragment.get_nodes().unwrap();
                                     let mview_node =
                                         nodes.get_node_body().unwrap().as_materialize().unwrap();
                                     let all_column_ids = mview_node.column_ids();
@@ -938,7 +938,7 @@ impl CompleteStreamFragmentGraph {
                                     GlobalFragmentId::new(source_fragment.fragment_id);
 
                                 let output_indices = {
-                                    let nodes = upstream_fragment.actors[0].get_nodes().unwrap();
+                                    let nodes = upstream_fragment.get_nodes().unwrap();
                                     let source_node =
                                         nodes.get_node_body().unwrap().as_source().unwrap();
 
@@ -1168,6 +1168,7 @@ impl CompleteStreamFragmentGraph {
         id: GlobalFragmentId,
         actors: Vec<StreamActor>,
         distribution: Distribution,
+        stream_node: StreamNode,
     ) -> Fragment {
         let building_fragment = self.get_fragment(id).into_building().unwrap();
         let internal_tables = building_fragment.extract_internal_tables();
@@ -1206,6 +1207,7 @@ impl CompleteStreamFragmentGraph {
             state_table_ids,
             upstream_fragment_ids,
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
+            nodes: Some(stream_node),
         }
     }
 
