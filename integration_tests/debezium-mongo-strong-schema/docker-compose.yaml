@@ -12,7 +12,7 @@ services:
     ports:
       - "8083:8083"
     healthcheck:
-      test: curl -f http://localhost:8083
+      test: curl -f localhost:8083
       interval: 1s
       start_period: 120s
     environment:
@@ -21,15 +21,19 @@ services:
       CONFIG_STORAGE_TOPIC: debezium_mongodb_config
       OFFSET_STORAGE_TOPIC: debezium_mongodb_offset
       STATUS_STORAGE_TOPIC: debezium_mongodb_status
+      # Remove these two lines below to test the debezium json format。
       CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
       CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://message_queue:8081
+
+  random_data_generator:
+    extends: ../mongodb/docker-compose.yaml
+    service: random_data_generator
 
   register-mongodb-connector:
     image: curlimages/curl:7.79.1
     container_name: register-mongodb-connector
     depends_on:
-      debezium:
-        condition: service_healthy
+      debezium: { condition: service_healthy }
     command: >
       /bin/sh /register-mongodb-connector.sh
     restart: on-failure
@@ -40,8 +44,7 @@ services:
     image: landoop/kafka-connect-ui:0.9.7
     container_name: kafka-connect-ui
     depends_on:
-      debezium:
-        condition: service_healthy
+      debezium: { condition: service_healthy }
     ports:
       - "8000:8000"
     environment:

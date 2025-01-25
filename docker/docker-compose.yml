@@ -5,41 +5,41 @@ services:
   risingwave-standalone:
     <<: *image
     command: "standalone --meta-opts=\" \
-                    --listen-addr 0.0.0.0:5690 \
-                    --advertise-addr 0.0.0.0:5690 \
-                    --dashboard-host 0.0.0.0:5691 \
-                    --prometheus-host 0.0.0.0:1250 \
-                    --prometheus-endpoint http://prometheus-0:9500 \
-                    --backend sql \
-                    --sql-endpoint postgres://postgres:@postgres-0:5432/metadata \
-                    --state-store hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001 \
-                    --data-directory hummock_001 \
-                    --config-path /risingwave.toml\" \
-                 --compute-opts=\" \
-                    --config-path /risingwave.toml \
-                    --listen-addr 0.0.0.0:5688 \
-                    --prometheus-listener-addr 0.0.0.0:1250 \
-                    --advertise-addr 0.0.0.0:5688 \
-                    --async-stack-trace verbose \
-                    --parallelism 8 \
-                    --total-memory-bytes 21474836480 \
-                    --role both \
-                    --meta-address http://0.0.0.0:5690 \
-                    --memory-manager-target-bytes 22333829939 \" \
-                 --frontend-opts=\" \
-                   --config-path /risingwave.toml \
-                   --listen-addr 0.0.0.0:4566 \
-                   --advertise-addr 0.0.0.0:4566 \
-                   --prometheus-listener-addr 0.0.0.0:1250 \
-                   --health-check-listener-addr 0.0.0.0:6786 \
-                   --meta-addr http://0.0.0.0:5690 \
-                   --frontend-total-memory-bytes=4294967296\" \
-                 --compactor-opts=\" \
-                   --listen-addr 0.0.0.0:6660 \
-                   --prometheus-listener-addr 0.0.0.0:1250 \
-                   --advertise-addr 0.0.0.0:6660 \
-                   --meta-address http://0.0.0.0:5690 \
-                   --compactor-total-memory-bytes=4294967296\""
+      --listen-addr 0.0.0.0:5690 \
+      --advertise-addr 0.0.0.0:5690 \
+      --dashboard-host 0.0.0.0:5691 \
+      --prometheus-host 0.0.0.0:1250 \
+      --prometheus-endpoint http://prometheus-0:9500 \
+      --backend sql \
+      --sql-endpoint postgres://postgres:@postgres-0:5432/metadata \
+      --state-store hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001 \
+      --data-directory hummock_001 \
+      --config-path /risingwave.toml\" \
+      --compute-opts=\" \
+      --config-path /risingwave.toml \
+      --listen-addr 0.0.0.0:5688 \
+      --prometheus-listener-addr 0.0.0.0:1250 \
+      --advertise-addr 0.0.0.0:5688 \
+      --async-stack-trace verbose \
+      --parallelism 8 \
+      --total-memory-bytes 21474836480 \
+      --role both \
+      --meta-address http://0.0.0.0:5690 \
+      --memory-manager-target-bytes 22333829939 \" \
+      --frontend-opts=\" \
+      --config-path /risingwave.toml \
+      --listen-addr 0.0.0.0:4566 \
+      --advertise-addr 0.0.0.0:4566 \
+      --prometheus-listener-addr 0.0.0.0:1250 \
+      --health-check-listener-addr 0.0.0.0:6786 \
+      --meta-addr http://0.0.0.0:5690 \
+      --frontend-total-memory-bytes=4294967296\" \
+      --compactor-opts=\" \
+      --listen-addr 0.0.0.0:6660 \
+      --prometheus-listener-addr 0.0.0.0:1250 \
+      --advertise-addr 0.0.0.0:6660 \
+      --meta-address http://0.0.0.0:5690 \
+      --compactor-total-memory-bytes=4294967296\""
     expose:
       - "6660"
       - "4566"
@@ -96,7 +96,7 @@ services:
     volumes:
       - "postgres-0:/var/lib/postgresql/data"
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 2s
       timeout: 5s
       retries: 5
@@ -104,12 +104,12 @@ services:
 
   grafana-0:
     image: "grafana/grafana-oss:latest"
-    command: [ ]
+    command: []
     expose:
       - "3001"
     ports:
       - "3001:3001"
-    depends_on: [ ]
+    depends_on: []
     volumes:
       - "grafana-0:/var/lib/grafana"
       - "./grafana.ini:/etc/grafana/grafana.ini"
@@ -142,20 +142,20 @@ services:
     ports:
       - "9301:9301"
       - "9400:9400"
-    depends_on: [ ]
+    depends_on: []
     volumes:
       - "minio-0:/data"
-    entrypoint: "
+    entrypoint: '
 
-      /bin/sh -c '
+      /bin/sh -c ''
 
       set -e
 
-      mkdir -p \"/data/hummock001\"
+      mkdir -p "/data/hummock001"
 
-      /usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"
+      /usr/bin/docker-entrypoint.sh "$$0" "$$@"
 
-      '"
+      '''
     environment:
       MINIO_CI_CD: "1"
       MINIO_PROMETHEUS_AUTH_TYPE: public
@@ -186,7 +186,7 @@ services:
       - "9500"
     ports:
       - "9500:9500"
-    depends_on: [ ]
+    depends_on: []
     volumes:
       - "prometheus-0:/prometheus"
       - "./prometheus.yaml:/etc/prometheus/prometheus.yml"
@@ -229,7 +229,7 @@ services:
       - "9092:9092"
       - "9644:9644"
       - "8081:8081"
-    depends_on: [ ]
+    depends_on: []
     volumes:
       - "message_queue:/var/lib/redpanda/data"
     environment: {}

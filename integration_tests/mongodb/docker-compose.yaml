@@ -20,7 +20,7 @@ services:
       [
         "bash",
         "-c",
-        "sleep 10 && mongo --host mongodb:27017 /config-replica.js && sleep 10"
+        "sleep 10 && mongo --host mongodb:27017 /config-replica.js && sleep 10",
       ]
     restart: "no"
     volumes:
