@@ -234,7 +234,7 @@ impl MergeExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
         let select_all = self.upstreams;
-        let select_all = BufferChunks::new(select_all, self.chunk_size, self.schema);
+        // let select_all = BufferChunks::new(select_all, self.chunk_size, self.schema);
         let actor_id = self.actor_context.id;
 
         let mut metrics = self.metrics.new_actor_input_metrics(

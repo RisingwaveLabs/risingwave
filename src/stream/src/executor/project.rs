@@ -43,6 +43,10 @@ struct Inner {
     /// Whether the stream is paused.
     is_paused: bool,
 
+    /// the selectivity threshold which should be in `[0,1]`. for the chunk with selectivity less
+    /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
+    materialize_selectivity_threshold: f64,
+
     /// Whether there are likely no-op updates in the output chunks, so that eliminating them with
     /// `StreamChunk::eliminate_adjacent_noop_update` could be beneficial.
     noop_update_hint: bool,
@@ -56,6 +60,7 @@ impl ProjectExecutor {
         exprs: Vec<NonStrictExpression>,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
+        materialize_selectivity_threshold: f64,
         noop_update_hint: bool,
     ) -> Self {
         let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
@@ -67,6 +72,7 @@ impl ProjectExecutor {
                 watermark_derivations,
                 nondecreasing_expr_indices,
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
+                materialize_selectivity_threshold,
                 is_paused: false,
                 noop_update_hint,
             },
@@ -93,6 +99,11 @@ impl Inner {
         &self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
+        let chunk = if chunk.selectivity() <= self.materialize_selectivity_threshold {
+            chunk.compact()
+        } else {
+            chunk
+        };
         let (data_chunk, ops) = chunk.into_parts();
         let mut projected_columns = Vec::new();
 
@@ -254,6 +265,7 @@ mod tests {
             vec![test_expr],
             MultiMap::new(),
             vec![],
+            0.0,
             false,
         );
         let mut project = project.boxed().execute();
@@ -336,6 +348,7 @@ mod tests {
             vec![a_expr, b_expr, c_expr],
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
             vec![2],
+            0.0,
             false,
         );
         let mut project = project.boxed().execute();
