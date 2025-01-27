@@ -202,9 +202,14 @@ pub fn storage_memory_config(
             .unwrap_or(default_block_cache_capacity_mb),
     );
 
-    let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
-        ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
-    );
+    let compactor_memory_limit_mb = if embedded_compactor_enabled {
+        storage_config.compactor_memory_limit_mb.unwrap_or(
+            ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize)
+                >> 20,
+        )
+    } else {
+        0
+    };
 
     // The file cache flush buffer threshold is used as a emergency limitation.
     // On most cases the flush buffer is not supposed to be as large as the threshold.
@@ -328,7 +333,11 @@ pub fn storage_memory_config(
         meta_cache_capacity_mb,
         meta_cache_shard_num,
         shared_buffer_capacity_mb,
-        compactor_memory_limit_mb,
+        compactor_memory_limit_mb: if embedded_compactor_enabled {
+            compactor_memory_limit_mb
+        } else {
+            0 // unused
+        },
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,

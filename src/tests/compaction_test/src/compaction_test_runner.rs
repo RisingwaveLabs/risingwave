@@ -26,7 +26,7 @@ use clap::Parser;
 use foyer::CacheHint;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, MetaConfig, NoOverride,
+    extract_storage_memory_config_default, load_config, MetaConfig, NoOverride,
 };
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -357,7 +357,7 @@ async fn start_replay(
     }
 
     // Creates a hummock state store *after* we reset the hummock version
-    let storage_memory_config = extract_storage_memory_config(&config);
+    let storage_memory_config = extract_storage_memory_config_default(&config);
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
         &system_params,

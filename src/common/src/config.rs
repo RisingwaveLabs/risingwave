@@ -701,6 +701,10 @@ pub struct CacheConfig {
     #[serde(default)]
     #[config_doc(omitted)]
     pub meta_cache_eviction: CacheEvictionConfig,
+
+    /// Configure the capacity of the meta cache in MB explicitly for compactor.
+    #[serde(default)]
+    pub compactor_meta_cache_capacity_mb: Option<usize>,
 }
 
 /// the section `[storage.cache.eviction]` in `risingwave.toml`.
@@ -2509,7 +2513,7 @@ pub const MAX_META_CACHE_SHARD_BITS: usize = 4;
 pub const MIN_BUFFER_SIZE_PER_SHARD: usize = 256;
 pub const MAX_BLOCK_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 
-pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
+pub fn extract_storage_memory_config_default(s: &RwConfig) -> StorageMemoryConfig {
     let block_cache_capacity_mb = s.storage.cache.block_cache_capacity_mb.unwrap_or(
         // adapt to old version
         s.storage
@@ -2541,10 +2545,6 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         }
         shard_bits
     });
-    let compactor_memory_limit_mb = s
-        .storage
-        .compactor_memory_limit_mb
-        .unwrap_or(default::storage::compactor_memory_limit_mb());
 
     let get_eviction_config = |c: &CacheEvictionConfig| {
         match c {
@@ -2631,13 +2631,40 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         meta_cache_capacity_mb,
         meta_cache_shard_num,
         shared_buffer_capacity_mb,
-        compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
         block_file_cache_flush_buffer_threshold_mb,
         meta_file_cache_flush_buffer_threshold_mb,
+
+        compactor_memory_limit_mb: 0,
     }
+}
+
+pub fn extract_compactor_memory_config(
+    s: &RwConfig,
+    total_memory_bytes: u64,
+) -> StorageMemoryConfig {
+    let mut default = extract_storage_memory_config_default(s);
+
+    pub const MIN_COMPACTOR_META_CACHE_CAPACITY_MB: usize = 128;
+    pub const MAX_COMPACTOR_META_CACHE_CAPACITY_PROPORTION: f64 = 0.02;
+
+    default.compactor_memory_limit_mb =
+        (total_memory_bytes as f64 * s.storage.compactor_memory_available_proportion) as usize;
+    default.meta_cache_capacity_mb = s
+        .storage
+        .cache
+        .compactor_meta_cache_capacity_mb
+        .unwrap_or_else(|| {
+            std::cmp::min(
+                MIN_COMPACTOR_META_CACHE_CAPACITY_MB,
+                (total_memory_bytes as f64 * MAX_COMPACTOR_META_CACHE_CAPACITY_PROPORTION) as usize
+                    >> 20,
+            )
+        });
+
+    default
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
