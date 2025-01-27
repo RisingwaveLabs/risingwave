@@ -89,6 +89,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                     };
                     let timestamp = Timestamptz::from(t);
                     let size = om.content_length() as i64;
+
                     let metadata = FsPageItem {
                         name,
                         size,

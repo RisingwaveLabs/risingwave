@@ -374,40 +374,38 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     .unwrap();
                             debug_assert_eq!(mapping.len(), 1);
                             if let Some((split_id, offset)) = mapping.into_iter().next() {
-                                let row = state_store_handler
-                                    .get(split_id.clone())
-                                    .await?
-                                    .expect("The fs_split should be in the state table.");
-                                let fs_split = match row.datum_at(1) {
-                                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                                        OpendalFsSplit::<Src>::restore_from_json(
-                                            jsonb_ref.to_owned_scalar(),
-                                        )?
-                                    }
-                                    _ => unreachable!(),
-                                };
-                                // FIXME(rc): Here we compare `offset` with `fs_split.size` to determine
-                                // whether the file is finished, where the `offset` is the starting position
-                                // of the NEXT message line in the file. However, In other source connectors,
-                                // we use the word `offset` to represent the offset of the current message.
-                                // We have to be careful about this semantical inconsistency.
-                                if offset.parse::<usize>().unwrap() >= fs_split.size {
+                                // When `offset = usize::MAX` , it indicates that reading the current file (split_id) is finished.
+                                // At this point, it can be deleted from the state table.
+                                // This chunk serves only as an EOF marker, so it will be skipped and not yielded to downstream.
+                                if offset.parse::<usize>().unwrap() == usize::MAX {
                                     splits_on_fetch -= 1;
                                     state_store_handler.delete(split_id).await?;
                                 } else {
+                                    let row = state_store_handler.get(split_id.clone()).await?
+                                    .unwrap_or_else(|| {
+                                        panic!("The fs_split (file_name) {:?} should be in the state table.",
+                                      split_id)
+                                    });
+                                    let fs_split = match row.datum_at(1) {
+                                        Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                                            OpendalFsSplit::<Src>::restore_from_json(
+                                                jsonb_ref.to_owned_scalar(),
+                                            )?
+                                        }
+                                        _ => unreachable!(),
+                                    };
                                     state_store_handler
                                         .set(split_id, fs_split.encode_to_json())
                                         .await?;
+                                    let chunk = prune_additional_cols(
+                                        &chunk,
+                                        split_idx,
+                                        offset_idx,
+                                        &source_desc.columns,
+                                    );
+                                    yield Message::Chunk(chunk);
                                 }
                             }
-
-                            let chunk = prune_additional_cols(
-                                &chunk,
-                                split_idx,
-                                offset_idx,
-                                &source_desc.columns,
-                            );
-                            yield Message::Chunk(chunk);
                         }
                     }
                 }

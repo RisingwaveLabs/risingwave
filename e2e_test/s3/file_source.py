@@ -10,6 +10,7 @@ from time import sleep
 import time
 from io import StringIO
 from minio import Minio
+import gzip
 from functools import partial
 
 def gen_data(file_num, item_num_per_file):
@@ -164,20 +165,36 @@ def test_batch_read(config, file_num, item_num_per_file, prefix, fmt):
             return f"CSV (delimiter = ',', without_header = {str('without' in fmt).lower()})"
 
     # Execute a SELECT statement
-    cur.execute(f'''CREATE SOURCE {_source()}(
-        id int,
-        name TEXT,
-        sex int,
-        mark int,
-    ) WITH (
-        connector = 's3',
-        match_pattern = '{prefix}*.{fmt}',
+    if fmt == 'json':
+        cur.execute(f'''CREATE SOURCE {_source()}(
+            id int,
+            name TEXT,
+            sex int,
+            mark int,
+        ) WITH (
+            connector = 's3',
+            match_pattern = '{prefix}*.{fmt}.gz',
         s3.region_name = '{config['S3_REGION']}',
         s3.bucket_name = '{config['S3_BUCKET']}',
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
         s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
-    ) FORMAT PLAIN ENCODE {_encode()};''')
+        ) FORMAT PLAIN ENCODE {_encode()};''')
+    else:
+        cur.execute(f'''CREATE SOURCE {_source()}(
+            id int,
+            name TEXT,
+            sex int,
+            mark int,
+        ) WITH (
+            connector = 's3',
+            match_pattern = '{prefix}*.{fmt}',
+            s3.region_name = '{config['S3_REGION']}',
+            s3.bucket_name = '{config['S3_BUCKET']}',
+            s3.credentials.access = '{config['S3_ACCESS_KEY']}',
+            s3.credentials.secret = '{config['S3_SECRET_KEY']}',
+            s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
+        ) FORMAT PLAIN ENCODE {_encode()};''')
 
     total_rows = file_num * item_num_per_file
     MAX_RETRIES = 40
@@ -265,19 +282,45 @@ if __name__ == "__main__":
         secure=True,
     )
     run_id = str(random.randint(1000, 9999))
+    
     _local = lambda idx: f'data_{idx}.{fmt}'
-    _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}"
+    if fmt == 'json':
+        _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}.gz"
+        for idx, file_str in enumerate(formatted_files):
+            with open(_local(idx), "w") as f:
+                with gzip.open(_local(idx) + '.gz', 'wb') as f_gz:
+                    f_gz.write(file_str.encode('utf-8'))  
+                    os.fsync(f.fileno())
+
+            client.fput_object(
+                config["S3_BUCKET"],
+                _s3(idx),
+                _local(idx) + '.gz'
+            )
+    else:
+        _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}"
+        for idx, file_str in enumerate(formatted_files):
+            with open(_local(idx), "w") as f:
+                f.write(file_str)
+                os.fsync(f.fileno())
+
+            client.fput_object(
+                config["S3_BUCKET"],
+                _s3(idx),
+                _local(idx) 
+            )
 
     # put s3 files
     for idx, file_str in enumerate(formatted_files):
         with open(_local(idx), "w") as f:
-            f.write(file_str)
-            os.fsync(f.fileno())
+            with gzip.open(_local(idx) + '.gz', 'wb') as f_gz:
+                f_gz.write(file_str.encode('utf-8'))  
+                os.fsync(f.fileno())
 
         client.fput_object(
             config["S3_BUCKET"],
             _s3(idx),
-            _local(idx)
+            _local(idx) + '.gz'
         )
 
     # do test
