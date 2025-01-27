@@ -1,0 +1,54 @@
+# This is a test on a panic in select with excluded upper bound: https://github.com/risingwavelabs/risingwave/issues/16219
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (a varchar);
+
+statement ok
+create materialized view mv as select * from t order by a desc;
+
+query T
+select * from mv where a < '';
+----
+
+query T
+select * from mv where a > '';
+----
+
+query T
+select * from mv where a <= '';
+----
+
+query T
+select * from mv where a >= '';
+----
+
+statement ok
+INSERT INTO t VALUES ('foo');
+
+query T
+select * from mv where a < '';
+----
+
+query T
+select * from mv where a > '';
+----
+foo
+
+query T
+select * from mv where a <= '';
+----
+
+
+query T
+select * from mv where a >= '';
+----
+foo
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
