@@ -16,6 +16,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use anyhow::anyhow;
+use either::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -25,8 +26,8 @@ use tokio::sync::mpsc;
 use super::permit::Receiver;
 use crate::executor::prelude::*;
 use crate::executor::{
-    BarrierInner, DispatcherBarrier, DispatcherMessage, DispatcherMessageStream,
-    DispatcherMessageStreamItem,
+    BarrierInner, DispatcherBarrier, DispatcherMessage, DispatcherMessageBatch,
+    DispatcherMessageStream, DispatcherMessageStreamItem,
 };
 use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
 
@@ -111,6 +112,7 @@ impl LocalInput {
 
 mod local_input {
     use await_tree::InstrumentAwait;
+    use either::Either;
 
     use crate::executor::exchange::error::ExchangeChannelClosed;
     use crate::executor::exchange::permit::Receiver;
@@ -128,7 +130,16 @@ mod local_input {
     async fn run_inner(mut channel: Receiver, upstream_actor_id: ActorId) {
         let span: await_tree::Span = format!("LocalInput (actor {upstream_actor_id})").into();
         while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
-            yield msg;
+            match msg.into_messages() {
+                Either::Left(barriers) => {
+                    for b in barriers {
+                        yield b;
+                    }
+                }
+                Either::Right(m) => {
+                    yield m;
+                }
+            }
         }
         // Always emit an error outside the loop. This is because we use barrier as the control
         // message to stop the stream. Reaching here means the channel is closed unexpectedly.
@@ -197,6 +208,7 @@ mod remote_input {
 
     use anyhow::Context;
     use await_tree::InstrumentAwait;
+    use either::Either;
     use risingwave_common::catalog::DatabaseId;
     use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::task_service::{permits, GetStreamResponse};
@@ -266,12 +278,13 @@ mod remote_input {
         while let Some(data_res) = stream.next().verbose_instrument_await(span.clone()).await {
             match data_res {
                 Ok(GetStreamResponse { message, permits }) => {
+                    use crate::executor::DispatcherMessageBatch;
                     let msg = message.unwrap();
-                    let bytes = DispatcherMessage::get_encoded_len(&msg);
+                    let bytes = DispatcherMessageBatch::get_encoded_len(&msg);
 
                     exchange_frag_recv_size_metrics.inc_by(bytes as u64);
 
-                    let msg_res = DispatcherMessage::from_protobuf(&msg);
+                    let msg_res = DispatcherMessageBatch::from_protobuf(&msg);
                     if let Some(add_back_permits) = match permits.unwrap().value {
                         // For records, batch the permits we received to reduce the backward
                         // `AddPermits` messages.
@@ -294,8 +307,16 @@ mod remote_input {
                     }
 
                     let msg = msg_res.context("RemoteInput decode message error")?;
-
-                    yield msg;
+                    match msg.into_messages() {
+                        Either::Left(barriers) => {
+                            for b in barriers {
+                                yield b;
+                            }
+                        }
+                        Either::Right(m) => {
+                            yield m;
+                        }
+                    }
                 }
 
                 Err(e) => Err(ExchangeChannelClosed::remote_input(up_down_ids.0, Some(e)))?,
@@ -357,4 +378,16 @@ pub(crate) fn new_input(
     };
 
     Ok(input)
+}
+
+impl DispatcherMessageBatch {
+    fn into_messages(self) -> Either<impl Iterator<Item = DispatcherMessage>, DispatcherMessage> {
+        match self {
+            DispatcherMessageBatch::BarrierBatch(barriers) => {
+                Either::Left(barriers.into_iter().map(DispatcherMessage::Barrier))
+            }
+            DispatcherMessageBatch::Chunk(c) => Either::Right(DispatcherMessage::Chunk(c)),
+            DispatcherMessageBatch::Watermark(w) => Either::Right(DispatcherMessage::Watermark(w)),
+        }
+    }
 }

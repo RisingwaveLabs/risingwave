@@ -272,7 +272,7 @@ async fn test_merger_sum_aggr() {
         .collect_vec();
 
     input
-        .send(Message::Barrier(b1.into_dispatcher()))
+        .send(Message::Barrier(b1.into_dispatcher()).into())
         .await
         .unwrap();
     epoch.inc_epoch();
@@ -283,12 +283,12 @@ async fn test_merger_sum_aggr() {
                 vec![op; i],
                 vec![I64Array::from_iter(vec![1; i]).into_ref()],
             );
-            input.send(Message::Chunk(chunk)).await.unwrap();
+            input.send(Message::Chunk(chunk).into()).await.unwrap();
         }
         let b = Barrier::new_test_barrier(epoch);
         barrier_test_env.inject_barrier(&b, actors.clone());
         input
-            .send(Message::Barrier(b.into_dispatcher()))
+            .send(Message::Barrier(b.into_dispatcher()).into())
             .await
             .unwrap();
         epoch.inc_epoch();
@@ -297,7 +297,7 @@ async fn test_merger_sum_aggr() {
         .with_mutation(Mutation::Stop(actors.clone().into_iter().collect()));
     barrier_test_env.inject_barrier(&b, actors);
     input
-        .send(Message::Barrier(b.into_dispatcher()))
+        .send(Message::Barrier(b.into_dispatcher()).into())
         .await
         .unwrap();
 
@@ -357,11 +357,13 @@ impl StreamConsumer for SenderConsumer {
 
                 channel
                     .send(match msg {
-                        Message::Chunk(chunk) => DispatcherMessage::Chunk(chunk),
+                        Message::Chunk(chunk) => DispatcherMessageBatch::Chunk(chunk),
                         Message::Barrier(barrier) => {
-                            DispatcherMessage::Barrier(barrier.into_dispatcher())
+                            DispatcherMessageBatch::BarrierBatch(vec![barrier.into_dispatcher()])
                         }
-                        Message::Watermark(watermark) => DispatcherMessage::Watermark(watermark),
+                        Message::Watermark(watermark) => {
+                            DispatcherMessageBatch::Watermark(watermark)
+                        }
                     })
                     .await
                     .expect("failed to send message");
