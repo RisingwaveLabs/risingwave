@@ -145,14 +145,30 @@ impl ReplaceStreamJobPlan {
                         .collect(),
                 },
             );
-            assert!(fragment_changes
-                .insert(fragment.fragment_id, fragment_change)
-                .is_none());
+            fragment_changes
+                .try_insert(fragment.fragment_id, fragment_change)
+                .expect("non-duplicate");
         }
         for fragment in self.old_fragments.fragments.values() {
-            assert!(fragment_changes
-                .insert(fragment.fragment_id, CommandFragmentChanges::RemoveFragment)
-                .is_none());
+            fragment_changes
+                .try_insert(fragment.fragment_id, CommandFragmentChanges::RemoveFragment)
+                .expect("non-duplicate");
+        }
+        for (fragment_id, merge_updates) in &self.merge_updates {
+            let replace_map = merge_updates
+                .iter()
+                .filter_map(|m| {
+                    m.new_upstream_fragment_id.map(|new_upstream_fragment_id| {
+                        (m.upstream_fragment_id, new_upstream_fragment_id)
+                    })
+                })
+                .collect();
+            fragment_changes
+                .try_insert(
+                    *fragment_id,
+                    CommandFragmentChanges::ReplaceNodeUpstream(replace_map),
+                )
+                .expect("non-duplicate");
         }
         fragment_changes
     }

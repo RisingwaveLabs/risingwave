@@ -15,7 +15,9 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
 use tracing::warn;
 
@@ -39,6 +41,10 @@ impl BarrierInfo {
 #[derive(Debug, Clone)]
 pub(crate) enum CommandFragmentChanges {
     NewFragment(TableId, InflightFragmentInfo),
+    ReplaceNodeUpstream(
+        /// old `fragment_id` -> new `fragment_id`
+        HashMap<FragmentId, FragmentId>,
+    ),
     Reschedule {
         new_actors: HashMap<ActorId, WorkerId>,
         to_remove: HashSet<ActorId>,
@@ -90,6 +96,16 @@ impl InflightDatabaseInfo {
             .expect("should exist")
             .fragment_infos
             .get(&fragment_id)
+            .expect("should exist")
+    }
+
+    fn fragment_mut(&mut self, fragment_id: FragmentId) -> &mut InflightFragmentInfo {
+        let job_id = self.fragment_location[&fragment_id];
+        self.jobs
+            .get_mut(&job_id)
+            .expect("should exist")
+            .fragment_infos
+            .get_mut(&fragment_id)
             .expect("should exist")
     }
 }
@@ -182,20 +198,47 @@ impl InflightDatabaseInfo {
                             .expect("non duplicate");
                     }
                     CommandFragmentChanges::Reschedule { new_actors, .. } => {
-                        let job_id = self.fragment_location[&fragment_id];
-                        let info = self
-                            .jobs
-                            .get_mut(&job_id)
-                            .expect("should exist")
-                            .fragment_infos
-                            .get_mut(&fragment_id)
-                            .expect("should exist");
+                        let info = self.fragment_mut(fragment_id);
                         let actors = &mut info.actors;
                         for (actor_id, node_id) in &new_actors {
                             assert!(actors.insert(*actor_id as _, *node_id as _).is_none());
                         }
                     }
                     CommandFragmentChanges::RemoveFragment => {}
+                    CommandFragmentChanges::ReplaceNodeUpstream(replace_map) => {
+                        let mut remaining_fragment_ids: HashSet<_> =
+                            replace_map.keys().cloned().collect();
+                        let info = self.fragment_mut(fragment_id);
+                        visit_stream_node_mut(&mut info.nodes, |node| {
+                            if let NodeBody::Merge(m) = node
+                                && let Some(new_upstream_fragment_id) =
+                                    replace_map.get(&m.upstream_fragment_id)
+                            {
+                                if !remaining_fragment_ids.remove(&m.upstream_fragment_id) {
+                                    if cfg!(debug_assertions) {
+                                        panic!(
+                                            "duplicate upstream fragment: {:?} {:?}",
+                                            m, replace_map
+                                        );
+                                    } else {
+                                        warn!(?m, ?replace_map, "duplicate upstream fragment");
+                                    }
+                                }
+                                m.upstream_fragment_id = *new_upstream_fragment_id;
+                            }
+                        });
+                        if cfg!(debug_assertions) {
+                            assert!(
+                                remaining_fragment_ids.is_empty(),
+                                "non-existing fragment to replace: {:?} {:?} {:?}",
+                                remaining_fragment_ids,
+                                info.nodes,
+                                replace_map
+                            );
+                        } else {
+                            warn!(?remaining_fragment_ids, node = ?info.nodes, ?replace_map, "non-existing fragment to replace");
+                        }
+                    }
                 }
             }
         }
@@ -278,6 +321,7 @@ impl InflightDatabaseInfo {
                             self.jobs.remove(&job_id).expect("should exist");
                         }
                     }
+                    CommandFragmentChanges::ReplaceNodeUpstream(_) => {}
                 }
             }
         }
