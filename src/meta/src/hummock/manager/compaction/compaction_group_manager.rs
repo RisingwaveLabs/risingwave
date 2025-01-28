@@ -247,11 +247,11 @@ impl HummockManager {
                             }
                         };
 
-                    let group_delta = GroupDelta::GroupConstruct(PbGroupConstruct {
+                    let group_delta = GroupDelta::GroupConstruct(Box::new(PbGroupConstruct {
                         group_config: Some(config),
                         group_id,
                         ..Default::default()
-                    });
+                    }));
 
                     group_deltas.push(group_delta);
                 }
@@ -604,6 +604,18 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::MaxOverlappingLevelSize(c) => {
                 target.max_overlapping_level_size = Some(*c);
+            }
+            MutableConfig::EmergencyLevel0SstFileCount(c) => {
+                target.emergency_level0_sst_file_count = Some(*c);
+            }
+            MutableConfig::EmergencyLevel0SubLevelPartition(c) => {
+                target.emergency_level0_sub_level_partition = Some(*c);
+            }
+            MutableConfig::Level0StopWriteThresholdMaxSstCount(c) => {
+                target.level0_stop_write_threshold_max_sst_count = Some(*c);
+            }
+            MutableConfig::Level0StopWriteThresholdMaxSize(c) => {
+                target.level0_stop_write_threshold_max_size = Some(*c);
             }
         }
     }

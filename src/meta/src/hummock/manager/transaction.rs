@@ -129,7 +129,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 .group_deltas;
 
             #[expect(deprecated)]
-            group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
+            group_deltas.push(GroupDelta::GroupConstruct(Box::new(GroupConstruct {
                 group_config: Some(compaction_group.compaction_config().as_ref().clone()),
                 group_id: compaction_group.group_id(),
                 parent_group_id: StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
@@ -137,7 +137,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 table_ids: vec![],
                 version: CompatibilityVersion::SplitGroupByTableId as i32,
                 split_key: None,
-            }));
+            })));
         }
 
         // Append SSTs to a new version.

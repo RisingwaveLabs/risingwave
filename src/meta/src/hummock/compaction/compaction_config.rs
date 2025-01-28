@@ -72,6 +72,18 @@ impl CompactionConfigBuilder {
                     compaction_config::disable_auto_group_scheduling(),
                 ),
                 max_overlapping_level_size: Some(compaction_config::max_overlapping_level_size()),
+                emergency_level0_sst_file_count: Some(
+                    compaction_config::emergency_level0_sst_file_count(),
+                ),
+                emergency_level0_sub_level_partition: Some(
+                    compaction_config::emergency_level0_sub_level_partition(),
+                ),
+                level0_stop_write_threshold_max_sst_count: Some(
+                    compaction_config::level0_stop_write_threshold_max_sst_count(),
+                ),
+                level0_stop_write_threshold_max_size: Some(
+                    compaction_config::level0_stop_write_threshold_max_size(),
+                ),
             },
         }
     }
@@ -101,6 +113,14 @@ impl CompactionConfigBuilder {
             .level0_max_compact_file_number(opt.level0_max_compact_file_number)
             .tombstone_reclaim_ratio(opt.tombstone_reclaim_ratio)
             .max_level(opt.max_level as u64)
+            .sst_allowed_trivial_move_min_size(Some(opt.sst_allowed_trivial_move_min_size))
+            .max_overlapping_level_size(Some(opt.max_overlapping_level_size))
+            .emergency_level0_sst_file_count(Some(opt.emergency_level0_sst_file_count))
+            .emergency_level0_sub_level_partition(Some(opt.emergency_level0_sub_level_partition))
+            .level0_stop_write_threshold_max_sst_count(Some(
+                opt.level0_stop_write_threshold_max_sst_count,
+            ))
+            .level0_stop_write_threshold_max_size(Some(opt.level0_stop_write_threshold_max_size))
     }
 
     pub fn build(self) -> CompactionConfig {
@@ -162,4 +182,10 @@ builder_field! {
     level0_overlapping_sub_level_compact_level_count: u32,
     tombstone_reclaim_ratio: u32,
     sst_allowed_trivial_move_min_size: Option<u64>,
+    disable_auto_group_scheduling: Option<bool>,
+    max_overlapping_level_size: Option<u64>,
+    emergency_level0_sst_file_count: Option<u32>,
+    emergency_level0_sub_level_partition: Option<u32>,
+    level0_stop_write_threshold_max_sst_count: Option<u32>,
+    level0_stop_write_threshold_max_size: Option<u64>,
 }

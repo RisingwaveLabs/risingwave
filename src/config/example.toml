@@ -81,6 +81,14 @@ level0_max_compact_file_number = 100
 tombstone_reclaim_ratio = 40
 enable_emergency_picker = true
 max_level = 6
+max_l0_compact_level_count = 42
+sst_allowed_trivial_move_min_size = 4194304
+disable_auto_group_scheduling = false
+max_overlapping_level_size = 268435456
+emergency_level0_sst_file_count = 2000
+emergency_level0_sub_level_partition = 256
+level0_stop_write_threshold_max_sst_count = 10000
+level0_stop_write_threshold_max_size = 322122547200
 
 [meta.developer]
 meta_cached_traces_num = 256

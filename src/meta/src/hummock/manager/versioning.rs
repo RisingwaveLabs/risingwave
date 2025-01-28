@@ -300,7 +300,7 @@ pub(super) fn calc_new_write_limits(
                         .iter()
                         .map(|table_id| table_id.table_id)
                         .collect(),
-                    reason: write_limit_type.as_str(),
+                    reason: write_limit_type.as_str().to_owned(),
                 },
             );
             continue;
@@ -417,6 +417,40 @@ mod tests {
                 );
             };
 
+        let set_level_0_max_sst_count_threshold_for_group_1 =
+            |target_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
+             max_sst_count_threshold: u32| {
+                target_groups.insert(
+                    1,
+                    CompactionGroup {
+                        group_id: 1,
+                        compaction_config: Arc::new(
+                            CompactionConfigBuilder::new()
+                                .level0_stop_write_threshold_max_sst_count(Some(
+                                    max_sst_count_threshold,
+                                ))
+                                .build(),
+                        ),
+                    },
+                );
+            };
+
+        let set_level_0_max_size_threshold_for_group_1 =
+            |target_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
+             max_size_threshold: u64| {
+                target_groups.insert(
+                    1,
+                    CompactionGroup {
+                        group_id: 1,
+                        compaction_config: Arc::new(
+                            CompactionConfigBuilder::new()
+                                .level0_stop_write_threshold_max_size(Some(max_size_threshold))
+                                .build(),
+                        ),
+                    },
+                );
+            };
+
         let mut target_groups: HashMap<CompactionGroupId, CompactionGroup> = Default::default();
         set_sub_level_number_threshold_for_group_1(&mut target_groups, 10);
         let origin_snapshot: HashMap<CompactionGroupId, WriteLimit> = [(
@@ -471,7 +505,7 @@ mod tests {
 
         set_sub_level_number_threshold_for_group_1(&mut target_groups, 5);
         let new_write_limits =
-            calc_new_write_limits(target_groups, origin_snapshot.clone(), &version);
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
         assert_ne!(
             new_write_limits, origin_snapshot,
             "write limit should be triggered for group 1"
@@ -479,6 +513,83 @@ mod tests {
         assert_eq!(
             new_write_limits.get(&1).as_ref().unwrap().reason,
             "WriteStop(l0_level_count: 11, threshold: 5) too many L0 sub levels"
+        );
+
+        set_sub_level_number_threshold_for_group_1(&mut target_groups, 100);
+        let last_level = version
+            .levels
+            .get_mut(&1)
+            .unwrap()
+            .l0
+            .sub_levels
+            .last_mut()
+            .unwrap();
+        last_level.table_infos.extend(vec![
+            SstableInfoInner {
+                key_range: KeyRange::default(),
+                table_ids: vec![1, 2, 3],
+                total_key_count: 100,
+                sst_size: 100,
+                uncompressed_file_size: 100,
+                ..Default::default()
+            }
+            .into(),
+            SstableInfoInner {
+                key_range: KeyRange::default(),
+                table_ids: vec![1, 2, 3],
+                total_key_count: 100,
+                sst_size: 100,
+                uncompressed_file_size: 100,
+                ..Default::default()
+            }
+            .into(),
+        ]);
+        let new_write_limits =
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+        assert_eq!(
+            new_write_limits, origin_snapshot,
+            "write limit should not be triggered for group 1"
+        );
+
+        set_level_0_max_size_threshold_for_group_1(&mut target_groups, 10);
+        let new_write_limits =
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+        assert_ne!(
+            new_write_limits, origin_snapshot,
+            "write limit should be triggered for group 1"
+        );
+        assert_eq!(
+            new_write_limits.get(&1).as_ref().unwrap().reason,
+            "WriteStop(l0_size: 200, threshold: 10) too large L0 size"
+        );
+
+        set_level_0_max_size_threshold_for_group_1(&mut target_groups, 10000);
+        let new_write_limits =
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+        assert_eq!(
+            new_write_limits, origin_snapshot,
+            "write limit should not be triggered for group 1"
+        );
+
+        set_level_0_max_sst_count_threshold_for_group_1(&mut target_groups, 1);
+        let new_write_limits =
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+        assert_ne!(
+            new_write_limits, origin_snapshot,
+            "write limit should be triggered for group 1"
+        );
+        assert_eq!(
+            new_write_limits.get(&1).as_ref().unwrap().reason,
+            "WriteStop(l0_sst_count: 2, threshold: 1) too many L0 sst files"
+        );
+
+        set_level_0_max_sst_count_threshold_for_group_1(&mut target_groups, 100);
+        let new_write_limits =
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+
+        assert_eq!(
+            new_write_limits, origin_snapshot,
+            "write limit should not be triggered for group 1"
         );
     }
 
