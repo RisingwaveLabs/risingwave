@@ -33,11 +33,14 @@ impl MergeExecutorBuilder {
         node: &MergeNode,
         chunk_size: usize,
     ) -> StreamResult<MergeExecutorInput> {
-        let upstreams = node.get_upstream_actor_id();
         let upstream_fragment_id = node.get_upstream_fragment_id();
 
-        let inputs: Vec<_> = upstreams
-            .iter()
+        let inputs: Vec<_> = actor_context
+            .initial_upstream_actors
+            .get(&node.upstream_fragment_id)
+            .map(|actors| actors.actors.iter())
+            .into_iter()
+            .flatten()
             .map(|&upstream_actor_id| {
                 new_input(
                     &shared_context,

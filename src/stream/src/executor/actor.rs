@@ -32,6 +32,7 @@ use risingwave_expr::expr_context::{expr_context_scope, FRAGMENT_ID, VNODE_COUNT
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::PbStreamActor;
+use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_rpc_client::MetaClient;
 use thiserror_ext::AsReport;
 use tokio_stream::StreamExt;
@@ -41,7 +42,7 @@ use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
 use super::StreamConsumer;
 use crate::error::StreamResult;
-use crate::task::{ActorId, LocalBarrierManager};
+use crate::task::{ActorId, FragmentId, LocalBarrierManager};
 
 /// Shared by all operators of an actor.
 pub struct ActorContext {
@@ -61,6 +62,7 @@ pub struct ActorContext {
     pub initial_dispatch_num: usize,
     // mv_table_id to subscription id
     pub related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
+    pub initial_upstream_actors: HashMap<FragmentId, UpstreamActors>,
 
     // Meta client. currently used for auto schema change. `None` for test only
     pub meta_client: Option<MetaClient>,
@@ -84,17 +86,20 @@ impl ActorContext {
             // Set 1 for test to enable sanity check on table
             initial_dispatch_num: 1,
             related_subscriptions: HashMap::new().into(),
+            initial_upstream_actors: Default::default(),
             meta_client: None,
             streaming_config: Arc::new(StreamingConfig::default()),
         })
     }
 
+    #[expect(clippy::too_many_arguments)]
     pub fn create(
         stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
         initial_dispatch_num: usize,
         related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
+        initial_upstream_actors: HashMap<FragmentId, UpstreamActors>,
         meta_client: Option<MetaClient>,
         streaming_config: Arc<StreamingConfig>,
     ) -> ActorContextRef {
@@ -112,6 +117,7 @@ impl ActorContext {
             streaming_metrics,
             initial_dispatch_num,
             related_subscriptions,
+            initial_upstream_actors,
             meta_client,
             streaming_config,
         })

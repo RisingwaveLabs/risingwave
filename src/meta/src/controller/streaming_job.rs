@@ -429,7 +429,7 @@ impl CatalogController {
         for_replace: bool,
     ) -> MetaResult<()> {
         let fragment_actors =
-            Self::extract_fragment_and_actors_from_fragments(stream_job_fragments.to_protobuf())?;
+            Self::extract_fragment_and_actors_from_fragments(stream_job_fragments)?;
         let all_tables = stream_job_fragments.all_tables();
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -1117,10 +1117,7 @@ impl CatalogController {
             .map(|update| {
                 (
                     update.upstream_fragment_id,
-                    (
-                        update.new_upstream_fragment_id.unwrap(),
-                        update.added_upstream_actor_id.clone(),
-                    ),
+                    update.new_upstream_fragment_id.unwrap(),
                 )
             })
             .collect();
@@ -1185,15 +1182,13 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
             visit_stream_node_mut(&mut stream_node, |body| {
                 if let PbNodeBody::Merge(m) = body
-                    && let Some((new_fragment_id, new_actor_ids)) =
-                        fragment_replace_map.get(&m.upstream_fragment_id)
+                    && let Some(new_fragment_id) = fragment_replace_map.get(&m.upstream_fragment_id)
                 {
                     m.upstream_fragment_id = *new_fragment_id;
-                    m.upstream_actor_id.clone_from(new_actor_ids);
                 }
             });
             for fragment_id in &mut upstream_fragment_id.0 {
-                if let Some((new_fragment_id, _)) = fragment_replace_map.get(&(*fragment_id as _)) {
+                if let Some(new_fragment_id) = fragment_replace_map.get(&(*fragment_id as _)) {
                     *fragment_id = *new_fragment_id as _;
                 }
             }
@@ -1632,51 +1627,34 @@ impl CatalogController {
 
             // add new actors
             for (
-                PbStreamActor {
-                    actor_id,
-                    fragment_id,
-                    nodes,
-                    dispatcher,
-                    upstream_actor_id,
-                    vnode_bitmap,
-                    expr_context,
-                    ..
-                },
+                (
+                    PbStreamActor {
+                        actor_id,
+                        fragment_id,
+                        dispatcher,
+                        vnode_bitmap,
+                        expr_context,
+                        ..
+                    },
+                    node_actor_upstreams,
+                ),
                 actor_status,
             ) in newly_created_actors
             {
                 let mut actor_upstreams = BTreeMap::<FragmentId, BTreeSet<ActorId>>::new();
                 let mut new_actor_dispatchers = vec![];
 
-                if let Some(nodes) = &nodes {
-                    visit_stream_node(nodes, |node| {
-                        if let PbNodeBody::Merge(node) = node {
-                            actor_upstreams
-                                .entry(node.upstream_fragment_id as FragmentId)
-                                .or_default()
-                                .extend(node.upstream_actor_id.iter().map(|id| *id as ActorId));
-                        }
-                    });
+                for (fragment_id, upstream_actor_ids) in node_actor_upstreams {
+                    actor_upstreams
+                        .entry(fragment_id as FragmentId)
+                        .or_default()
+                        .extend(upstream_actor_ids.iter().map(|id| *id as ActorId));
                 }
 
                 let actor_upstreams: BTreeMap<FragmentId, Vec<ActorId>> = actor_upstreams
                     .into_iter()
                     .map(|(k, v)| (k, v.into_iter().collect()))
                     .collect();
-
-                debug_assert_eq!(
-                    actor_upstreams
-                        .values()
-                        .flatten()
-                        .cloned()
-                        .sorted()
-                        .collect_vec(),
-                    upstream_actor_id
-                        .iter()
-                        .map(|actor_id| *actor_id as i32)
-                        .sorted()
-                        .collect_vec()
-                );
 
                 let actor_upstreams = ActorUpstreamActors(actor_upstreams);
 

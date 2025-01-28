@@ -17,8 +17,17 @@ message InjectBarrierRequest {
   repeated uint32 table_ids_to_sync = 5;
   uint32 partial_graph_id = 6;
 
+  message BuildActorInfo {
+    message UpstreamActors {
+      repeated uint32 actors = 1;
+    }
+
+    stream_plan.StreamActor actor = 1;
+    map<uint32, UpstreamActors> upstreams = 2;
+  }
+
   repeated common.ActorInfo broadcast_info = 8;
-  repeated stream_plan.StreamActor actors_to_build = 9;
+  repeated BuildActorInfo actors_to_build = 9;
   repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_add = 10;
   repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_remove = 11;
 }

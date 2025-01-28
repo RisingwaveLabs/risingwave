@@ -550,7 +550,7 @@ message MergeNode {
   //
   // `upstream_actor_id` stored in the plan node in `Fragment` meta model cannot be directly used.
   // See `compose_fragment`.
-  repeated uint32 upstream_actor_id = 1;
+  repeated uint32 upstream_actor_id = 1 [deprecated = true];
   uint32 upstream_fragment_id = 2;
   // Type of the upstream dispatcher. If there's always one upstream according to this
   // type, the compute node may use the `ReceiverExecutor` as an optimization.
@@ -972,7 +972,7 @@ message StreamActor {
   // Note that upstream actor ids are also stored in the proto of merge nodes.
   // It is painstaking to traverse through the node tree and get upstream actor id from the root StreamNode.
   // We duplicate the information here to ease the parsing logic in stream manager.
-  repeated uint32 upstream_actor_id = 6;
+  repeated uint32 upstream_actor_id = 6 [deprecated = true];
   // Vnodes that the executors in this actor own.
   // If the fragment is a singleton, this field will not be set and leave a `None`.
   common.Buffer vnode_bitmap = 8;

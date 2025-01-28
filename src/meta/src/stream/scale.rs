@@ -41,7 +41,7 @@ use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State}
 use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, FragmentTypeFlag, PbDispatcher, PbStreamActor, StreamNode,
+    Dispatcher, DispatcherType, FragmentTypeFlag, PbDispatcher, PbStreamActor, StreamActor,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
@@ -52,7 +52,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 use crate::barrier::{Command, Reschedule};
 use crate::controller::scale::RescheduleWorkingSet;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableParallelism};
+use crate::model::{ActorId, ActorUpstreams, DispatcherId, FragmentId, TableParallelism};
 use crate::serving::{
     to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping, ServingVnodeMapping,
 };
@@ -79,7 +79,6 @@ pub struct CustomActorInfo {
     pub actor_id: u32,
     pub fragment_id: u32,
     pub dispatcher: Vec<Dispatcher>,
-    pub upstream_actor_id: Vec<u32>,
     /// `None` if singleton.
     pub vnode_bitmap: Option<Bitmap>,
 }
@@ -90,7 +89,6 @@ impl From<&PbStreamActor> for CustomActorInfo {
             actor_id,
             fragment_id,
             dispatcher,
-            upstream_actor_id,
             vnode_bitmap,
             ..
         }: &PbStreamActor,
@@ -99,7 +97,6 @@ impl From<&PbStreamActor> for CustomActorInfo {
             actor_id: *actor_id,
             fragment_id: *fragment_id,
             dispatcher: dispatcher.clone(),
-            upstream_actor_id: upstream_actor_id.clone(),
             vnode_bitmap: vnode_bitmap.as_ref().map(Bitmap::from),
         }
     }
@@ -139,6 +136,7 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 
 use super::SourceChange;
 use crate::controller::id::IdCategory;
@@ -529,9 +527,9 @@ impl ScaleController {
                     status: _,
                     splits: _,
                     worker_id,
-                    upstream_actor_ids,
                     vnode_bitmap,
                     expr_context,
+                    ..
                 },
             ) in actors
             {
@@ -546,12 +544,6 @@ impl ScaleController {
                     actor_id: actor_id as _,
                     fragment_id: fragment_id as _,
                     dispatcher: dispatchers,
-                    upstream_actor_id: upstream_actor_ids
-                        .into_inner()
-                        .values()
-                        .flatten()
-                        .map(|id| *id as _)
-                        .collect(),
                     vnode_bitmap: vnode_bitmap.map(|b| Bitmap::from(&b.to_protobuf())),
                 };
 
@@ -589,13 +581,13 @@ impl ScaleController {
                     actor_id,
                     fragment_id,
                     dispatcher,
-                    upstream_actor_id,
                     vnode_bitmap,
                 } = actors.first().unwrap().clone();
 
                 let (related_job, job_definition) =
                     related_jobs.get(&job_id).expect("job not found");
 
+                #[expect(deprecated)]
                 let fragment = CustomFragmentInfo {
                     fragment_id: fragment_id as _,
                     fragment_type_mask: fragment_type_mask as _,
@@ -607,7 +599,7 @@ impl ScaleController {
                         actor_id,
                         fragment_id: fragment_id as _,
                         dispatcher,
-                        upstream_actor_id,
+                        upstream_actor_id: vec![],
                         vnode_bitmap: vnode_bitmap.map(|b| b.to_protobuf()),
                         mview_definition: job_definition.to_owned(),
                         expr_context: expr_contexts
@@ -1197,6 +1189,7 @@ impl ScaleController {
             {
                 let new_actor_id = actor_to_create.0;
                 let mut new_actor = sample_actor.clone();
+                let mut new_actor_upstream = ActorUpstreams::new();
 
                 // This should be assigned before the `modify_actor_upstream_and_downstream` call,
                 // because we need to use the new actor id to find the upstream and
@@ -1210,7 +1203,7 @@ impl ScaleController {
                     &fragment_actor_bitmap,
                     &no_shuffle_upstream_actor_map,
                     &no_shuffle_downstream_actors_map,
-                    &mut new_actor,
+                    (&mut new_actor, &mut new_actor_upstream),
                 )?;
 
                 if let Some(bitmap) = fragment_actor_bitmap
@@ -1220,7 +1213,7 @@ impl ScaleController {
                     new_actor.vnode_bitmap = Some(bitmap.to_protobuf());
                 }
 
-                new_created_actors.insert(*new_actor_id, new_actor);
+                new_created_actors.insert(*new_actor_id, (new_actor, new_actor_upstream));
             }
         }
 
@@ -1433,11 +1426,11 @@ impl ScaleController {
         for (fragment_id, actors_to_create) in &fragment_actors_to_create {
             let mut created_actors = HashMap::new();
             for (actor_id, worker_id) in actors_to_create {
-                let actor = new_created_actors.get(actor_id).cloned().unwrap();
+                let (actor, actor_upstreams) = new_created_actors.get(actor_id).cloned().unwrap();
                 created_actors.insert(
                     *actor_id,
                     (
-                        actor,
+                        (actor, actor_upstreams),
                         ActorStatus {
                             location: PbActorLocation::from_worker(*worker_id as _),
                             state: ActorState::Inactive as i32,
@@ -1565,7 +1558,7 @@ impl ScaleController {
         fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
         no_shuffle_upstream_actor_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         no_shuffle_downstream_actors_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
-        new_actor: &mut PbStreamActor,
+        (new_actor, actor_upstreams): (&mut StreamActor, &mut ActorUpstreams),
     ) -> MetaResult<()> {
         let fragment = &ctx.fragment_map[&new_actor.fragment_id];
         let mut applied_upstream_fragment_actor_ids = HashMap::new();
@@ -1581,11 +1574,11 @@ impl ScaleController {
                 DispatcherType::Unspecified => unreachable!(),
                 DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
                     let upstream_fragment = &ctx.fragment_map[upstream_fragment_id];
-                    let mut upstream_actor_ids = upstream_fragment
+                    let mut upstream_actor_ids: HashSet<_> = upstream_fragment
                         .actors
                         .iter()
                         .map(|actor| actor.actor_id as ActorId)
-                        .collect_vec();
+                        .collect();
 
                     if let Some(upstream_actors_to_remove) =
                         fragment_actors_to_remove.get(upstream_fragment_id)
@@ -1600,10 +1593,8 @@ impl ScaleController {
                         upstream_actor_ids.extend(upstream_actors_to_create.keys().cloned());
                     }
 
-                    applied_upstream_fragment_actor_ids.insert(
-                        *upstream_fragment_id as FragmentId,
-                        upstream_actor_ids.clone(),
-                    );
+                    applied_upstream_fragment_actor_ids
+                        .insert(*upstream_fragment_id as FragmentId, upstream_actor_ids);
                 }
                 DispatcherType::NoShuffle => {
                     let no_shuffle_upstream_actor_id = *no_shuffle_upstream_actor_map
@@ -1613,36 +1604,24 @@ impl ScaleController {
 
                     applied_upstream_fragment_actor_ids.insert(
                         *upstream_fragment_id as FragmentId,
-                        vec![no_shuffle_upstream_actor_id as ActorId],
+                        HashSet::from_iter([no_shuffle_upstream_actor_id as ActorId]),
                     );
                 }
             }
         }
 
-        new_actor.upstream_actor_id = applied_upstream_fragment_actor_ids
-            .values()
-            .flatten()
-            .cloned()
-            .collect_vec();
-
-        fn replace_merge_node_upstream(
-            stream_node: &mut StreamNode,
-            applied_upstream_fragment_actor_ids: &HashMap<FragmentId, Vec<ActorId>>,
-        ) {
-            if let Some(NodeBody::Merge(s)) = stream_node.node_body.as_mut() {
-                s.upstream_actor_id = applied_upstream_fragment_actor_ids
-                    .get(&s.upstream_fragment_id)
-                    .cloned()
-                    .unwrap();
-            }
-
-            for child in &mut stream_node.input {
-                replace_merge_node_upstream(child, applied_upstream_fragment_actor_ids);
-            }
-        }
-
         if let Some(node) = new_actor.nodes.as_mut() {
-            replace_merge_node_upstream(node, &applied_upstream_fragment_actor_ids);
+            visit_stream_node(node, |node_body| {
+                if let NodeBody::Merge(s) = node_body {
+                    let upstream_actor_ids = applied_upstream_fragment_actor_ids
+                        .get(&s.upstream_fragment_id)
+                        .cloned()
+                        .unwrap();
+                    actor_upstreams
+                        .try_insert(s.upstream_fragment_id, upstream_actor_ids)
+                        .expect("non-duplicate");
+                }
+            });
         }
 
         // Update downstream actor ids

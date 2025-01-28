@@ -37,7 +37,7 @@ use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers,
     DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, StreamActor, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    StopMutation, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -49,7 +49,9 @@ use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
-use crate::model::{ActorId, DispatcherId, FragmentId, StreamJobFragments};
+use crate::model::{
+    ActorId, DispatcherId, FragmentId, StreamActorWithUpstreams, StreamJobFragments,
+};
 use crate::stream::{
     build_actor_connector_splits, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
 };
@@ -83,7 +85,7 @@ pub struct Reschedule {
     /// `Source` and `SourceBackfill` are handled together here.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
-    pub newly_created_actors: Vec<(StreamActor, PbActorStatus)>,
+    pub newly_created_actors: Vec<(StreamActorWithUpstreams, PbActorStatus)>,
 }
 
 /// Replacing an old job with a new one. All actors in the job will be rebuilt.
@@ -952,7 +954,7 @@ impl Command {
         mutation
     }
 
-    pub fn actors_to_create(&self) -> Option<HashMap<WorkerId, Vec<StreamActor>>> {
+    pub fn actors_to_create(&self) -> Option<HashMap<WorkerId, Vec<StreamActorWithUpstreams>>> {
         match self {
             Command::CreateStreamingJob { info, job_type } => {
                 let mut map = match job_type {

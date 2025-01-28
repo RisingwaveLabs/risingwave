@@ -471,8 +471,11 @@ async fn test_graph_builder() -> MetaResult<()> {
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
-    let ActorGraphBuildResult { graph, .. } =
-        actor_graph_builder.generate_graph(&env, &job, expr_context)?;
+    let ActorGraphBuildResult {
+        graph,
+        actor_upstreams,
+        ..
+    } = actor_graph_builder.generate_graph(&env, &job, expr_context)?;
 
     let stream_job_fragments = StreamJobFragments::for_test(TableId::default(), graph);
     let actors = stream_job_fragments.actors();
@@ -534,8 +537,13 @@ async fn test_graph_builder() -> MetaResult<()> {
                         .unwrap()
                         .iter()
                         .collect::<HashSet<_>>(),
-                    merge_node
-                        .get_upstream_actor_id()
+                    actor_upstreams
+                        .get(&actor.fragment_id)
+                        .unwrap()
+                        .get(&actor.actor_id)
+                        .unwrap()
+                        .get(&merge_node.upstream_fragment_id)
+                        .unwrap()
                         .iter()
                         .collect::<HashSet<_>>(),
                 );

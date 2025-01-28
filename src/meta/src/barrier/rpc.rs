@@ -32,9 +32,9 @@ use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{
-    AddMutation, Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo,
-};
+use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation, SubscriptionUpstreamInfo};
+use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
+use risingwave_pb::stream_service::inject_barrier_request::BuildActorInfo;
 use risingwave_pb::stream_service::streaming_control_stream_request::{
     CreatePartialGraphRequest, PbDatabaseInitialPartialGraph, PbInitRequest, PbInitialPartialGraph,
     RemovePartialGraphRequest, ResetDatabaseRequest,
@@ -57,7 +57,7 @@ use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
-use crate::model::{ActorId, StreamJobFragments};
+use crate::model::{ActorId, StreamActorWithUpstreams, StreamJobFragments};
 use crate::stream::build_actor_connector_splits;
 use crate::{MetaError, MetaResult};
 
@@ -320,7 +320,7 @@ impl ControlStreamManager {
         database_id: DatabaseId,
         info: InflightDatabaseInfo,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
-        stream_actors: &mut HashMap<ActorId, StreamActor>,
+        stream_actors: &mut HashMap<ActorId, StreamActorWithUpstreams>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
         background_jobs: &mut HashMap<TableId, (String, StreamJobFragments)>,
         subscription_info: InflightSubscriptionInfo,
@@ -455,7 +455,7 @@ impl ControlStreamManager {
         barrier_info: &BarrierInfo,
         pre_applied_graph_info: impl IntoIterator<Item = &InflightFragmentInfo>,
         applied_graph_info: impl IntoIterator<Item = &'a InflightFragmentInfo> + 'a,
-        mut new_actors: Option<HashMap<WorkerId, Vec<StreamActor>>>,
+        mut new_actors: Option<HashMap<WorkerId, Vec<StreamActorWithUpstreams>>>,
         subscriptions_to_add: Vec<SubscriptionUpstreamInfo>,
         subscriptions_to_remove: Vec<SubscriptionUpstreamInfo>,
     ) -> MetaResult<HashSet<WorkerId>> {
@@ -484,7 +484,7 @@ impl ControlStreamManager {
             .flatten()
             .flat_map(|(worker_id, actor_infos)| {
                 actor_infos.iter().map(|actor_info| ActorInfo {
-                    actor_id: actor_info.actor_id,
+                    actor_id: actor_info.0.actor_id,
                     host: self
                         .nodes
                         .get(worker_id)
@@ -541,6 +541,22 @@ impl ControlStreamManager {
                                             .into_iter()
                                             .flatten()
                                             .flatten()
+                                            .map(|(actor, upstreams)| BuildActorInfo {
+                                                actor: Some(actor),
+                                                upstreams: upstreams
+                                                    .into_iter()
+                                                    .map(|(fragment_id, upstreams)| {
+                                                        (
+                                                            fragment_id,
+                                                            UpstreamActors {
+                                                                actors: upstreams
+                                                                    .into_iter()
+                                                                    .collect(),
+                                                            },
+                                                        )
+                                                    })
+                                                    .collect(),
+                                            })
                                             .collect(),
                                         subscriptions_to_add: subscriptions_to_add.clone(),
                                         subscriptions_to_remove: subscriptions_to_remove.clone(),

@@ -762,6 +762,8 @@ impl DatabaseManagedBarrierState {
         let subscriptions =
             LazyCell::new(|| Arc::new(graph_state.mv_depended_subscriptions.clone()));
         for actor in request.actors_to_build {
+            let upstream = actor.upstreams;
+            let actor = actor.actor.unwrap();
             let actor_id = actor.actor_id;
             assert!(!is_stop_actor(actor_id));
             assert!(new_actors.insert(actor_id));
@@ -769,6 +771,7 @@ impl DatabaseManagedBarrierState {
             let (join_handle, monitor_join_handle) = self.actor_manager.spawn_actor(
                 actor,
                 (*subscriptions).clone(),
+                upstream,
                 self.current_shared_context.clone(),
                 self.local_barrier_manager.clone(),
             );

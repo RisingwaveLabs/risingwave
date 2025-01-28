@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -37,7 +37,9 @@ use super::id::GlobalFragmentIdsExt;
 use super::Locations;
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
-use crate::model::{DispatcherId, FragmentId};
+use crate::model::{
+    ActorUpstreams, DispatcherId, FragmentActorUpstreams, FragmentId, StreamActorWithUpstreams,
+};
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, EdgeId, EitherFragment, StreamFragmentEdge,
 };
@@ -126,11 +128,18 @@ impl ActorBuilder {
     /// 1. Replace the logical `Exchange` in node's input with `Merge`, which can be executed on the
     ///    compute nodes.
     /// 2. Fill the upstream mview info of the `Merge` node under the other "leaf" nodes.
-    fn rewrite(&self) -> MetaResult<StreamNode> {
-        self.rewrite_inner(&self.nodes, 0)
+    fn rewrite(&self) -> MetaResult<(StreamNode, ActorUpstreams)> {
+        let mut actor_upstreams = ActorUpstreams::new();
+        let node = self.rewrite_inner(&self.nodes, &mut actor_upstreams, 0)?;
+        Ok((node, actor_upstreams))
     }
 
-    fn rewrite_inner(&self, stream_node: &StreamNode, depth: usize) -> MetaResult<StreamNode> {
+    fn rewrite_inner(
+        &self,
+        stream_node: &StreamNode,
+        actor_upstreams: &mut ActorUpstreams,
+        depth: usize,
+    ) -> MetaResult<StreamNode> {
         match stream_node.get_node_body()? {
             // Leaf node `Exchange`.
             NodeBody::Exchange(exchange) => {
@@ -150,12 +159,23 @@ impl ActorBuilder {
                     link_id: stream_node.get_operator_id(),
                 }];
 
+                let upstream_fragment_id = upstreams.fragment_id.as_global_id();
+                actor_upstreams
+                    .try_insert(
+                        upstream_fragment_id,
+                        HashSet::from_iter(upstreams.actors.as_global_ids()),
+                    )
+                    .expect("non-duplicate");
+
                 Ok(StreamNode {
-                    node_body: Some(NodeBody::Merge(Box::new(MergeNode {
-                        upstream_actor_id: upstreams.actors.as_global_ids(),
-                        upstream_fragment_id: upstreams.fragment_id.as_global_id(),
-                        upstream_dispatcher_type: exchange.get_strategy()?.r#type,
-                        fields: stream_node.get_fields().clone(),
+                    node_body: Some(NodeBody::Merge(Box::new({
+                        #[expect(deprecated)]
+                        MergeNode {
+                            upstream_actor_id: vec![],
+                            upstream_fragment_id,
+                            upstream_dispatcher_type: exchange.get_strategy()?.r#type,
+                            fields: stream_node.get_fields().clone(),
+                        }
                     }))),
                     identity: "MergeExecutor".to_owned(),
                     ..stream_node.clone()
@@ -194,14 +214,22 @@ impl ActorBuilder {
                     DispatcherType::NoShuffle as _
                 };
 
+                let upstream_fragment_id = upstreams.fragment_id.as_global_id();
+                actor_upstreams
+                    .try_insert(upstream_fragment_id, HashSet::from_iter(upstream_actor_id))
+                    .expect("non-duplicate");
+
                 let input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
-                        node_body: Some(NodeBody::Merge(Box::new(MergeNode {
-                            upstream_actor_id,
-                            upstream_fragment_id: upstreams.fragment_id.as_global_id(),
-                            upstream_dispatcher_type,
-                            fields: merge_node.fields.clone(),
+                        node_body: Some(NodeBody::Merge(Box::new({
+                            #[expect(deprecated)]
+                            MergeNode {
+                                upstream_actor_id: vec![],
+                                upstream_fragment_id,
+                                upstream_dispatcher_type,
+                                fields: merge_node.fields.clone(),
+                            }
                         }))),
                         ..merge_node.clone()
                     },
@@ -242,15 +270,23 @@ impl ActorBuilder {
                 // So they both should have only one upstream actor.
                 assert_eq!(upstream_actor_id.len(), 1);
 
+                let upstream_fragment_id = upstreams.fragment_id.as_global_id();
+                actor_upstreams
+                    .try_insert(upstream_fragment_id, HashSet::from_iter(upstream_actor_id))
+                    .expect("non-duplicate");
+
                 // rewrite the input
                 let input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
-                        node_body: Some(NodeBody::Merge(Box::new(MergeNode {
-                            upstream_actor_id,
-                            upstream_fragment_id: upstreams.fragment_id.as_global_id(),
-                            upstream_dispatcher_type: DispatcherType::NoShuffle as _,
-                            fields: merge_node.fields.clone(),
+                        node_body: Some(NodeBody::Merge(Box::new({
+                            #[expect(deprecated)]
+                            MergeNode {
+                                upstream_actor_id: vec![],
+                                upstream_fragment_id,
+                                upstream_dispatcher_type: DispatcherType::NoShuffle as _,
+                                fields: merge_node.fields.clone(),
+                            }
                         }))),
                         ..merge_node.clone()
                     },
@@ -269,7 +305,7 @@ impl ActorBuilder {
                     .iter()
                     .zip_eq_fast(&mut new_stream_node.input)
                 {
-                    *new_input = self.rewrite_inner(input, depth + 1)?;
+                    *new_input = self.rewrite_inner(input, actor_upstreams, depth + 1)?;
                 }
                 Ok(new_stream_node)
             }
@@ -277,31 +313,33 @@ impl ActorBuilder {
     }
 
     /// Build an actor after all the upstreams and downstreams are processed.
-    fn build(self, job: &StreamingJob, expr_context: ExprContext) -> MetaResult<StreamActor> {
-        let rewritten_nodes = self.rewrite()?;
+    fn build(
+        self,
+        job: &StreamingJob,
+        expr_context: ExprContext,
+    ) -> MetaResult<StreamActorWithUpstreams> {
+        let (rewritten_nodes, actor_upstreams) = self.rewrite()?;
 
-        // TODO: store each upstream separately
-        let upstream_actor_id = self
-            .upstreams
-            .into_values()
-            .flat_map(|ActorUpstream { actors, .. }| actors.as_global_ids())
-            .collect();
         // Only fill the definition when debug assertions enabled, otherwise use name instead.
         #[cfg(not(debug_assertions))]
         let mview_definition = job.name();
         #[cfg(debug_assertions)]
         let mview_definition = job.definition();
 
-        Ok(StreamActor {
-            actor_id: self.actor_id.as_global_id(),
-            fragment_id: self.fragment_id.as_global_id(),
-            nodes: Some(rewritten_nodes),
-            dispatcher: self.downstreams.into_values().collect(),
-            upstream_actor_id,
-            vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
-            mview_definition,
-            expr_context: Some(expr_context),
-        })
+        Ok((
+            #[expect(deprecated)]
+            StreamActor {
+                actor_id: self.actor_id.as_global_id(),
+                fragment_id: self.fragment_id.as_global_id(),
+                nodes: Some(rewritten_nodes),
+                dispatcher: self.downstreams.into_values().collect(),
+                upstream_actor_id: vec![],
+                vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
+                mview_definition,
+                expr_context: Some(expr_context),
+            },
+            actor_upstreams,
+        ))
     }
 }
 
@@ -628,6 +666,7 @@ impl ActorGraphBuildState {
 pub struct ActorGraphBuildResult {
     /// The graph of sealed fragments, including all actors.
     pub graph: BTreeMap<FragmentId, Fragment>,
+    pub actor_upstreams: BTreeMap<FragmentId, FragmentActorUpstreams>,
 
     /// The scheduled locations of the actors to be built.
     pub building_locations: Locations,
@@ -781,28 +820,37 @@ impl ActorGraphBuilder {
         }
 
         // Serialize the graph into a map of sealed fragments.
-        let graph = {
+        let (graph, actor_upstreams) = {
             let mut actors: HashMap<GlobalFragmentId, Vec<StreamActor>> = HashMap::new();
+            let mut fragment_actor_upstreams: BTreeMap<_, FragmentActorUpstreams> = BTreeMap::new();
 
             // As all fragments are processed, we can now `build` the actors where the `Exchange`
             // and `Chain` are rewritten.
             for builder in actor_builders.into_values() {
                 let fragment_id = builder.fragment_id();
-                let actor = builder.build(job, expr_context.clone())?;
+                let (actor, actor_upstreams) = builder.build(job, expr_context.clone())?;
+                fragment_actor_upstreams
+                    .entry(fragment_id.as_global_id())
+                    .or_default()
+                    .try_insert(actor.actor_id, actor_upstreams)
+                    .expect("non-duplicate");
                 actors.entry(fragment_id).or_default().push(actor);
             }
 
-            actors
-                .into_iter()
-                .map(|(fragment_id, actors)| {
-                    let distribution = self.distributions[&fragment_id].clone();
-                    let fragment =
-                        self.fragment_graph
-                            .seal_fragment(fragment_id, actors, distribution);
-                    let fragment_id = fragment_id.as_global_id();
-                    (fragment_id, fragment)
-                })
-                .collect()
+            (
+                actors
+                    .into_iter()
+                    .map(|(fragment_id, actors)| {
+                        let distribution = self.distributions[&fragment_id].clone();
+                        let fragment =
+                            self.fragment_graph
+                                .seal_fragment(fragment_id, actors, distribution);
+                        let fragment_id = fragment_id.as_global_id();
+                        (fragment_id, fragment)
+                    })
+                    .collect(),
+                fragment_actor_upstreams,
+            )
         };
 
         // Convert the actor location map to the `Locations` struct.
@@ -847,6 +895,7 @@ impl ActorGraphBuilder {
 
         Ok(ActorGraphBuildResult {
             graph,
+            actor_upstreams,
             building_locations,
             existing_locations,
             dispatchers,
