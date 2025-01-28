@@ -67,6 +67,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MakeDate
             | Type::MakeTime
             | Type::MakeTimestamp
+            | Type::MakeTimestampNs
             | Type::CharToTimestamptz
             | Type::CharToDate
             | Type::CastWithTimeZone

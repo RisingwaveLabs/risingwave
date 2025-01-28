@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use risingwave_common::cast::str_to_bool;
-use risingwave_common::types::{Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
+use risingwave_common::types::{
+    Date, Decimal, ScalarImpl, Time, Timestamp, TimestampNanosecond, Timestamptz,
+};
 
 use super::unified::{AccessError, AccessResult};
 use super::{ByteStreamSourceParser, CsvProperties};
@@ -97,6 +99,7 @@ impl CsvParser {
             DataType::Date => parse!(v, Date)?.into(),
             DataType::Time => parse!(v, Time)?.into(),
             DataType::Timestamp => parse!(v, Timestamp)?.into(),
+            DataType::TimestampNanosecond => parse!(v, TimestampNanosecond)?.into(),
             DataType::Timestamptz => parse!(v, Timestamptz)?.into(),
             _ => {
                 return Err(AccessError::UnsupportedType {

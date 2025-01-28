@@ -187,6 +187,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     | DataType::Boolean
                     | DataType::Decimal
                     | DataType::Timestamp
+                    | DataType::TimestampNanosecond
                     | DataType::Timestamptz
                     | DataType::Varchar
                     | DataType::Date

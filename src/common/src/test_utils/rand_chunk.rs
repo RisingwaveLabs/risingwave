@@ -14,8 +14,8 @@
 
 use crate::array::{
     BoolArray, DataChunk, DateArray, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-    I64Array, Int256Array, IntervalArray, SerialArray, TimeArray, TimestampArray, TimestamptzArray,
-    Utf8Array,
+    I64Array, Int256Array, IntervalArray, SerialArray, TimeArray, TimestampArray,
+    TimestampNanosecondArray, TimestamptzArray, Utf8Array,
 };
 use crate::test_utils::rand_array::seed_rand_array_ref;
 use crate::types::DataType;
@@ -38,6 +38,9 @@ pub fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f6
             DataType::Time => seed_rand_array_ref::<TimeArray>(size, seed, null_ratio),
             DataType::Serial => seed_rand_array_ref::<SerialArray>(size, seed, null_ratio),
             DataType::Timestamp => seed_rand_array_ref::<TimestampArray>(size, seed, null_ratio),
+            DataType::TimestampNanosecond => {
+                seed_rand_array_ref::<TimestampNanosecondArray>(size, seed, null_ratio)
+            }
             DataType::Timestamptz => {
                 seed_rand_array_ref::<TimestamptzArray>(size, seed, null_ratio)
             }

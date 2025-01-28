@@ -69,6 +69,7 @@ impl DataType {
                     $(
                     DataType::$enum => $len,
                     )*
+                    DataType::TimestampNanosecond => 8,
                     DataType::Serial => 8,
                     DataType::Int256 => -1,
                     DataType::List(_) | DataType::Struct(_) | DataType::Map(_) => -1,
@@ -121,11 +122,13 @@ impl DataType {
                         DataType::Struct(_) => 2287, // pseudo-type of array[struct] (see `pg_type.dat`)
                         DataType::List { .. } => unreachable!("Never reach here!"),
                         DataType::Map(_) => 1304,
+                        DataType::TimestampNanosecond => 1306,
                     }
                     DataType::Serial => 20,
                     // XXX: what does the oid mean here? Why we don't have from_oid for them?
                     DataType::Int256 => 1301,
                     DataType::Map(_) => 1303,
+                    DataType::TimestampNanosecond => 1305,
                     // TODO: Support to give a new oid for custom struct type. #9434
                     DataType::Struct(_) => 2249,  // pseudo-type of struct (see `pg_type.dat`)
                 }
@@ -145,6 +148,7 @@ impl DataType {
                     DataType::List(_) => "list",
                     DataType::Serial => "serial",
                     DataType::Int256 => "rw_int256",
+                    DataType::TimestampNanosecond => "timestamp_nano",
                     DataType::Map(_) => "map",
                 }
             }

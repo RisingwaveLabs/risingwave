@@ -92,6 +92,7 @@ where
 #[function("greater_than_or_equal(time, time) -> boolean")]
 #[function("greater_than_or_equal(interval, interval) -> boolean")]
 #[function("greater_than_or_equal(timestamp, timestamp) -> boolean")]
+#[function("greater_than_or_equal(timestamp_ns, timestamp_ns) -> boolean")]
 #[function("greater_than_or_equal(timestamptz, timestamptz) -> boolean")]
 #[function("greater_than_or_equal(date, timestamp) -> boolean")]
 #[function("greater_than_or_equal(timestamp, date) -> boolean")]

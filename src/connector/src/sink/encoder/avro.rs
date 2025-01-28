@@ -461,7 +461,7 @@ fn on_field<D: MaybeData>(data_type: &DataType, maybe: D, expected: &AvroSchema)
             })?,
             _ => return no_match_err(),
         },
-        DataType::Timestamp => return no_match_err(),
+        DataType::Timestamp | DataType::TimestampNanosecond => return no_match_err(),
         DataType::Date => match inner {
             AvroSchema::Date => {
                 maybe.on_base(|s| Ok(Value::Date(s.into_date().get_nums_days_unix_epoch())))?

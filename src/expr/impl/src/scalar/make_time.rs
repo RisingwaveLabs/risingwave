@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use risingwave_common::types::{Date, FloatExt, Time, Timestamp, Timestamptz, F64};
+use risingwave_common::types::{
+    Date, FloatExt, Time, Timestamp, TimestampNanosecond, Timestamptz, F64,
+};
 use risingwave_expr::expr_context::TIME_ZONE;
 use risingwave_expr::{capture_context, function, ExprError, Result};
 
@@ -35,7 +37,7 @@ pub fn make_naive_date(mut year: i32, month: i32, day: i32) -> Result<NaiveDate>
     })
 }
 
-fn make_naive_time(hour: i32, min: i32, sec: F64) -> Result<NaiveTime> {
+fn make_naive_time_ns(hour: i32, min: i32, sec: F64) -> Result<NaiveTime> {
     if !sec.is_finite() || sec.0.is_sign_negative() {
         return Err(ExprError::InvalidParam {
             name: "sec",
@@ -52,6 +54,23 @@ fn make_naive_time(hour: i32, min: i32, sec: F64) -> Result<NaiveTime> {
     )
 }
 
+fn make_naive_time_ms(hour: i32, min: i32, sec: F64) -> Result<NaiveTime> {
+    if !sec.is_finite() || sec.0.is_sign_negative() {
+        return Err(ExprError::InvalidParam {
+            name: "sec",
+            reason: format!("invalid sec: {}", sec).into(),
+        });
+    }
+    let sec_u32 = sec.0.trunc() as u32;
+    let microsecond_u32 = ((sec.0 - sec.0.trunc()) * 1_000_000.0).round_ties_even() as u32;
+    NaiveTime::from_hms_micro_opt(hour as u32, min as u32, sec_u32, microsecond_u32).ok_or_else(
+        || ExprError::InvalidParam {
+            name: "hour, min, sec",
+            reason: format!("invalid time: {}:{}:{}", hour, min, sec).into(),
+        },
+    )
+}
+
 // year int, month int, day int
 #[function("make_date(int4, int4, int4) -> date")]
 pub fn make_date(year: i32, month: i32, day: i32) -> Result<Date> {
@@ -61,7 +80,7 @@ pub fn make_date(year: i32, month: i32, day: i32) -> Result<Date> {
 // hour int, min int, sec double precision
 #[function("make_time(int4, int4, float8) -> time")]
 pub fn make_time(hour: i32, min: i32, sec: F64) -> Result<Time> {
-    Ok(Time(make_naive_time(hour, min, sec)?))
+    Ok(Time(make_naive_time_ns(hour, min, sec)?))
 }
 
 // year int, month int, day int, hour int, min int, sec double precision
@@ -76,7 +95,22 @@ pub fn make_timestamp(
 ) -> Result<Timestamp> {
     Ok(Timestamp(NaiveDateTime::new(
         make_naive_date(year, month, day)?,
-        make_naive_time(hour, min, sec)?,
+        make_naive_time_ms(hour, min, sec)?,
+    )))
+}
+
+#[function("make_timestamp_ns(int4, int4, int4, int4, int4, float8) -> timestamp_ns")]
+pub fn make_timestamp_ns(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    min: i32,
+    sec: F64,
+) -> Result<TimestampNanosecond> {
+    Ok(TimestampNanosecond(NaiveDateTime::new(
+        make_naive_date(year, month, day)?,
+        make_naive_time_ns(hour, min, sec)?,
     )))
 }
 
@@ -119,7 +153,7 @@ fn make_timestamptz_impl(
 ) -> Result<Timestamptz> {
     let naive_date_time = NaiveDateTime::new(
         make_naive_date(year, month, day)?,
-        make_naive_time(hour, min, sec)?,
+        make_naive_time_ms(hour, min, sec)?,
     );
     timestamp_at_time_zone(Timestamp(naive_date_time), time_zone)
 }

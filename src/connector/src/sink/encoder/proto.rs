@@ -423,6 +423,12 @@ fn on_field<D: MaybeData>(
             Kind::String => maybe.on_base(|s| Ok(Value::String(s.into_timestamp().to_string())))?,
             _ => return no_match_err(), // google.type.DateTime
         },
+        DataType::TimestampNanosecond => match proto_field.kind() {
+            Kind::String => {
+                maybe.on_base(|s| Ok(Value::String(s.into_timestampns().to_string())))?
+            }
+            _ => return no_match_err(), // google.type.DateTime
+        },
         DataType::Decimal => match proto_field.kind() {
             Kind::String => maybe.on_base(|s| Ok(Value::String(s.into_decimal().to_string())))?,
             _ => return no_match_err(), // google.type.Decimal

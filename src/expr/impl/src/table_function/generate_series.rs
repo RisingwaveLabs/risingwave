@@ -36,6 +36,7 @@ where
 #[function("generate_series(int4, int4, int4) -> setof int4")]
 #[function("generate_series(int8, int8, int8) -> setof int8")]
 #[function("generate_series(timestamp, timestamp, interval) -> setof timestamp")]
+#[function("generate_series(timestamp_ns, timestamp_ns, interval) -> setof timestamp_ns")]
 fn generate_series_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = T>>
 where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,

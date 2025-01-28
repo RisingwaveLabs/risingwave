@@ -170,7 +170,7 @@ impl DorisSink {
             risingwave_common::types::DataType::Time => {
                 Err(SinkError::Doris("doris can not support Time".to_owned()))
             }
-            risingwave_common::types::DataType::Timestamp => {
+            risingwave_common::types::DataType::Timestamp | risingwave_common::types::DataType::TimestampNanosecond => {
                 Ok(doris_data_type.contains("DATETIME"))
             }
             risingwave_common::types::DataType::Timestamptz => Err(SinkError::Doris(

@@ -53,6 +53,7 @@ message DataType {
     SERIAL = 19;
     INT256 = 20;
     MAP = 21;
+    TIMESTAMP_NANOSECOND = 22;
   }
   TypeName type_name = 1;
   // Data length for char.
@@ -104,6 +105,7 @@ enum ArrayType {
   SERIAL = 17;
   INT256 = 18;
   MAP = 20;
+  TIMESTAMP_NANOSECOND = 21;
 }
 
 message Array {

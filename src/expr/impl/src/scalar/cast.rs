@@ -37,6 +37,7 @@ use thiserror_ext::AsReport;
 #[function("cast(varchar) -> timestamp")]
 #[function("cast(varchar) -> interval")]
 #[function("cast(varchar) -> jsonb")]
+#[function("cast(varchar) -> timestamp_ns")]
 pub fn str_parse<T>(elem: &str, ctx: &Context) -> Result<T>
 where
     T: FromStr,
@@ -125,9 +126,14 @@ where
 #[function("cast(int8) -> decimal")]
 #[function("cast(float4) -> float8")]
 #[function("cast(date) -> timestamp")]
+#[function("cast(date) -> timestamp_ns")]
 #[function("cast(time) -> interval")]
 #[function("cast(timestamp) -> date")]
+#[function("cast(timestamp_ns) -> date")]
 #[function("cast(timestamp) -> time")]
+#[function("cast(timestamp_ns) -> time")]
+#[function("cast(timestamp_ns) -> timestamp")]
+#[function("cast(timestamp) -> timestamp_ns")]
 #[function("cast(interval) -> time")]
 #[function("cast(varchar) -> varchar")]
 #[function("cast(int256) -> float8")]
@@ -158,6 +164,7 @@ pub fn int_to_bool(input: i32) -> bool {
 #[function("cast(date) -> varchar")]
 #[function("cast(interval) -> varchar")]
 #[function("cast(timestamp) -> varchar")]
+#[function("cast(timestamp_ns) -> varchar")]
 #[function("cast(jsonb) -> varchar")]
 #[function("cast(bytea) -> varchar")]
 #[function("cast(anyarray) -> varchar")]

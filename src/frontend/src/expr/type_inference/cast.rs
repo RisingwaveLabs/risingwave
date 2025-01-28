@@ -306,23 +306,24 @@ pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
     use DataTypeName::*;
     const CAST_TABLE: &[(&str, DataTypeName)] = &[
         // 123456789ABCDEF
-        (". e            a ", Boolean),     // 0
-        (" .iiiiii       a ", Int16),       // 1
-        ("ea.iiiii       a ", Int32),       // 2
-        (" aa.iiii       ae", Int64),       // 3
-        (" aaa.ii        a ", Decimal),     // 4
-        (" aaaa.i        a ", Float32),     // 5
-        (" aaaaa.        a ", Float64),     // 6
-        ("      e.       a ", Int256),      // 7
-        ("        .ii    a ", Date),        // 8
-        ("        a.ia   a ", Timestamp),   // 9
-        ("        aa.a   a ", Timestamptz), // A
-        ("           .i  a ", Time),        // B
-        ("           a.  a ", Interval),    // C
-        ("eeeeeee      . a ", Jsonb),       // D
-        ("              .a ", Bytea),       // E
-        ("eeeeeeeeeeeeeee. ", Varchar),     // F
-        ("   e            .", Serial),
+        (". e            a  ", Boolean),             // 0
+        (" .iiiiii       a  ", Int16),               // 1
+        ("ea.iiiii       a  ", Int32),               // 2
+        (" aa.iiii       ae ", Int64),               // 3
+        (" aaa.ii        a  ", Decimal),             // 4
+        (" aaaa.i        a  ", Float32),             // 5
+        (" aaaaa.        a  ", Float64),             // 6
+        ("      e.       a  ", Int256),              // 7
+        ("        .ii    a i", Date),                // 8
+        ("        a.ia   a i", Timestamp),           // 9
+        ("        aa.a   a a", Timestamptz),         // A
+        ("           .i  a  ", Time),                // B
+        ("           a.  a  ", Interval),            // C
+        ("eeeeeee      . a  ", Jsonb),               // D
+        ("              .a  ", Bytea),               // E
+        ("eeeeeeeeeeeeeee. e", Varchar),             // F
+        ("   e            . ", Serial),              // G
+        ("        aaia   a .", TimestampNanosecond), // H
     ];
     let mut map = BTreeMap::new();
     for (row, source) in CAST_TABLE {

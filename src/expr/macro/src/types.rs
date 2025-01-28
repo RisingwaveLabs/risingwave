@@ -28,6 +28,7 @@ const TYPE_MATRIX: &str = "
     date        Date        DateArray           Date            Date                y
     time        Time        TimeArray           Time            Time                y
     timestamp   Timestamp   TimestampArray      Timestamp       Timestamp           y
+    timestamp_ns   TimestampNanosecond   TimestampNanosecondArray      TimestampNanosecond       TimestampNanosecond           y
     timestamptz Timestamptz TimestamptzArray    Timestamptz     Timestamptz         y
     interval    Interval    IntervalArray       Interval        Interval            y
     varchar     Varchar     Utf8Array           Box<str>        &str                _
