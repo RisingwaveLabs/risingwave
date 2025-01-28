@@ -31,6 +31,7 @@ mod m20241121_101830_table_engine;
 mod m20241125_043732_connection_params;
 mod m20241202_071413_resource_group;
 mod m20241226_074013_clean_watermark_index_in_pk;
+mod m20250106_072104_fragment_relation;
 mod utils;
 
 pub struct Migrator;
@@ -100,6 +101,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20241121_101830_table_engine::Migration),
             Box::new(m20241202_071413_resource_group::Migration),
             Box::new(m20241226_074013_clean_watermark_index_in_pk::Migration),
+            Box::new(m20250106_072104_fragment_relation::Migration),
         ]
     }
 }

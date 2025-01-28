@@ -24,6 +24,7 @@ pub use super::compaction_task::Entity as CompactionTask;
 pub use super::connection::Entity as Connection;
 pub use super::database::Entity as Database;
 pub use super::fragment::Entity as Fragment;
+pub use super::fragment_relation::Entity as FragmentRelation;
 pub use super::function::Entity as Function;
 pub use super::hummock_pinned_snapshot::Entity as HummockPinnedSnapshot;
 pub use super::hummock_pinned_version::Entity as HummockPinnedVersion;

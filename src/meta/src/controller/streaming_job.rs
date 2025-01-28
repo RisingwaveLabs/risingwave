@@ -27,15 +27,15 @@ use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
-    Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Sink, Source,
-    StreamingJob as StreamingJobModel, Table,
+    Actor, ActorDispatcher, Fragment, FragmentRelation, Index, Object, ObjectDependency, Sink,
+    Source, StreamingJob as StreamingJobModel, Table,
 };
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
-    streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType, DatabaseId,
-    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SinkId, SourceId,
-    StreamNode, StreamingParallelism, UserId,
+    actor, actor_dispatcher, fragment, fragment_relation, index, object, object_dependency, sink,
+    source, streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType,
+    DatabaseId, ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId,
+    SinkId, SourceId, StreamNode, StreamingParallelism, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
@@ -434,6 +434,35 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
+        let mut fragment_relations = BTreeMap::new();
+
+        for (fragment, actors, actor_dispatchers) in &fragment_actors {
+            for actor in actors {
+                if let Some(dispatcher) = actor_dispatchers.get(&actor.actor_id) {
+                    for dispatcher in dispatcher {
+                        let key = (fragment.fragment_id, dispatcher.dispatcher_id);
+
+                        if fragment_relations.contains_key(&key) {
+                            continue;
+                        }
+
+                        let target_fragment_id = dispatcher.dispatcher_id;
+
+                        fragment_relations.insert(
+                            key,
+                            fragment_relation::Model {
+                                source_fragment_id: fragment.fragment_id,
+                                target_fragment_id,
+                                dispatcher_type: dispatcher.dispatcher_type,
+                                dist_key_indices: dispatcher.dist_key_indices.clone(),
+                                output_indices: dispatcher.output_indices.clone(),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
         // Add fragments.
         let (fragments, actor_with_dispatchers): (Vec<_>, Vec<_>) = fragment_actors
             .into_iter()
@@ -469,6 +498,12 @@ impl CatalogController {
                     .await?;
                 }
             }
+        }
+
+        for (_, relation) in fragment_relations {
+            FragmentRelation::insert(relation.into_active_model())
+                .exec(&txn)
+                .await?;
         }
 
         // Add actors and actor dispatchers.
@@ -656,6 +691,48 @@ impl CatalogController {
                 .update(&txn)
                 .await?;
             }
+        }
+
+        let actor_fragments: Vec<(ActorId, FragmentId)> = Actor::find()
+            .select_only()
+            .columns([actor::Column::ActorId, actor::Column::FragmentId])
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let actor_to_fragments: HashMap<_, _> = actor_fragments.into_iter().collect();
+
+        let mut fragment_relations = BTreeMap::new();
+
+        for (actor_id, dispatchers) in &new_actor_dispatchers {
+            let fragment_id = actor_to_fragments
+                .get(&(*actor_id as ActorId))
+                .ok_or_else(|| MetaError::catalog_id_not_found("actor", *actor_id))?;
+
+            for dispatcher in dispatchers {
+                let key = (fragment_id, dispatcher.dispatcher_id);
+
+                if fragment_relations.contains_key(&key) {
+                    continue;
+                }
+
+                fragment_relations.insert(
+                    key,
+                    fragment_relation::Model {
+                        source_fragment_id: *fragment_id,
+                        target_fragment_id: dispatcher.dispatcher_id as FragmentId,
+                        dispatcher_type: dispatcher.r#type().into(),
+                        dist_key_indices: I32Array::from(dispatcher.dist_key_indices.clone()),
+                        output_indices: I32Array::from(dispatcher.output_indices.clone()),
+                    },
+                );
+            }
+        }
+
+        for (_, relation) in fragment_relations {
+            FragmentRelation::insert(relation.into_active_model())
+                .exec(&txn)
+                .await?;
         }
 
         let mut actor_dispatchers = vec![];
