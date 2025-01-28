@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use replace_job_plan::{ReplaceSource, ReplaceTable};
+use replace_job_plan::{DropTableAssociatedSource, ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -98,23 +98,42 @@ impl DdlServiceImpl {
             .as_ref()
             .map(ColIndexMapping::from_protobuf);
 
-        ReplaceStreamJobInfo {
-            streaming_job: match replace_job.unwrap() {
-                replace_job_plan::ReplaceJob::ReplaceTable(ReplaceTable {
+        let mut drop_table_associated_source_id = None;
+        let replace_streaming_job = match replace_job.unwrap() {
+            replace_job_plan::ReplaceJob::ReplaceTable(ReplaceTable {
+                table,
+                source,
+                job_type,
+            }) => StreamingJob::Table(
+                source,
+                table.unwrap(),
+                TableJobType::try_from(job_type).unwrap(),
+            ),
+            replace_job_plan::ReplaceJob::ReplaceSource(ReplaceSource { source }) => {
+                StreamingJob::Source(source.unwrap())
+            }
+            replace_job_plan::ReplaceJob::DropTableAssociatedSource(
+                DropTableAssociatedSource {
+                    associated_source_id,
                     table,
-                    source,
-                    job_type,
-                }) => StreamingJob::Table(
-                    source,
-                    table.unwrap(),
-                    TableJobType::try_from(job_type).unwrap(),
-                ),
-                replace_job_plan::ReplaceJob::ReplaceSource(ReplaceSource { source }) => {
-                    StreamingJob::Source(source.unwrap())
-                }
-            },
+                },
+            ) => {
+                tracing::info!(
+                    "replace table drop table associated source: {:?}, table id {}",
+                    associated_source_id,
+                    table.as_ref().unwrap().id
+                );
+
+                drop_table_associated_source_id = Some(associated_source_id);
+                StreamingJob::Table(None, table.unwrap(), TableJobType::General)
+            }
+        };
+
+        ReplaceStreamJobInfo {
+            streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
             col_index_mapping,
+            drop_table_associated_source_id,
         }
     }
 }

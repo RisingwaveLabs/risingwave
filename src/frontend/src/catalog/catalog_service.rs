@@ -25,7 +25,9 @@ use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
-use risingwave_pb::ddl_service::replace_job_plan::{ReplaceJob, ReplaceSource, ReplaceTable};
+use risingwave_pb::ddl_service::replace_job_plan::{
+    DropTableAssociatedSource, ReplaceJob, ReplaceSource, ReplaceTable,
+};
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
     create_connection_request, PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType,
@@ -104,6 +106,14 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
         job_type: TableJobType,
+    ) -> Result<()>;
+
+    async fn replace_table_drop_table_associated_source(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
+        mapping: ColIndexMapping,
+        drop_table_associated_source_id: u32,
     ) -> Result<()>;
 
     async fn replace_source(
@@ -346,6 +356,32 @@ impl CatalogWriter for CatalogWriterImpl {
                     source,
                     table: Some(table),
                     job_type: job_type as _,
+                }),
+            )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn replace_table_drop_table_associated_source(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
+        mapping: ColIndexMapping,
+        drop_table_associated_source_id: u32,
+    ) -> Result<()> {
+        tracing::info!(
+            "replace table drop table associated source: {:?}, table id {}",
+            drop_table_associated_source_id,
+            table.id
+        );
+        let version = self
+            .meta_client
+            .replace_job(
+                graph,
+                mapping,
+                ReplaceJob::DropTableAssociatedSource(DropTableAssociatedSource {
+                    associated_source_id: drop_table_associated_source_id,
+                    table: Some(table),
                 }),
             )
             .await?;

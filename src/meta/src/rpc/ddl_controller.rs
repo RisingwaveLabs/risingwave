@@ -119,6 +119,9 @@ pub struct ReplaceStreamJobInfo {
     pub streaming_job: StreamingJob,
     pub fragment_graph: StreamFragmentGraphProto,
     pub col_index_mapping: Option<ColIndexMapping>,
+
+    /// only used for dropping table associated source
+    pub drop_table_associated_source_id: Option<u32>,
 }
 
 pub enum DdlCommand {
@@ -336,9 +339,15 @@ impl DdlController {
                     streaming_job,
                     fragment_graph,
                     col_index_mapping,
+                    drop_table_associated_source_id,
                 }) => {
-                    ctrl.replace_job(streaming_job, fragment_graph, col_index_mapping)
-                        .await
+                    ctrl.replace_job(
+                        streaming_job,
+                        fragment_graph,
+                        col_index_mapping,
+                        drop_table_associated_source_id,
+                    )
+                    .await
                 }
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
                 DdlCommand::AlterObjectOwner(object, owner_id) => {
@@ -694,7 +703,15 @@ impl DdlController {
         fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragments)> {
         let (mut replace_table_ctx, mut stream_job_fragments) = self
-            .build_replace_job(stream_ctx, streaming_job, fragment_graph, None, tmp_id as _)
+            .build_replace_job(
+                stream_ctx,
+                streaming_job,
+                fragment_graph,
+                None,
+                tmp_id as _,
+                // guarantee that not drop the source because the code path is for creating streaming job
+                None,
+            )
             .await?;
 
         let target_table = streaming_job.table().unwrap();
@@ -1213,6 +1230,7 @@ impl DdlController {
                                 dropping_sink_id: Some(sink_id),
                                 updated_sink_catalogs: vec![],
                             },
+                            None, // release_ctx is None because we already drop the objects and not require atomic drop things when replacing table.
                         )
                         .await?;
                     Ok(version)
@@ -1284,7 +1302,6 @@ impl DdlController {
         for secret in secret_ids {
             LocalSecretManager::global().remove_secret(secret as _);
         }
-
         Ok(version)
     }
 
@@ -1294,6 +1311,7 @@ impl DdlController {
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         col_index_mapping: Option<ColIndexMapping>,
+        drop_table_associated_source_id: Option<u32>,
     ) -> MetaResult<NotificationVersion> {
         match &mut streaming_job {
             StreamingJob::Table(..) | StreamingJob::Source(..) => {}
@@ -1340,6 +1358,7 @@ impl DdlController {
         tracing::debug!(id = job_id, "building replace streaming job");
         let mut updated_sink_catalogs = vec![];
 
+        let mut release_ctx = None;
         let result: MetaResult<Vec<PbMergeUpdate>> = try {
             let (mut ctx, mut stream_job_fragments) = self
                 .build_replace_job(
@@ -1348,8 +1367,10 @@ impl DdlController {
                     fragment_graph,
                     col_index_mapping.as_ref(),
                     tmp_id as _,
+                    drop_table_associated_source_id,
                 )
                 .await?;
+            release_ctx = ctx.release_ctx.clone();
 
             if let StreamingJob::Table(_, table, ..) = &streaming_job {
                 let catalogs = self
@@ -1412,8 +1433,28 @@ impl DdlController {
                             dropping_sink_id: None,
                             updated_sink_catalogs,
                         },
+                        release_ctx.as_ref(),
                     )
                     .await?;
+                if let Some(release_ctx) = &release_ctx {
+                    // drop table associated source, we have already drop the objects in catalog above and need to run command to clean up the hummock entry.
+                    self.source_manager
+                        .apply_source_change(SourceChange::DropSource {
+                            dropped_source_ids: release_ctx.removed_source_ids.clone(),
+                        })
+                        .await;
+                    self.stream_manager
+                        .drop_streaming_jobs(
+                            risingwave_common::catalog::DatabaseId::from(
+                                release_ctx.database_id as u32,
+                            ),
+                            vec![],
+                            vec![],
+                            release_ctx.removed_state_table_ids.clone(),
+                            HashSet::new(),
+                        )
+                        .await;
+                }
                 Ok(version)
             }
             Err(err) => {
@@ -1708,6 +1749,7 @@ impl DdlController {
         mut fragment_graph: StreamFragmentGraph,
         col_index_mapping: Option<&ColIndexMapping>,
         tmp_job_id: TableId,
+        drop_table_associated_source_id: Option<u32>,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragments)> {
         match &stream_job {
             StreamingJob::Table(..) | StreamingJob::Source(..) => {}
@@ -1726,12 +1768,32 @@ impl DdlController {
             .get_job_fragments_by_id(&id.into())
             .await?;
         let old_internal_table_ids = old_fragments.internal_table_ids();
-        let old_internal_tables = self
-            .metadata_manager
-            .get_table_catalog_by_ids(old_internal_table_ids)
-            .await?;
 
-        fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+        // handle drop table's associated source
+        let mut release_ctx = None;
+        if drop_table_associated_source_id.is_some() {
+            // drop table's associated source means the fragment containing the table has just one internal table (associated source's state table)
+            debug_assert!(old_internal_table_ids.len() == 1);
+
+            release_ctx = Some(ReleaseContext {
+                database_id: stream_job.database_id() as i32,
+                // we do not remove the original table catalog as it's still needed for the streaming job
+                // just need to remove the ref to the state table
+                removed_streaming_job_ids: vec![id as i32],
+                removed_source_ids: vec![drop_table_associated_source_id.unwrap() as i32],
+                removed_state_table_ids: old_internal_table_ids
+                    .iter()
+                    .map(|id| *id as i32)
+                    .collect(),
+                ..Default::default()
+            });
+        } else {
+            let old_internal_tables = self
+                .metadata_manager
+                .get_table_catalog_by_ids(old_internal_table_ids)
+                .await?;
+            fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+        }
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
@@ -1846,6 +1908,7 @@ impl DdlController {
             existing_locations,
             streaming_job: stream_job.clone(),
             tmp_id: tmp_job_id as _,
+            release_ctx,
         };
 
         Ok((ctx, stream_job_fragments))

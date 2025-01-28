@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnCatalog, Engine};
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::{bail, bail_not_implemented};
@@ -101,50 +101,14 @@ pub async fn get_replace_table_plan(
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(old_catalog);
-    let Statement::CreateTable {
-        columns,
-        constraints,
-        source_watermarks,
-        append_only,
-        on_conflict,
-        with_version_column,
-        wildcard_idx,
-        cdc_table_info,
-        format_encode,
-        include_column_options,
-        engine,
-        ..
-    } = new_definition
-    else {
-        panic!("unexpected statement type: {:?}", new_definition);
-    };
-
-    let format_encode = format_encode
-        .clone()
-        .map(|format_encode| format_encode.into_v2_with_warning());
-
-    let engine = match engine {
-        risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
-        risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
-    };
 
     let (mut graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         old_catalog,
-        format_encode,
         handler_args.clone(),
+        new_definition,
         col_id_gen,
-        columns.clone(),
-        wildcard_idx,
-        constraints,
-        source_watermarks,
-        append_only,
-        on_conflict,
-        with_version_column,
-        cdc_table_info,
-        include_column_options,
-        engine,
         sql_column_strategy,
     )
     .await?;

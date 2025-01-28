@@ -52,6 +52,7 @@ mod alter_streaming_rate_limit;
 mod alter_swap_rename;
 mod alter_system;
 mod alter_table_column;
+pub mod alter_table_drop_connector;
 mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
@@ -758,6 +759,12 @@ pub async fn handle(
                 rate_limit,
             )
             .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::DropConnector,
+        } => {
+            alter_table_drop_connector::handle_alter_table_drop_connector(handler_args, name).await
         }
         Statement::AlterTable {
             name,

@@ -15,6 +15,76 @@
 use super::*;
 
 impl CatalogController {
+    // drop table associated source is a special case of drop relation, which just remove the source object and associated state table, keeping the streaming job and fragments.
+    pub async fn drop_table_associated_source(
+        &self,
+        txn: &DatabaseTransaction,
+        release_ctx: &ReleaseContext,
+    ) -> MetaResult<(Vec<PbUserInfo>, Vec<PartialObject>)> {
+        {
+            // alter the original table to remove the ref to the state table catalog
+            let table_id = *release_ctx.removed_streaming_job_ids.first().unwrap();
+            Table::update(table::ActiveModel {
+                table_id: Set(table_id as _),
+                optional_associated_source_id: Set(None),
+                ..Default::default()
+            })
+            .exec(txn)
+            .await?;
+        }
+
+        let to_drop_source_objects: Vec<PartialObject> = Object::find()
+            .filter(object::Column::Oid.is_in(release_ctx.removed_source_ids.clone()))
+            .into_partial_model()
+            .all(txn)
+            .await?;
+        let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
+            .select_only()
+            .columns([
+                object::Column::Oid,
+                object::Column::ObjType,
+                object::Column::SchemaId,
+                object::Column::DatabaseId,
+            ])
+            .filter(object::Column::Oid.is_in(release_ctx.removed_state_table_ids.clone()))
+            .into_partial_model()
+            .all(txn)
+            .await?;
+        let to_drop_objects = to_drop_source_objects
+            .into_iter()
+            .chain(to_drop_internal_table_objs.into_iter())
+            .collect_vec();
+        // Find affect users with privileges on all this objects.
+        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .filter(user_privilege::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
+            .into_tuple()
+            .all(txn)
+            .await?;
+
+        tracing::info!(
+            "drop_table_associated_source: to_drop_objects: {:?}",
+            to_drop_objects
+        );
+
+        // delete all in to_drop_objects.
+        let res = Object::delete_many()
+            .filter(object::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
+            .exec(txn)
+            .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found(
+                ObjectType::Source.as_str(),
+                release_ctx.removed_source_ids.first().unwrap(),
+            ));
+        }
+        let user_infos = list_user_info_by_ids(to_update_user_ids, txn).await?;
+
+        Ok((user_infos, to_drop_objects))
+    }
+
     // Drop all kinds of objects including databases,
     // schemas, relations, connections, functions, etc.
     pub async fn drop_object(
