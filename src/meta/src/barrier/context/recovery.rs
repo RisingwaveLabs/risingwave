@@ -172,6 +172,7 @@ impl GlobalBarrierWorkerContextImpl {
                         }
                         background_jobs
                     };
+
                     tracing::info!("recovered mview progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
@@ -188,12 +189,39 @@ impl GlobalBarrierWorkerContextImpl {
                         background_streaming_jobs.len()
                     );
 
+                    let unreschedulable_jobs = {
+                        let mut unreschedulable_jobs = HashSet::new();
+
+                        for job_id in background_streaming_jobs {
+                            let scan_types = self
+                                .metadata_manager
+                                .get_job_backfill_scan_types(&job_id)
+                                .await?;
+
+                            if scan_types
+                                .values()
+                                .any(|scan_type| !scan_type.is_reschedulable())
+                            {
+                                unreschedulable_jobs.insert(job_id);
+                            }
+                        }
+
+                        unreschedulable_jobs
+                    };
+
+                    if !unreschedulable_jobs.is_empty() {
+                        tracing::info!(
+                            "unreschedulable background jobs: {:?}",
+                            unreschedulable_jobs
+                        );
+                    }
+
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     // FIXME: Transactions should be used.
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     let mut info = if !self.env.opts.disable_automatic_parallelism_control
-                        && background_streaming_jobs.is_empty()
+                        && unreschedulable_jobs.is_empty()
                     {
                         info!("trigger offline scaling");
                         self.scale_actors(&active_streaming_nodes)
@@ -263,6 +291,23 @@ impl GlobalBarrierWorkerContextImpl {
                     let stream_actors = self.load_all_actors().await.inspect_err(|err| {
                         warn!(error = %err.as_report(), "update actors failed");
                     })?;
+
+                    let background_jobs = {
+                        let jobs = self
+                            .list_background_mv_progress()
+                            .await
+                            .context("recover mview progress should not fail")?;
+                        let mut background_jobs = HashMap::new();
+                        for (definition, stream_job_fragments) in jobs {
+                            background_jobs
+                                .try_insert(
+                                    stream_job_fragments.stream_job_id(),
+                                    (definition, stream_job_fragments),
+                                )
+                                .expect("non-duplicate");
+                        }
+                        background_jobs
+                    };
 
                     // get split assignments for all actors
                     let source_splits = self.source_manager.list_assignments().await;
@@ -585,7 +630,7 @@ impl GlobalBarrierWorkerContextImpl {
         let reschedule_targets: HashMap<_, _> = {
             let streaming_parallelisms = mgr
                 .catalog_controller
-                .get_all_created_streaming_parallelisms()
+                .get_all_streaming_parallelisms()
                 .await?;
 
             let mut result = HashMap::new();

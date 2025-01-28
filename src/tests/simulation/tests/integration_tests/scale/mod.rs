@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod auto_parallelism;
+mod background_ddl;
 mod cascade_materialized_view;
 mod dynamic_filter;
 mod nexmark_chaos;

@@ -26,7 +26,7 @@ use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
-use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
+use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamScanType, StreamActor};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Instant};
@@ -752,6 +752,17 @@ impl MetadataManager {
     pub async fn list_rate_limits(&self) -> MetaResult<Vec<RateLimitInfo>> {
         let rate_limits = self.catalog_controller.list_rate_limits().await?;
         Ok(rate_limits)
+    }
+
+    pub async fn get_job_backfill_scan_types(
+        &self,
+        job_id: &TableId,
+    ) -> MetaResult<HashMap<FragmentId, PbStreamScanType>> {
+        let backfill_types = self
+            .catalog_controller
+            .get_job_fragment_backfill_scan_type(job_id.table_id as _)
+            .await?;
+        Ok(backfill_types)
     }
 }
 

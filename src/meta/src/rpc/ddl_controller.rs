@@ -403,16 +403,6 @@ impl DdlController {
             deferred = true;
         }
 
-        if !deferred
-            && !self
-                .metadata_manager
-                .list_background_creating_jobs()
-                .await?
-                .is_empty()
-        {
-            bail!("The system is creating jobs in the background, please try again later")
-        }
-
         self.stream_manager
             .reschedule_streaming_job(table_id, target, deferred)
             .await

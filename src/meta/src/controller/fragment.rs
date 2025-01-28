@@ -20,7 +20,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
+use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
@@ -47,7 +47,8 @@ use risingwave_pb::meta::{
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
+    DispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext, PbStreamScanType,
+    StreamScanType,
 };
 use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
@@ -66,7 +67,7 @@ use crate::controller::utils::{
 use crate::manager::LocalNotification;
 use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{build_actor_split_impls, SplitAssignment};
-use crate::{MetaError, MetaResult};
+use crate::{model, MetaError, MetaResult};
 
 #[derive(Clone, Debug)]
 pub struct InflightFragmentInfo {
@@ -721,6 +722,40 @@ impl CatalogController {
             job_info.parallelism.clone(),
             job_info.max_parallelism as _,
         )
+    }
+
+    pub async fn get_job_fragment_backfill_scan_type(
+        &self,
+        job_id: ObjectId,
+    ) -> MetaResult<HashMap<model::FragmentId, PbStreamScanType>> {
+        let inner = self.inner.read().await;
+        let fragments: Vec<_> = Fragment::find()
+            .filter(fragment::Column::JobId.eq(job_id))
+            .all(&inner.db)
+            .await?;
+
+        let mut result = HashMap::new();
+
+        for fragment::Model {
+            fragment_id,
+            stream_node,
+            ..
+        } in fragments
+        {
+            let stream_node = stream_node.to_protobuf();
+            visit_stream_node(&stream_node, |body| {
+                if let NodeBody::StreamScan(node) = body {
+                    match node.stream_scan_type() {
+                        StreamScanType::Unspecified => {}
+                        scan_type => {
+                            result.insert(fragment_id as model::FragmentId, scan_type);
+                        }
+                    }
+                }
+            });
+        }
+
+        Ok(result)
     }
 
     pub async fn list_streaming_job_infos(&self) -> MetaResult<Vec<StreamingJobInfo>> {

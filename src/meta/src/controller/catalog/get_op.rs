@@ -171,13 +171,12 @@ impl CatalogController {
             .collect())
     }
 
-    pub async fn get_all_created_streaming_parallelisms(
+    pub async fn get_all_streaming_parallelisms(
         &self,
     ) -> MetaResult<HashMap<ObjectId, StreamingParallelism>> {
         let inner = self.inner.read().await;
 
         let job_parallelisms = StreamingJob::find()
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
             .select_only()
             .columns([
                 streaming_job::Column::JobId,

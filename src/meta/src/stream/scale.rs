@@ -139,6 +139,7 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 
 use super::SourceChange;
 use crate::controller::id::IdCategory;
@@ -706,15 +707,46 @@ impl ScaleController {
                 .get(fragment_id)
                 .ok_or_else(|| anyhow!("fragment {fragment_id} does not exist"))?;
 
-            // Check if the reschedule is supported.
+            // Check if the rescheduling is supported.
             match fragment_state[fragment_id] {
                 table_fragments::State::Unspecified => unreachable!(),
-                state @ table_fragments::State::Initial
-                | state @ table_fragments::State::Creating => {
+                state @ table_fragments::State::Initial => {
                     bail!(
                         "the materialized view of fragment {fragment_id} is in state {}",
                         state.as_str_name()
                     )
+                }
+                state @ table_fragments::State::Creating => {
+                    let stream_node = fragment
+                        .actor_template
+                        .nodes
+                        .as_ref()
+                        .expect("empty nodes in fragment actor template");
+
+                    let mut is_reschedulable = true;
+                    visit_stream_node_cont(stream_node, |body| {
+                        if let Some(NodeBody::StreamScan(node)) = &body.node_body {
+                            if !node.stream_scan_type().is_reschedulable() {
+                                is_reschedulable = false;
+
+                                // fail fast
+                                return false;
+                            }
+
+                            // continue visiting
+                            return true;
+                        }
+
+                        // continue visiting
+                        true
+                    });
+
+                    if !is_reschedulable {
+                        bail!(
+                            "the materialized view of fragment {fragment_id} is in state {}",
+                            state.as_str_name()
+                        )
+                    }
                 }
                 table_fragments::State::Created => {}
             }
@@ -2331,6 +2363,24 @@ impl ScaleController {
 
         Ok(())
     }
+
+    pub async fn resolve_related_no_shuffle_jobs(
+        &self,
+        jobs: &[TableId],
+    ) -> MetaResult<HashSet<TableId>> {
+        let RescheduleWorkingSet { related_jobs, .. } = self
+            .metadata_manager
+            .catalog_controller
+            .resolve_working_set_for_reschedule_tables(
+                jobs.iter().map(|id| id.table_id as _).collect(),
+            )
+            .await?;
+
+        Ok(related_jobs
+            .keys()
+            .map(|id| TableId::new(*id as _))
+            .collect())
+    }
 }
 
 #[derive(Debug)]
@@ -2452,45 +2502,44 @@ impl GlobalStreamManager {
     /// - `Ok(false)` if no jobs can be scaled;
     /// - `Ok(true)` if some jobs are scaled, and it is possible that there are more jobs can be scaled.
     async fn trigger_parallelism_control(&self) -> MetaResult<bool> {
+        tracing::info!("trigger parallelism control");
+
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+
         let background_streaming_jobs = self
             .metadata_manager
             .list_background_creating_jobs()
             .await?;
 
-        if !background_streaming_jobs.is_empty() {
-            tracing::debug!(
-                "skipping parallelism control due to background jobs {:?}",
-                background_streaming_jobs
+        let skipped_jobs = if !background_streaming_jobs.is_empty() {
+            let jobs = self
+                .scale_controller
+                .resolve_related_no_shuffle_jobs(&background_streaming_jobs)
+                .await?;
+
+            tracing::info!(
+                "skipping parallelism control of background jobs {:?} and associated jobs {:?}",
+                background_streaming_jobs,
+                jobs
             );
-            // skip if there are background creating jobs
-            return Ok(true);
-        }
 
-        tracing::info!("trigger parallelism control");
-
-        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+            jobs
+        } else {
+            HashSet::new()
+        };
 
         let job_ids: HashSet<_> = {
             let streaming_parallelisms = self
                 .metadata_manager
                 .catalog_controller
-                .get_all_created_streaming_parallelisms()
+                .get_all_streaming_parallelisms()
                 .await?;
 
-            // streaming_parallelisms
-            //     .into_iter()
-            //     .map(|(table_id, parallelism)| {
-            //         let table_parallelism = match parallelism {
-            //             StreamingParallelism::Adaptive => TableParallelism::Adaptive,
-            //             StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
-            //             StreamingParallelism::Custom => TableParallelism::Custom,
-            //         };
-            //
-            //         (table_id, table_parallelism)
-            //     })
-            //     .collect()
-
-            streaming_parallelisms.into_keys().collect()
+            streaming_parallelisms
+                .into_iter()
+                .filter(|(table_id, _)| !skipped_jobs.contains(&TableId::new(*table_id as _)))
+                .map(|(table_id, _)| table_id)
+                .collect()
         };
 
         let workers = self
