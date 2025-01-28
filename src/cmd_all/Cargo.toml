@@ -17,6 +17,7 @@ external-udf = ["risingwave_expr_impl/external-udf"]
 wasm-udf = ["risingwave_expr_impl/wasm-udf"]
 js-udf = ["risingwave_expr_impl/js-udf"]
 python-udf = ["risingwave_expr_impl/python-udf"]
+fips = ["workspace-config/fips"]
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]

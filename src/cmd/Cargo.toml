@@ -12,6 +12,7 @@ rw-static-link = ["workspace-config/rw-static-link"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
 openssl-vendored = ["workspace-config/openssl-vendored"]
 default = ["rw-static-link"]
+fips = ["workspace-config/fips"]
 
 [package.metadata.cargo-machete]
 ignored = [
