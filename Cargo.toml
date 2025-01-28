@@ -219,7 +219,7 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
 ] }
 tokio-util = "0.7"
 tracing-opentelemetry = "0.25"
-rand = { version = "0.8", features = ["small_rng"] }
+rand = { version = "0.9", features = ["small_rng"] }
 governor = { version = "0.8", default-features = false, features = ["std"] }
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
