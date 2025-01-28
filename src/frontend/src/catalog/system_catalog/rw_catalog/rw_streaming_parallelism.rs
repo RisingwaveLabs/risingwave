@@ -18,7 +18,7 @@ use risingwave_frontend_macro::system_catalog;
 #[system_catalog(
     view,
     "rw_catalog.rw_streaming_parallelism",
-    "WITH all_streaming_jobs AS (
+    "WITH all_relations AS (
         SELECT id, name, 'table' as relation_type FROM rw_tables
         UNION ALL
         SELECT id, name, 'materialized view' as relation_type FROM rw_materialized_views
@@ -30,14 +30,14 @@ use risingwave_frontend_macro::system_catalog;
         SELECT id, name, 'source' as relation_type FROM rw_sources WHERE is_shared = true
     )
     SELECT
-        job.id,
-        job.name,
-        job.relation_type,
-        tf.parallelism,
-        tf.max_parallelism
-    FROM all_streaming_jobs job
-    INNER JOIN rw_table_fragments tf ON job.id = tf.table_id
-    ORDER BY job.id"
+        relation.id,
+        relation.name,
+        relation.relation_type,
+        job.parallelism,
+        job.max_parallelism
+    FROM all_relations relation
+    INNER JOIN rw_streaming_jobs job ON relation.id = job.id
+    ORDER BY relation.id"
 )]
 #[derive(Fields)]
 struct RwStreamingParallelism {

@@ -304,7 +304,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     session.run("create table t (v1 int);").await?;
 
     session
-        .run("select parallelism from rw_table_fragments")
+        .run("select parallelism from rw_streaming_jobs")
         .await?
         .assert_result_eq("ADAPTIVE");
 
@@ -328,7 +328,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     session.run("alter table t set parallelism = 3").await?;
 
     session
-        .run("select parallelism from rw_table_fragments")
+        .run("select parallelism from rw_streaming_jobs")
         .await?
         .assert_result_eq("FIXED(3)");
 
@@ -396,7 +396,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
         .await?;
 
     session
-        .run("select parallelism from rw_table_fragments")
+        .run("select parallelism from rw_streaming_jobs")
         .await?
         .assert_result_eq("ADAPTIVE");
 
