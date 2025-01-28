@@ -32,6 +32,7 @@ use risingwave_common::constants::log_store::v2::{
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::license::Feature;
 use risingwave_common::types::{DataType, Interval, ScalarImpl, Timestamptz};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
@@ -369,7 +370,7 @@ pub fn infer_kv_log_store_table_catalog_inner(
     let mut table_catalog_builder = TableCatalogBuilder::default();
 
     let mut value_indices =
-        Vec::with_capacity(KV_LOG_STORE_PREDEFINED_COLUMNS.len() + columns.len());
+        Vec::with_capacity(KV_LOG_STORE_PREDEFINED_COLUMNS.len() + input.schema().fields().len());
 
     for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
         let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
@@ -384,9 +385,23 @@ pub fn infer_kv_log_store_table_catalog_inner(
 
     let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
-    let payload_indices = table_catalog_builder.extend_columns(columns);
+    if columns.len() != input.schema().fields().len()
+        || columns
+            .iter()
+            .zip_eq_fast(input.schema().fields())
+            .any(|(c, f)| *c.data_type() != f.data_type())
+    {
+        tracing::warn!(
+            "sink schema different with upstream schema: sink columns: {:?}, input schema: {:?}.",
+            columns,
+            input.schema()
+        );
+    }
+    for field in input.schema().fields() {
+        let indice = table_catalog_builder.add_column(field);
+        value_indices.push(indice);
+    }
 
-    value_indices.extend(payload_indices);
     table_catalog_builder.set_value_indices(value_indices);
 
     // Modify distribution key indices based on the pre-defined columns.
