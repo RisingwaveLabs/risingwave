@@ -597,6 +597,20 @@ message WindowFunction {
 // Note: due to historic reasons, UserDefinedFunction is a oneof variant parallel to FunctionCall,
 // while UserDefinedFunctionMetadata is embedded as a field in TableFunction and AggCall.
 
+enum UdfExprVersion {
+  // Versions before introducing this enum.
+  UDF_EXPR_VERSION_UNSPECIFIED = 0;
+  // Begin from this version, we re-interpret `identifier` as `name_in_runtime`.
+  UDF_EXPR_VERSION_NAME_IN_RUNTIME = 1;
+
+  // IMPORTANT:
+  // Don't forget to change `UdfExprVersion::LATEST` in `prost/src/lib.rs` to the latest version
+  // when adding new versions to this enum.
+
+  // Only used for tests.
+  UDF_EXPR_VERSION_MAX = 2147483647;
+}
+
 message UserDefinedFunction {
   repeated ExprNode children = 1;
   string name = 2;
@@ -605,12 +619,9 @@ message UserDefinedFunction {
   string language = 4;
   // The link to the external function service.
   optional string link = 5;
-  // An unique identifier to the function.
-  // - If `link` is not empty, the name of the function in the external function service.
-  // - If `language` is `rust` or `wasm`, the name of the function in the wasm binary file.
-  // - If `language` is `javascript`, the name of the function.
+  // This is re-interpreted as `name_in_runtime`.
   optional string identifier = 6;
-  // - If `language` is `javascript`, the source code of the function.
+  // - If `language` is `javascript` or `python`, the source code of the function.
   optional string body = 7;
   // - If `language` is `rust` or `wasm`, the zstd-compressed wasm binary.
   optional bytes compressed_binary = 10;
@@ -619,6 +630,8 @@ message UserDefinedFunction {
   optional string runtime = 11;
   reserved 12;
   reserved "function_type";
+
+  UdfExprVersion version = 1000;
 }
 
 // Additional information for user defined table/aggregate functions.
@@ -628,10 +641,13 @@ message UserDefinedFunctionMetadata {
   data.DataType return_type = 13;
   string language = 4;
   optional string link = 5;
+  // This is re-interpreted as `name_in_runtime`.
   optional string identifier = 6;
   optional string body = 7;
   optional bytes compressed_binary = 10;
   optional string runtime = 11;
   reserved 12;
   reserved "function_type";
+
+  UdfExprVersion version = 1000;
 }

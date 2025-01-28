@@ -19,7 +19,7 @@ use fancy_regex::Regex;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
-use risingwave_pb::catalog::Function;
+use risingwave_pb::catalog::PbFunction;
 use risingwave_sqlparser::parser::{Parser, ParserError};
 
 use super::*;
@@ -321,7 +321,7 @@ pub async fn handle_create_sql_function(
     }
 
     // Create the actual function, will be stored in function catalog
-    let function = Function {
+    let function = PbFunction {
         id: FunctionId::placeholder().0,
         schema_id,
         database_id,
@@ -332,7 +332,7 @@ pub async fn handle_create_sql_function(
         return_type: Some(return_type.into()),
         language,
         runtime: None,
-        identifier: None,
+        name_in_runtime: None, // None for SQL UDF
         body: Some(body),
         compressed_binary: None,
         link: None,
