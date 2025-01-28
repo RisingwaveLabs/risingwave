@@ -81,7 +81,7 @@ create sink sink_kafka from data_table with (
 
 sleep 3s
 
-query IT rowsort
+query IT rowsort retry 3 backoff 5s
 select a, b from t1;
 ----
 1 a

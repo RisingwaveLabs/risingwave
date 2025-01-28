@@ -1096,7 +1096,7 @@ pub(super) async fn handle_create_table_plan(
                 col_id_gen,
                 include_column_options,
                 props,
-                SqlColumnStrategy::Reject,
+                SqlColumnStrategy::FollowChecked,
             )
             .await?,
             TableJobType::General,

@@ -128,18 +128,6 @@ Caused by these errors (recent errors listed first):
   4: Item not found: Invalid column: bar
 
 
-# Can't drop non-generated column
-# TODO(purify): may support it.
-statement error
-ALTER TABLE t DROP COLUMN foo;
-----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  Not supported: alter table with schema registry
-HINT: try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead
-
-
 # Drop generated column
 statement ok
 ALTER TABLE t DROP COLUMN gen_col;

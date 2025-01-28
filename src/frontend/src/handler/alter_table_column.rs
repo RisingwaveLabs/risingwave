@@ -28,7 +28,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement};
 
-use super::create_source::{schema_has_schema_registry, SqlColumnStrategy};
+use super::create_source::SqlColumnStrategy;
 use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
@@ -260,31 +260,8 @@ pub async fn handle_alter_table_column(
 
     // Retrieve the original table definition and parse it to AST.
     let mut definition = original_catalog.create_sql_ast_purified()?;
-    let Statement::CreateTable {
-        columns,
-        format_encode,
-        ..
-    } = &mut definition
-    else {
+    let Statement::CreateTable { columns, .. } = &mut definition else {
         panic!("unexpected statement: {:?}", definition);
-    };
-
-    let format_encode = format_encode
-        .clone()
-        .map(|format_encode| format_encode.into_v2_with_warning());
-
-    let fail_if_has_schema_registry = || {
-        if let Some(format_encode) = &format_encode
-            && schema_has_schema_registry(format_encode)
-        {
-            // TODO(purify): we may support this.
-            Err(ErrorCode::NotSupported(
-                "alter table with schema registry".to_owned(),
-                "try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),
-            ))
-        } else {
-            Ok(())
-        }
     };
 
     if !original_catalog.incoming_sinks.is_empty()
@@ -295,12 +272,27 @@ pub async fn handle_alter_table_column(
         ))?;
     }
 
-    match operation {
+    // The `sql_column_strategy` will be `FollowChecked` if the operation is `AddColumn`, and
+    // `FollowUnchecked` if the operation is `DropColumn`.
+    //
+    // Consider the following example:
+    // - There was a column `foo` and a generated column `gen` that references `foo`.
+    // - The external schema is updated to remove `foo`.
+    // - The user tries to drop `foo` from the table.
+    //
+    // Dropping `foo` directly will fail because `gen` references `foo`. However, dropping `gen`
+    // first will also be rejected because `foo` does not exist any more. Also, executing
+    // `REFRESH SCHEMA` will not help because it keeps the generated column. The user gets stuck.
+    //
+    // `FollowUnchecked` workarounds this issue. There are also some alternatives:
+    // - Allow dropping multiple columns at once.
+    // - Check against the persisted schema, instead of resolving again.
+    //
+    // Applied only to tables with schema registry.
+    let sql_column_strategy = match operation {
         AlterTableOperation::AddColumn {
             column_def: new_column,
         } => {
-            fail_if_has_schema_registry()?;
-
             // Duplicated names can actually be checked by `StreamMaterialize`. We do here for
             // better error reporting.
             let new_column_name = new_column.name.real_value();
@@ -325,6 +317,8 @@ pub async fn handle_alter_table_column(
 
             // Add the new column to the table definition if it is not created by `create table (*)` syntax.
             columns.push(new_column);
+
+            SqlColumnStrategy::FollowChecked
         }
 
         AlterTableOperation::DropColumn {
@@ -338,10 +332,6 @@ pub async fn handle_alter_table_column(
 
             // Check if the column to drop is referenced by any generated columns.
             for column in original_catalog.columns() {
-                if column_name.real_value() == column.name() && !column.is_generated() {
-                    fail_if_has_schema_registry()?;
-                }
-
                 if let Some(expr) = column.generated_expr() {
                     let expr = ExprImpl::from_expr_proto(expr)?;
                     let refs = expr.collect_input_refs(original_catalog.columns().len());
@@ -381,17 +371,18 @@ pub async fn handle_alter_table_column(
                     column_name, table_name
                 )))?
             }
+
+            SqlColumnStrategy::FollowUnchecked
         }
 
         _ => unreachable!(),
     };
-
     let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
         &session,
         table_name,
         definition,
         &original_catalog,
-        SqlColumnStrategy::Follow,
+        sql_column_strategy,
     )
     .await?;
 

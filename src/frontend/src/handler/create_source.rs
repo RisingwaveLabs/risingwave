@@ -95,6 +95,7 @@ use crate::handler::util::{
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
+use crate::session::current::notice_to_user;
 use crate::session::SessionImpl;
 use crate::utils::{
     resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
@@ -215,9 +216,10 @@ pub(crate) fn bind_all_columns(
             .cloned()
             .collect_vec();
 
+        #[allow(clippy::collapsible_else_if)]
         match sql_column_strategy {
             // Ignore `cols_from_source`, follow `cols_from_sql` without checking.
-            SqlColumnStrategy::Follow => {
+            SqlColumnStrategy::FollowUnchecked => {
                 assert!(
                     wildcard_idx.is_none(),
                     "wildcard still exists while strategy is Follows, not correctly purified?"
@@ -225,35 +227,78 @@ pub(crate) fn bind_all_columns(
                 return Ok(cols_from_sql);
             }
 
-            // Will merge generated columns from `cols_from_sql` into `cols_from_source`.
+            // Will merge `generated_cols_from_sql` into `cols_from_source`.
             SqlColumnStrategy::Ignore => {}
-            SqlColumnStrategy::Reject => {
-                // Perform extra check to see if there are non-generated columns in `cols_from_sql`
-                // and reject the request if there are. Based on different input, guess the user's
-                // intention and provide a more specific error message.
-                if generated_cols_from_sql.len() != cols_from_sql.len() {
+
+            SqlColumnStrategy::FollowChecked => {
+                let has_regular_cols_from_sql =
+                    generated_cols_from_sql.len() != cols_from_sql.len();
+
+                if has_regular_cols_from_sql {
                     if wildcard_idx.is_some() {
                         // (*, normal_column INT)
                         return Err(RwError::from(NotSupported(
-                            "Only generated columns are allowed in user-defined schema from SQL"
+                            "When there's a wildcard (\"*\"), \
+                             only generated columns are allowed in user-defined schema from SQL"
                                 .to_owned(),
                             "Remove the non-generated columns".to_owned(),
                         )));
                     } else {
                         // (normal_column INT)
-                        return Err(RwError::from(ProtocolError(format!(
-                            "User-defined schema from SQL is not allowed with FORMAT {} ENCODE {}. \
-                            Please refer to https://www.risingwave.dev/docs/current/sql-create-source/ \
-                            for more information.",
-                            format_encode.format, format_encode.row_encode
-                        ))));
+                        // Follow `cols_from_sql` with name & type checking.
+                        for col in &cols_from_sql {
+                            if generated_cols_from_sql.contains(col) {
+                                continue;
+                            }
+                            let Some(col_from_source) =
+                                cols_from_source.iter().find(|c| c.name() == col.name())
+                            else {
+                                return Err(RwError::from(ProtocolError(format!(
+                                    "Column \"{}\" is defined in SQL but not found in the source",
+                                    col.name()
+                                ))));
+                            };
+
+                            if col_from_source.data_type() != col.data_type() {
+                                return Err(RwError::from(ProtocolError(format!(
+                                    "Data type mismatch for column \"{}\". \
+                                     Defined in SQL as \"{}\", but found in the source as \"{}\"",
+                                    col.name(),
+                                    col.data_type(),
+                                    col_from_source.data_type()
+                                ))));
+                            }
+                        }
+                        return Ok(cols_from_sql);
+                    }
+                } else {
+                    if wildcard_idx.is_some() {
+                        // (*)
+                        // (*, generated_column INT)
+                        // Good, expand the wildcard later.
+                    } else {
+                        // ()
+                        // (generated_column INT)
+                        // Interpreted as if there's a wildcard for backward compatibility.
+                        // TODO: the behavior is not that consistent, making it impossible to ingest no
+                        //       columns from the source (though not useful in practice). Currently we
+                        //       just notice the user but we may want to interpret it as empty columns
+                        //       in the future.
+                        notice_to_user("\
+                            Neither wildcard (\"*\") nor regular (non-generated) columns appear in the user-defined schema from SQL. \
+                            For backward compatibility, all columns from the source will be included at the beginning. \
+                            For clarity, consider adding a wildcard (\"*\") to indicate where the columns from the source should be included, \
+                            or specifying the columns you want to include from the source.
+                        ");
                     }
                 }
             }
         }
 
-        // If we are planning based on a purified SQL, the wildcard may already be expanded thus absent.
-        // Default to 0 to leave the generated columns at the end.
+        // In some cases the wildcard may be absent:
+        // - plan based on a purified SQL
+        // - interpret `()` as `(*)` for backward compatibility (see notice above)
+        // Default to 0 to expand the wildcard at the beginning.
         let wildcard_idx = wildcard_idx.unwrap_or(0).min(generated_cols_from_sql.len());
 
         // Merge `generated_cols_from_sql` with `cols_from_source`.
@@ -654,25 +699,24 @@ pub fn bind_connector_props(
 /// how to handle the regular columns (i.e., non-generated) defined in SQL?
 pub enum SqlColumnStrategy {
     /// Follow all columns defined in SQL, ignore the columns from external system.
+    /// This ensures that no accidental side effect will change the schema.
     ///
-    /// This is the behavior when `SINK INTO` or `[ADD | DROP] COLUMN` atop the purified SQL,
-    /// ensuring that no accidental refresh will happen and the schema remains unchanged.
-    // TODO(purify): we may validate whether defined columns are valid against the resolved schema.
-    Follow,
+    /// This is the behavior when re-planning the target table of `SINK INTO`.
+    FollowUnchecked,
+
+    /// Follow all column defined in SQL, check the columns from external system with name & type.
+    /// This ensures that no accidental side effect will change the schema.
+    ///
+    /// This is the behavior when creating a new table or source with a resolvable schema;
+    /// adding, or dropping columns on that table.
+    // TODO(purify): `ALTER SOURCE` currently has its own code path and does not check.
+    FollowChecked,
 
     /// Merge the generated columns defined in SQL and columns from external system. If there
     /// are also regular columns defined in SQL, ignore silently.
     ///
     /// This is the behavior when `REFRESH SCHEMA` atop the purified SQL.
     Ignore,
-
-    /// Merge the generated columns defined in SQL and columns from external system. If there
-    /// are also regular columns defined in SQL, reject the request.
-    ///
-    /// This is the behavior when creating a new table or source with a resolvable schema.
-    // TODO(purify): we may accept this as there are some practical use cases, see
-    //               https://github.com/risingwavelabs/risingwave/issues/12199
-    Reject,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -921,7 +965,7 @@ pub async fn handle_create_source(
         &mut col_id_gen,
         create_source_type,
         overwrite_options.source_rate_limit,
-        SqlColumnStrategy::Reject,
+        SqlColumnStrategy::FollowChecked,
     )
     .await?;
 

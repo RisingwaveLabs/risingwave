@@ -107,7 +107,7 @@ async fn get_new_table_plan(
         table_name,
         new_table_definition,
         &original_catalog,
-        SqlColumnStrategy::Follow, // not used
+        SqlColumnStrategy::FollowUnchecked, // not used
     )
     .await?;
 

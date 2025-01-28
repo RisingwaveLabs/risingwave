@@ -558,7 +558,7 @@ pub(crate) async fn reparse_table_for_sink(
         None,
         include_column_options,
         engine,
-        SqlColumnStrategy::Follow,
+        SqlColumnStrategy::FollowUnchecked,
     )
     .await?;
 
