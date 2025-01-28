@@ -49,7 +49,9 @@ impl ComputeNodeService {
             .arg("--total-memory-bytes")
             .arg(config.total_memory_bytes.to_string())
             .arg("--role")
-            .arg(&config.role);
+            .arg(&config.role)
+            .arg("--resource-group")
+            .arg(&config.resource_group);
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;

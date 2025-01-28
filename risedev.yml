@@ -293,6 +293,29 @@ profile:
       - use: compute-node
       - use: frontend
 
+  # Start 4 CNs with resource groups rg1, rg2, and default
+  multiple-resource-groups:
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compactor
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+        resource-group: "rg1"
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        resource-group: "rg2"
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+
+
   ci-time-travel:
     config-path: src/config/ci-time-travel.toml
     steps:
@@ -1174,6 +1197,9 @@ template:
     parallelism: 4
 
     role: both
+
+    # Resource group for scheduling, default value is "default"
+    resource-group: "default"
 
   meta-node:
     # Meta-node advertise address
