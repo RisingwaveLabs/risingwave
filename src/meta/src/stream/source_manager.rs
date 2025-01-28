@@ -45,7 +45,7 @@ use tokio::{select, time};
 pub use worker::create_source_worker;
 use worker::{create_source_worker_async, ConnectorSourceWorkerHandle};
 
-use crate::barrier::{BarrierScheduler, Command};
+use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan};
 use crate::manager::MetadataManager;
 use crate::model::{ActorId, FragmentId, StreamJobFragments};
 use crate::rpc::metrics::MetaMetrics;
@@ -369,7 +369,7 @@ impl SourceManager {
         dropped_job_fragments: &StreamJobFragments,
         added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         split_assignment: SplitAssignment,
-        fragment_replacements: HashMap<FragmentId, FragmentId>,
+        replace_plan: &ReplaceStreamJobPlan,
     ) {
         // Extract the fragments that include source operators.
         let dropped_source_fragments = dropped_job_fragments.stream_source_fragments().clone();
@@ -388,7 +388,7 @@ impl SourceManager {
             dropped_actors,
             added_source_fragments,
             split_assignment,
-            fragment_replacements,
+            fragment_replacements: replace_plan.fragment_replacements(),
         })
         .await;
     }

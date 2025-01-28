@@ -761,7 +761,17 @@ impl DatabaseManagedBarrierState {
         let mut new_actors = HashSet::new();
         let subscriptions =
             LazyCell::new(|| Arc::new(graph_state.mv_depended_subscriptions.clone()));
-        for actor in request.actors_to_build {
+        for (node, actor) in request
+            .actors_to_build
+            .into_iter()
+            .flat_map(|fragment_actors| {
+                let node = Arc::new(fragment_actors.node.unwrap());
+                fragment_actors
+                    .actors
+                    .into_iter()
+                    .map(move |actor| (node.clone(), actor))
+            })
+        {
             let upstream = actor.upstreams;
             let actor = actor.actor.unwrap();
             let actor_id = actor.actor_id;
@@ -770,6 +780,7 @@ impl DatabaseManagedBarrierState {
             assert!(request.actor_ids_to_collect.contains(&actor_id));
             let (join_handle, monitor_join_handle) = self.actor_manager.spawn_actor(
                 actor,
+                node,
                 (*subscriptions).clone(),
                 upstream,
                 self.current_shared_context.clone(),

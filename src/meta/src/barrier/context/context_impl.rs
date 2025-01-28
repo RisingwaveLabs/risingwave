@@ -209,7 +209,7 @@ impl CommandContext {
                                 old_fragments,
                                 new_fragments.stream_source_fragments(),
                                 init_split_assignment.clone(),
-                                replace_plan.fragment_replacements(),
+                                replace_plan,
                             )
                             .await;
                     }
@@ -307,7 +307,7 @@ impl CommandContext {
                         old_fragments,
                         new_fragments.stream_source_fragments(),
                         init_split_assignment.clone(),
-                        replace_plan.fragment_replacements(),
+                        replace_plan,
                     )
                     .await;
             }

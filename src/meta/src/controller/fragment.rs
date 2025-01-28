@@ -16,10 +16,12 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use anyhow::Context;
+use futures::stream::BoxStream;
+use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
+use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
@@ -45,7 +47,7 @@ use risingwave_pb::meta::{FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping
 use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
+    DispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext, PbStreamNode,
 };
 use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
@@ -71,6 +73,8 @@ use crate::{MetaError, MetaResult};
 
 #[derive(Clone, Debug)]
 pub struct InflightFragmentInfo {
+    pub fragment_id: crate::model::FragmentId,
+    pub nodes: PbStreamNode,
     pub actors: HashMap<crate::model::ActorId, WorkerId>,
     pub state_table_ids: HashSet<risingwave_common::catalog::TableId>,
 }
@@ -214,6 +218,7 @@ impl CatalogController {
             actors: pb_actors,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
+            nodes,
             ..
         } = fragment;
 
@@ -222,8 +227,7 @@ impl CatalogController {
         assert!(!pb_actors.is_empty());
 
         let stream_node = {
-            let actor_template = pb_actors.first().cloned().unwrap();
-            let mut stream_node = actor_template.nodes.unwrap();
+            let mut stream_node = nodes.as_ref().unwrap().clone();
             visit_stream_node_mut(&mut stream_node, |body| {
                 #[expect(deprecated)]
                 if let NodeBody::Merge(m) = body {
@@ -256,7 +260,6 @@ impl CatalogController {
             let PbStreamActor {
                 actor_id,
                 fragment_id,
-                nodes: _,
                 dispatcher: pb_dispatcher,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition: _,
@@ -399,7 +402,16 @@ impl CatalogController {
             vnode_count,
         } = fragment;
 
-        let stream_node_template = stream_node.to_protobuf();
+        let stream_node = stream_node.to_protobuf();
+        let mut upstream_fragments = HashSet::new();
+        visit_stream_node(&stream_node, |body| {
+            if let NodeBody::Merge(m) = body {
+                assert!(
+                    upstream_fragments.insert(m.upstream_fragment_id),
+                    "non-duplicate upstream fragment"
+                );
+            }
+        });
 
         let mut pb_actors = vec![];
 
@@ -430,26 +442,21 @@ impl CatalogController {
 
             let upstream_fragment_actors = upstream_actor_ids.into_inner();
 
-            let pb_nodes = {
-                let mut nodes = stream_node_template.clone();
-
-                visit_stream_node_mut(&mut nodes, |body| {
-                    if let NodeBody::Merge(m) = body
-                        && let Some(upstream_actor_ids) =
-                            upstream_fragment_actors.get(&(m.upstream_fragment_id as _))
+            {
+                for upstream_fragment_id in &upstream_fragments {
+                    if let Some(upstream_actor_ids) =
+                        upstream_fragment_actors.get(&(*upstream_fragment_id as _))
                     {
                         actor_upstreams
                             .entry(actor_id as _)
                             .or_default()
                             .try_insert(
-                                m.upstream_fragment_id,
+                                *upstream_fragment_id,
                                 upstream_actor_ids.iter().map(|id| *id as _).collect(),
                             )
                             .expect("non-duplicate");
                     }
-                });
-
-                Some(nodes)
+                }
             };
 
             let pb_vnode_bitmap = vnode_bitmap.map(|vnode_bitmap| vnode_bitmap.to_protobuf());
@@ -478,7 +485,7 @@ impl CatalogController {
             pb_actors.push(PbStreamActor {
                 actor_id: actor_id as _,
                 fragment_id: fragment_id as _,
-                nodes: pb_nodes,
+                nodes: None,
                 dispatcher: pb_dispatcher,
                 upstream_actor_id: vec![],
                 vnode_bitmap: pb_vnode_bitmap,
@@ -498,6 +505,7 @@ impl CatalogController {
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
+            nodes: Some(stream_node),
         };
 
         Ok((
@@ -945,6 +953,7 @@ impl CatalogController {
                 fragment::Column::StateTableIds,
                 fragment::Column::UpstreamFragmentId,
                 fragment::Column::VnodeCount,
+                fragment::Column::StreamNode,
             ])
             .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
             .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
@@ -1021,18 +1030,27 @@ impl CatalogController {
         } else {
             filter_condition
         };
-        let actor_info: Vec<(
-            ActorId,
-            WorkerId,
-            FragmentId,
-            I32Array,
-            DatabaseId,
-            ObjectId,
-        )> = Actor::find()
+        #[expect(clippy::type_complexity)]
+        let mut actor_info_stream: BoxStream<
+            '_,
+            Result<
+                (
+                    ActorId,
+                    WorkerId,
+                    FragmentId,
+                    StreamNode,
+                    I32Array,
+                    DatabaseId,
+                    ObjectId,
+                ),
+                _,
+            >,
+        > = Actor::find()
             .select_only()
             .column(actor::Column::ActorId)
             .column(actor::Column::WorkerId)
             .column(fragment::Column::FragmentId)
+            .column(fragment::Column::StreamNode)
             .column(fragment::Column::StateTableIds)
             .column(object::Column::DatabaseId)
             .column(object::Column::Oid)
@@ -1040,13 +1058,22 @@ impl CatalogController {
             .join(JoinType::InnerJoin, fragment::Relation::Object.def())
             .filter(filter_condition)
             .into_tuple()
-            .all(&inner.db)
+            .stream(&inner.db)
             .await?;
 
         let mut database_fragment_infos: HashMap<_, HashMap<_, HashMap<_, InflightFragmentInfo>>> =
             HashMap::new();
 
-        for (actor_id, worker_id, fragment_id, state_table_ids, database_id, job_id) in actor_info {
+        while let Some((
+            actor_id,
+            worker_id,
+            fragment_id,
+            node,
+            state_table_ids,
+            database_id,
+            job_id,
+        )) = actor_info_stream.try_next().await?
+        {
             let fragment_infos = database_fragment_infos
                 .entry(database_id)
                 .or_default()
@@ -1065,6 +1092,8 @@ impl CatalogController {
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(InflightFragmentInfo {
+                        fragment_id: fragment_id as _,
+                        nodes: node.to_protobuf(),
                         actors: HashMap::from_iter([(actor_id as _, worker_id as _)]),
                         state_table_ids,
                     });
@@ -1720,16 +1749,15 @@ mod tests {
         )
         .to_bitmaps();
 
+        let stream_node = generate_merger_stream_node(upstream_actor_ids.values().next().unwrap());
+
         let pb_actors = (0..actor_count)
             .map(|actor_id| {
-                let actor_upstream_actor_ids =
-                    upstream_actor_ids.get(&(actor_id as _)).cloned().unwrap();
-                let stream_node = generate_merger_stream_node(&actor_upstream_actor_ids);
-
+                #[expect(deprecated)]
                 PbStreamActor {
                     actor_id: actor_id as _,
                     fragment_id: TEST_FRAGMENT_ID as _,
-                    nodes: Some(stream_node),
+                    nodes: None,
                     dispatcher: generate_dispatchers_for_actor(actor_id),
                     vnode_bitmap: actor_bitmaps
                         .get(&actor_id)
@@ -1756,6 +1784,7 @@ mod tests {
                 .flat_map(|m| m.keys().map(|x| *x as _))
                 .collect(),
             maybe_vnode_count: VnodeCount::for_test().to_protobuf(),
+            nodes: Some(stream_node.clone()),
         };
 
         let pb_actor_status = (0..actor_count)
@@ -1780,7 +1809,6 @@ mod tests {
             &pb_actor_splits,
         )?;
 
-        check_fragment_template(fragment.clone(), pb_actors.clone());
         check_fragment(fragment, pb_fragment);
         check_actors(
             actors,
@@ -1788,19 +1816,10 @@ mod tests {
             actor_dispatchers,
             pb_actors,
             Default::default(),
+            &stream_node,
         );
 
         Ok(())
-    }
-
-    fn check_fragment_template(fragment: fragment::Model, actors: Vec<PbStreamActor>) {
-        let stream_node_template = fragment.stream_node.to_protobuf();
-
-        for PbStreamActor { nodes, .. } in actors {
-            let template_node = stream_node_template.clone();
-            let nodes = nodes.unwrap();
-            assert_eq!(nodes, template_node);
-        }
     }
 
     #[tokio::test]
@@ -1917,7 +1936,6 @@ mod tests {
 
         let pb_actors = pb_fragment.actors.clone();
 
-        check_fragment_template(fragment.clone(), pb_actors.clone());
         check_fragment(fragment, pb_fragment);
         check_actors(
             actors,
@@ -1925,6 +1943,7 @@ mod tests {
             actor_dispatchers,
             pb_actors,
             pb_actor_splits,
+            &stream_node,
         );
 
         Ok(())
@@ -1936,6 +1955,7 @@ mod tests {
         mut actor_dispatchers: HashMap<ActorId, Vec<actor_dispatcher::Model>>,
         pb_actors: Vec<PbStreamActor>,
         pb_actor_splits: HashMap<u32, PbConnectorSplits>,
+        stream_node: &PbStreamNode,
     ) {
         for (
             actor::Model {
@@ -1951,7 +1971,6 @@ mod tests {
             PbStreamActor {
                 actor_id: pb_actor_id,
                 fragment_id: pb_fragment_id,
-                nodes: pb_nodes,
                 dispatcher: pb_dispatcher,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition,
@@ -1979,7 +1998,7 @@ mod tests {
 
             assert_eq!(mview_definition, "");
 
-            visit_stream_node(pb_nodes.as_ref().unwrap(), |body| {
+            visit_stream_node(stream_node, |body| {
                 if let PbNodeBody::Merge(m) = body {
                     let expected_upstream_actor_ids = upstream_actor_ids
                         .get(&(m.upstream_fragment_id as _))
@@ -2017,6 +2036,7 @@ mod tests {
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
             maybe_vnode_count: _,
+            nodes,
         } = pb_fragment;
 
         assert_eq!(fragment_id, TEST_FRAGMENT_ID as u32);
@@ -2035,5 +2055,6 @@ mod tests {
             pb_state_table_ids,
             fragment.state_table_ids.into_u32_array()
         );
+        assert_eq!(fragment.stream_node.to_protobuf(), nodes.unwrap());
     }
 }

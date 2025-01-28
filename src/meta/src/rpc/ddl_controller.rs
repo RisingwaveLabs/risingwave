@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -69,7 +69,9 @@ use crate::manager::{
     LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
     StreamingJobType, IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{FragmentActorUpstreams, StreamContext, StreamJobFragments, TableParallelism};
+use crate::model::{
+    FragmentActorUpstreams, FragmentId, StreamContext, StreamJobFragments, TableParallelism,
+};
 use crate::stream::{
     create_source_worker, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
@@ -657,9 +659,9 @@ impl DdlController {
                 )
             })?;
 
-        for actor in &stream_scan_fragment.actors {
+        {
             if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) =
-                actor.nodes.as_ref().unwrap().node_body
+                stream_scan_fragment.nodes.as_ref().unwrap().node_body
                 && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
             {
                 let options_with_secret = WithOptionsSecResolved::new(
@@ -753,8 +755,8 @@ impl DdlController {
 
         // check if the union fragment is fully assigned.
         for fragment in stream_job_fragments.fragments.values() {
-            for actor in &fragment.actors {
-                if let Some(node) = &actor.nodes {
+            if let Some(node) = &fragment.nodes {
+                for actor in &fragment.actors {
                     visit_stream_node(node, |node| {
                         if let NodeBody::Merge(merge_node) = node {
                             let fragment_actor_upstreams = stream_job_fragments
@@ -800,16 +802,7 @@ impl DdlController {
             .map(|actor| actor.actor_id)
             .collect_vec();
 
-        let mut sink_fields = None;
-
-        for actor in &sink_fragment.actors {
-            if let Some(node) = &actor.nodes {
-                sink_fields = Some(node.fields.clone());
-                break;
-            }
-        }
-
-        let sink_fields = sink_fields.expect("sink fields not found");
+        let sink_fields = sink_fragment.nodes.as_ref().unwrap().fields.clone();
 
         let output_indices = sink_fields
             .iter()
@@ -857,8 +850,8 @@ impl DdlController {
 
         let upstream_fragment_id = sink_fragment.fragment_id;
 
-        for actor in &mut union_fragment.actors {
-            if let Some(node) = &mut actor.nodes {
+        if let Some(node) = &mut union_fragment.nodes {
+            {
                 visit_stream_node_cont_mut(node, |node| {
                     if let Some(NodeBody::Union(_)) = &mut node.node_body {
                         for input_project_node in &mut node.input {
@@ -876,14 +869,29 @@ impl DdlController {
 
                                 if let Some(NodeBody::Merge(merge_node)) =
                                     &mut merge_stream_node.node_body
-                                    && union_fragment_actor_upstreams
-                                        .get(&actor.actor_id)
-                                        .and_then(|actor_upstream| {
-                                            actor_upstream.get(&merge_node.upstream_fragment_id)
-                                        })
-                                        .map(|upstream_actor_ids| upstream_actor_ids.is_empty())
-                                        .unwrap_or(true)
+                                    && union_fragment.actors.iter().any(|actor| {
+                                        union_fragment_actor_upstreams
+                                            .get(&actor.actor_id)
+                                            .and_then(|actor_upstream| {
+                                                actor_upstream.get(&merge_node.upstream_fragment_id)
+                                            })
+                                            .map(|upstream_actor_ids| upstream_actor_ids.is_empty())
+                                            .unwrap_or(true)
+                                    })
                                 {
+                                    if cfg!(debug_assertions) {
+                                        union_fragment.actors.iter().for_each(|actor| {
+                                            assert!(union_fragment_actor_upstreams
+                                                .get(&actor.actor_id)
+                                                .and_then(|actor_upstream| {
+                                                    actor_upstream
+                                                        .get(&merge_node.upstream_fragment_id)
+                                                })
+                                                .map(|upstream_actor_ids| upstream_actor_ids
+                                                    .is_empty())
+                                                .unwrap_or(true), "inconsistent replace table plan for sink. upstreams: {:?} actor_id: {} upstream_fragment_id: {}", union_fragment_actor_upstreams, actor.actor_id, merge_node.upstream_fragment_id)
+                                        });
+                                    }
                                     if let Some(sink_id) = sink_id {
                                         merge_stream_node.identity =
                                             format!("MergeExecutor(from sink {})", sink_id);
@@ -902,14 +910,16 @@ impl DdlController {
                                         }
                                     };
 
-                                    union_fragment_actor_upstreams
-                                        .entry(actor.actor_id)
-                                        .or_default()
-                                        .try_insert(
-                                            upstream_fragment_id,
-                                            HashSet::from_iter(sink_actor_ids.iter().cloned()),
-                                        )
-                                        .expect("checked non-exist");
+                                    for actor in &union_fragment.actors {
+                                        union_fragment_actor_upstreams
+                                            .entry(actor.actor_id)
+                                            .or_default()
+                                            .try_insert(
+                                                upstream_fragment_id,
+                                                HashSet::from_iter(sink_actor_ids.iter().cloned()),
+                                            )
+                                            .expect("checked non-exist");
+                                    }
 
                                     merge_stream_node.fields = sink_fields.to_vec();
 
@@ -1209,7 +1219,7 @@ impl DdlController {
                 )
                 .await?;
 
-            let result: MetaResult<Vec<PbMergeUpdate>> = try {
+            let result: MetaResult<BTreeMap<FragmentId, Vec<PbMergeUpdate>>> = try {
                 let merge_updates = ctx.merge_updates.clone();
 
                 self.metadata_manager
@@ -1366,7 +1376,7 @@ impl DdlController {
         tracing::debug!(id = job_id, "building replace streaming job");
         let mut updated_sink_catalogs = vec![];
 
-        let result: MetaResult<Vec<PbMergeUpdate>> = try {
+        let result: MetaResult<_> = try {
             let (mut ctx, mut stream_job_fragments) = self
                 .build_replace_job(
                     ctx,

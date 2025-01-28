@@ -177,7 +177,7 @@ pub struct ReplaceStreamJobContext {
     pub old_fragments: StreamJobFragments,
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
-    pub merge_updates: Vec<MergeUpdate>,
+    pub merge_updates: BTreeMap<FragmentId, Vec<MergeUpdate>>,
 
     /// New dispatchers to add from upstream actors to downstream actors.
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,

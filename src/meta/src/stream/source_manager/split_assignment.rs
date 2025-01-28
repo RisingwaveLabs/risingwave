@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+
 use super::*;
 
 impl SourceManager {
@@ -145,7 +147,7 @@ impl SourceManager {
     pub async fn allocate_splits_for_replace_source(
         &self,
         job_id: &TableId,
-        merge_updates: &Vec<MergeUpdate>,
+        merge_updates: &BTreeMap<FragmentId, Vec<MergeUpdate>>,
     ) -> MetaResult<SplitAssignment> {
         tracing::debug!(?merge_updates, "allocate_splits_for_replace_source");
         if merge_updates.is_empty() {
@@ -174,15 +176,24 @@ impl SourceManager {
         let fragment_id = fragments.into_iter().next().unwrap();
 
         debug_assert!(
-            !merge_updates.is_empty()
-                && merge_updates.iter().all(|merge_update| {
-                    merge_update.upstream_fragment_id == merge_updates[0].upstream_fragment_id
-                        && merge_update.new_upstream_fragment_id == Some(fragment_id)
-                }),
+            merge_updates.values().flatten().next().is_some()
+                && merge_updates.values().flatten().all(|merge_update| {
+                    merge_update.new_upstream_fragment_id == Some(fragment_id)
+                })
+                && merge_updates
+                    .values()
+                    .flatten()
+                    .map(|merge_update| merge_update.upstream_fragment_id)
+                    .all_equal(),
             "merge update should only replace one fragment: {:?}",
             merge_updates
         );
-        let prev_fragment_id = merge_updates[0].upstream_fragment_id;
+        let prev_fragment_id = merge_updates
+            .values()
+            .flatten()
+            .next()
+            .expect("non-empty")
+            .upstream_fragment_id;
         // Here we align the new source executor to backfill executors
         //
         // old_source => new_source            backfill_1
@@ -196,7 +207,8 @@ impl SourceManager {
         // Note: we can choose any backfill actor to align here.
         // We use `HashMap` to dedup.
         let aligned_actors: HashMap<ActorId, ActorId> = merge_updates
-            .iter()
+            .values()
+            .flatten()
             .map(|merge_update| {
                 assert_eq!(merge_update.added_upstream_actor_id.len(), 1);
                 // Note: removed_upstream_actor_id is not set for replace job, so we can't use it.

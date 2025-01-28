@@ -47,7 +47,7 @@ pub mod predicate {
     pub type BoxedPredicate = Box<dyn Predicate>;
 
     fn root(fragment: &PbFragment) -> &StreamNode {
-        fragment.actors.first().unwrap().nodes.as_ref().unwrap()
+        fragment.nodes.as_ref().unwrap()
     }
 
     fn count(root: &StreamNode, p: &impl Fn(&StreamNode) -> bool) -> usize {

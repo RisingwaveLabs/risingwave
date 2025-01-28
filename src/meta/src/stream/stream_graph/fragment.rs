@@ -304,12 +304,15 @@ pub(super) enum EdgeId {
 
     /// The edge between an upstream building fragment and downstream external fragment. Used for
     /// schema change (replace table plan).
-    DownstreamExternal {
-        /// The ID of the original upstream fragment (`Materialize`).
-        original_upstream_fragment_id: GlobalFragmentId,
-        /// The ID of the downstream fragment.
-        downstream_fragment_id: GlobalFragmentId,
-    },
+    DownstreamExternal(DownstreamExternalEdgeId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct DownstreamExternalEdgeId {
+    /// The ID of the original upstream fragment (`Materialize`).
+    pub(super) original_upstream_fragment_id: GlobalFragmentId,
+    /// The ID of the downstream fragment.
+    pub(super) downstream_fragment_id: GlobalFragmentId,
 }
 
 /// The edge in the fragment graph.
@@ -343,7 +346,7 @@ impl StreamFragmentEdge {
 /// This only includes nodes and edges of the current job itself. It will be converted to [`CompleteStreamFragmentGraph`] later,
 /// that contains the additional information of pre-existing
 /// fragments, which are connected to the graph's top-most or bottom-most fragments.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct StreamFragmentGraph {
     /// stores all the fragments in the graph.
     fragments: HashMap<GlobalFragmentId, BuildingFragment>,
@@ -704,6 +707,7 @@ pub(super) enum EitherFragment {
 ///   `Materialize` node will be included in this structure.
 /// - if we're going to replace the plan of a table with downstream mviews, the downstream fragments
 ///   containing the `StreamScan` nodes will be included in this structure.
+#[derive(Debug)]
 pub struct CompleteStreamFragmentGraph {
     /// The fragment graph of the streaming job being built.
     building_graph: StreamFragmentGraph,
@@ -890,7 +894,7 @@ impl CompleteStreamFragmentGraph {
                             {
                                 // Resolve the required output columns from the upstream materialized view.
                                 let (dist_key_indices, output_indices) = {
-                                    let nodes = upstream_fragment.actors[0].get_nodes().unwrap();
+                                    let nodes = upstream_fragment.get_nodes().unwrap();
                                     let mview_node =
                                         nodes.get_node_body().unwrap().as_materialize().unwrap();
                                     let all_column_ids = mview_node.column_ids();
@@ -934,7 +938,7 @@ impl CompleteStreamFragmentGraph {
                                     GlobalFragmentId::new(source_fragment.fragment_id);
 
                                 let output_indices = {
-                                    let nodes = upstream_fragment.actors[0].get_nodes().unwrap();
+                                    let nodes = upstream_fragment.get_nodes().unwrap();
                                     let source_node =
                                         nodes.get_node_body().unwrap().as_source().unwrap();
 
@@ -1013,10 +1017,10 @@ impl CompleteStreamFragmentGraph {
                 let id = GlobalFragmentId::new(fragment.fragment_id);
 
                 let edge = StreamFragmentEdge {
-                    id: EdgeId::DownstreamExternal {
+                    id: EdgeId::DownstreamExternal(DownstreamExternalEdgeId {
                         original_upstream_fragment_id: original_table_fragment_id,
                         downstream_fragment_id: id,
-                    },
+                    }),
                     dispatch_strategy: dispatch_strategy.clone(),
                 };
 
@@ -1164,6 +1168,7 @@ impl CompleteStreamFragmentGraph {
         id: GlobalFragmentId,
         actors: Vec<StreamActor>,
         distribution: Distribution,
+        stream_node: StreamNode,
     ) -> Fragment {
         let building_fragment = self.get_fragment(id).into_building().unwrap();
         let internal_tables = building_fragment.extract_internal_tables();
@@ -1202,6 +1207,7 @@ impl CompleteStreamFragmentGraph {
             state_table_ids,
             upstream_fragment_ids,
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
+            nodes: Some(stream_node),
         }
     }
 

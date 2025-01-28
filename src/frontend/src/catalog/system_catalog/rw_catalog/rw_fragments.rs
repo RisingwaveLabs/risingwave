@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::Fields;
+use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
+use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
@@ -30,6 +31,7 @@ struct RwFragment {
     flags: Vec<String>,
     parallelism: i32,
     max_parallelism: i32,
+    node: JsonbVal,
 }
 
 pub(super) fn extract_fragment_type_flag(mask: u32) -> Vec<FragmentTypeFlag> {
@@ -73,6 +75,7 @@ async fn read_rw_fragment(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFragmen
                 .collect(),
             parallelism: distribution.parallelism as i32,
             max_parallelism: distribution.vnode_count as i32,
+            node: json!(distribution.node).into(),
         })
         .collect())
 }
