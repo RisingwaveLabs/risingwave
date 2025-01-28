@@ -320,6 +320,7 @@ pub async fn start_service_as_election_leader(
         meta_store_impl,
     )
     .await?;
+    tracing::info!("MetaSrvEnv started");
     let _ = env.may_start_watch_license_key_file()?;
     let system_params_reader = env.system_params_reader().await;
 
@@ -355,8 +356,10 @@ pub async fn start_service_as_election_leader(
             .await
             .unwrap(),
     );
+    tracing::info!("CompactorManager started");
 
     let heartbeat_srv = HeartbeatServiceImpl::new(metadata_manager.clone());
+    tracing::info!("HeartbeatServiceImpl started");
 
     let (compactor_streams_change_tx, compactor_streams_change_rx) =
         tokio::sync::mpsc::unbounded_channel();
@@ -372,6 +375,7 @@ pub async fn start_service_as_election_leader(
     )
     .await
     .unwrap();
+    tracing::info!("HummockManager started");
     let object_store_media_type = hummock_manager.object_store_media_type();
 
     let meta_member_srv = MetaMemberServiceImpl::new(election_client.clone());
@@ -414,6 +418,7 @@ pub async fn start_service_as_election_leader(
 
     let (barrier_scheduler, scheduled_barriers) =
         BarrierScheduler::new_pair(hummock_manager.clone(), meta_metrics.clone());
+    tracing::info!("BarrierScheduler started");
 
     // Initialize services.
     let backup_manager = BackupManager::new(
@@ -424,12 +429,14 @@ pub async fn start_service_as_election_leader(
         system_params_reader.backup_storage_directory(),
     )
     .await?;
+    tracing::info!("BackupManager started");
 
     LocalSecretManager::init(
         opts.temp_secret_file_dir,
         env.cluster_id().to_string(),
         META_NODE_ID,
     );
+    tracing::info!("LocalSecretManager started");
 
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
@@ -439,6 +446,7 @@ pub async fn start_service_as_election_leader(
         serving_vnode_mapping.clone(),
     )
     .await?;
+    tracing::info!("NotificationServiceImpl started");
 
     let source_manager = Arc::new(
         SourceManager::new(
@@ -449,8 +457,10 @@ pub async fn start_service_as_election_leader(
         .await
         .unwrap(),
     );
+    tracing::info!("SourceManager started");
 
     let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
+    tracing::info!("SinkCoordinatorManager started");
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
@@ -470,6 +480,7 @@ pub async fn start_service_as_election_leader(
         scale_controller.clone(),
     )
     .await;
+    tracing::info!("GlobalBarrierManager started");
     sub_tasks.push((join_handle, shutdown_rx));
 
     {

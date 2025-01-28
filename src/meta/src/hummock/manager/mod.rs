@@ -514,6 +514,7 @@ async fn write_exclusive_cluster_id(
     const CLUSTER_ID_NAME: &str = "0";
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
+    tracing::info!("try reading cluster_id");
     match object_store.read(&cluster_id_full_path, ..).await {
         Ok(stored_cluster_id) => {
             let stored_cluster_id = String::from_utf8(stored_cluster_id.to_vec()).unwrap();
@@ -529,6 +530,7 @@ async fn write_exclusive_cluster_id(
         }
         Err(e) => {
             if e.is_object_not_found_error() {
+                tracing::info!("cluster_id not found, writing cluster_id");
                 object_store
                     .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
                     .await?;
