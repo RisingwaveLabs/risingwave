@@ -661,6 +661,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 split_weight_by_vnode = 20;
       bool disable_auto_group_scheduling = 21;
       uint64 max_overlapping_level_size = 22;
+      uint32 sst_allowed_trivial_move_max_count = 23;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -863,6 +864,9 @@ message CompactionConfig {
   // The limitation of the max size of the overlapping-level for the compaction
   // hummock will reorg the commit-sstables to the multi overlapping-level if the size of the commit-sstables is larger than `max_overlapping_level_size`
   optional uint64 max_overlapping_level_size = 24;
+
+  // The limitation of the max sst count of the trivial move task
+  optional uint32 sst_allowed_trivial_move_max_count = 25;
 }
 
 message TableStats {

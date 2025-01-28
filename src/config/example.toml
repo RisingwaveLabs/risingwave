@@ -81,6 +81,8 @@ level0_max_compact_file_number = 100
 tombstone_reclaim_ratio = 40
 enable_emergency_picker = true
 max_level = 6
+sst_allowed_trivial_move_min_size = 4194304
+sst_allowed_trivial_move_max_count = 64
 
 [meta.developer]
 meta_cached_traces_num = 256

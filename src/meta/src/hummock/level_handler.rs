@@ -137,6 +137,11 @@ impl LevelHandler {
     pub fn compacting_files(&self) -> &HashMap<HummockSstableId, HummockCompactionTaskId> {
         &self.compacting_files
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_add_pending_sst(&mut self, sst_id: HummockSstableId, task_id: u64) {
+        self.compacting_files.insert(sst_id, task_id);
+    }
 }
 
 impl From<&LevelHandler> for risingwave_pb::hummock::LevelHandler {

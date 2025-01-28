@@ -20,6 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::IntGauge;
+use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::table_stats::PbTableStatsMap;
@@ -666,4 +667,43 @@ pub fn remove_compact_task_metrics(
             }
         }
     }
+}
+
+pub fn trigger_compact_tasks_stat(
+    metrics: &MetaMetrics,
+    compact_tasks: &[CompactTask],
+    compact_status: &BTreeMap<CompactionGroupId, CompactStatus>,
+    current_version: &HummockVersion,
+) {
+    let mut task_status_label_map = HashMap::new();
+    let mut task_type_label_map = HashMap::new();
+    let mut group_label_map = HashMap::new();
+
+    for task in compact_tasks {
+        let task_status_label = task_status_label_map
+            .entry(task.task_status)
+            .or_insert_with(|| task.task_status.as_str_name().to_owned());
+
+        let task_type_label = task_type_label_map
+            .entry(task.task_type)
+            .or_insert_with(|| task.task_type.as_str_name().to_owned());
+
+        let group_label = group_label_map
+            .entry(task.compaction_group_id)
+            .or_insert_with(|| task.compaction_group_id.to_string());
+
+        metrics
+            .compact_frequency
+            .with_label_values(&["normal", group_label, task_type_label, task_status_label])
+            .inc();
+    }
+
+    group_label_map.keys().for_each(|group_id| {
+        trigger_sst_stat(
+            metrics,
+            compact_status.get(group_id),
+            current_version,
+            *group_id,
+        );
+    });
 }

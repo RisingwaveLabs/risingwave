@@ -19,11 +19,11 @@ mod overlap_strategy;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::level::Levels;
-use risingwave_pb::hummock::compact_task::{self, TaskType};
+use risingwave_pb::hummock::compact_task::{self};
 
 mod picker;
 pub mod selector;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
-use risingwave_pb::hummock::{CompactionConfig, LevelType};
+use risingwave_pb::hummock::CompactionConfig;
 pub use selector::{CompactionSelector, CompactionSelectorContext};
 
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
@@ -143,47 +143,6 @@ impl CompactStatus {
         }
 
         None
-    }
-
-    pub fn is_trivial_move_task(task: &CompactTask) -> bool {
-        if task.task_type != TaskType::Dynamic && task.task_type != TaskType::Emergency {
-            return false;
-        }
-
-        if task.input_ssts.len() != 2 || task.input_ssts[0].level_type != LevelType::Nonoverlapping
-        {
-            return false;
-        }
-
-        // it may be a manual compaction task
-        if task.input_ssts[0].level_idx == task.input_ssts[1].level_idx
-            && task.input_ssts[0].level_idx > 0
-        {
-            return false;
-        }
-
-        if task.input_ssts[1].level_idx == task.target_level
-            && task.input_ssts[1].table_infos.is_empty()
-        {
-            return true;
-        }
-
-        false
-    }
-
-    pub fn is_trivial_reclaim(task: &CompactTask) -> bool {
-        // Currently all VnodeWatermark tasks are trivial reclaim.
-        if task.task_type == TaskType::VnodeWatermark {
-            return true;
-        }
-        let exist_table_ids = HashSet::<u32>::from_iter(task.existing_table_ids.clone());
-        task.input_ssts.iter().all(|level| {
-            level.table_infos.iter().all(|sst| {
-                sst.table_ids
-                    .iter()
-                    .all(|table_id| !exist_table_ids.contains(table_id))
-            })
-        })
     }
 
     pub fn report_compact_task(&mut self, compact_task: &CompactTask) {
