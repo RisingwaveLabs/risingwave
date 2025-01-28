@@ -135,6 +135,10 @@ pub struct IcebergConnection {
     /// Path of iceberg warehouse, only applicable in storage catalog.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
+    /// Catalog id, can be omitted for storage catalog or when
+    /// caller's AWS account ID matches glue id
+    #[serde(rename = "glue.id")]
+    pub glue_id: Option<String>,
     /// Catalog name, can be omitted for storage catalog, but
     /// must be set for other catalogs.
     #[serde(rename = "catalog.name")]
@@ -255,6 +259,7 @@ impl Connection for IcebergConnection {
             secret_key: self.secret_key.clone(),
             gcs_credential: self.gcs_credential.clone(),
             warehouse_path: self.warehouse_path.clone(),
+            glue_id: self.glue_id.clone(),
             catalog_name: self.catalog_name.clone(),
             catalog_uri: self.catalog_uri.clone(),
             credential: self.credential.clone(),

@@ -103,6 +103,12 @@ IcebergProperties:
     field_type: String
     comments: Path of iceberg warehouse, only applicable in storage catalog.
     required: false
+  - name: glue.id
+    field_type: String
+    comments: |-
+      AWS Client id, can be omitted for storage catalog or when
+      caller's AWS account ID matches glue id
+    required: false
   - name: catalog.name
     field_type: String
     comments: |-

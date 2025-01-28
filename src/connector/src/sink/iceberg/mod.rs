@@ -1432,6 +1432,7 @@ mod test {
                 secret_key: Some("hummockadmin".to_owned()),
                 gcs_credential: None,
                 catalog_type: Some("jdbc".to_owned()),
+                glue_id: None,
                 catalog_name: Some("demo".to_owned()),
                 database_name: Some("demo_db".to_owned()),
                 table_name: "demo_table".to_owned(),
