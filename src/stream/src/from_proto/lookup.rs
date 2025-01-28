@@ -16,7 +16,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::LookupNode;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use super::*;
 use crate::executor::{LookupExecutor, LookupExecutorParams};
@@ -62,7 +62,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .map(|&idx| ColumnId::new(table_desc.columns[idx as usize].column_id))
             .collect_vec();
 
-        let storage_table = StorageTable::new_partial(
+        let storage_table = BatchTable::new_partial(
             store,
             column_ids,
             params.vnode_bitmap.map(Into::into),
@@ -80,7 +80,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             stream_join_key_indices: lookup.stream_key.iter().map(|x| *x as usize).collect(),
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
-            storage_table,
+            batch_table: storage_table,
             watermark_epoch: params.watermark_epoch,
             chunk_size: params.env.config().developer.chunk_size,
         });

@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::plan_common::StorageTableDesc;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
@@ -47,7 +47,7 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
     /// None: Local mode don't record mertics.
     metrics: Option<BatchMetrics>,
 
-    table: StorageTable<S>,
+    table: BatchTable<S>,
     old_epoch: u64,
     new_epoch: u64,
     version_id: HummockVersionId,
@@ -56,7 +56,7 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
 
 impl<S: StateStore> LogRowSeqScanExecutor<S> {
     pub fn new(
-        table: StorageTable<S>,
+        table: BatchTable<S>,
         old_epoch: u64,
         new_epoch: u64,
         version_id: HummockVersionId,
@@ -138,7 +138,7 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
         let new_epoch = new_epoch.epoch;
 
         dispatch_state_store!(source.context().state_store(), state_store, {
-            let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
+            let table = BatchTable::new_partial(state_store, column_ids, vnodes, table_desc);
             Ok(Box::new(LogRowSeqScanExecutor::new(
                 table,
                 old_epoch,
@@ -208,7 +208,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn execute_range(
-        table: Arc<StorageTable<S>>,
+        table: Arc<BatchTable<S>>,
         old_epoch: u64,
         new_epoch: u64,
         version_id: HummockVersionId,

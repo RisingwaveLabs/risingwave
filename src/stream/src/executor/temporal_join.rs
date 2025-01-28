@@ -31,7 +31,7 @@ use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::table::TableIter;
 
 use super::join::{JoinType, JoinTypePrimitive};
@@ -104,7 +104,7 @@ impl JoinEntry {
 }
 
 struct TemporalSide<K: HashKey, S: StateStore> {
-    source: StorageTable<S>,
+    source: BatchTable<S>,
     table_stream_key_indices: Vec<usize>,
     table_output_indices: Vec<usize>,
     cache: ManagedLruCache<K, JoinEntry, DefaultHasher, SharedStatsAlloc<Global>>,
@@ -597,7 +597,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
         info: ExecutorInfo,
         left: Executor,
         right: Executor,
-        table: StorageTable<S>,
+        table: BatchTable<S>,
         left_join_keys: Vec<usize>,
         right_join_keys: Vec<usize>,
         null_safe: Vec<bool>,

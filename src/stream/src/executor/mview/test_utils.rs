@@ -18,12 +18,12 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::{test_epoch, EpochPair};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use crate::common::table::state_table::StateTable;
 use crate::common::table::test_utils::gen_pbtable;
 
-pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore> {
+pub async fn gen_basic_table(row_count: usize) -> BatchTable<MemoryStateStore> {
     let state_store = MemoryStateStore::new();
 
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
@@ -46,7 +46,7 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
         None,
     )
     .await;
-    let table = StorageTable::for_test(
+    let table = BatchTable::for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),

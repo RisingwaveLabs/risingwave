@@ -21,7 +21,7 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::table::TableDistribution;
 use risingwave_storage::StateStore;
 use risingwave_stream::common::table::state_table::StateTable;
@@ -72,13 +72,13 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
 pub fn make_storage_table<S: StateStore>(
     hummock: S,
     table: &TableCatalog,
-) -> Result<StorageTable<S>> {
+) -> Result<BatchTable<S>> {
     let output_columns_ids = table
         .columns()
         .iter()
         .map(|x| x.column_desc.column_id)
         .collect();
-    Ok(StorageTable::new_partial(
+    Ok(BatchTable::new_partial(
         hummock,
         output_columns_ids,
         Some(Bitmap::ones(table.vnode_count()).into()),

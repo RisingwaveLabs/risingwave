@@ -19,7 +19,7 @@ use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{build_non_strict_from_prost, NonStrictExpression};
 use risingwave_pb::plan_common::{JoinType as JoinTypeProto, StorageTableDesc};
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -62,7 +62,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 
         if node.get_is_nested_loop() {
-            let right_table = StorageTable::new_partial(
+            let right_table = BatchTable::new_partial(
                 store.clone(),
                 table_output_indices
                     .iter()
@@ -93,7 +93,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                     .map(|x| ColumnId::new(x.column_id))
                     .collect_vec();
 
-                StorageTable::new_partial(
+                BatchTable::new_partial(
                     store.clone(),
                     column_ids,
                     params.vnode_bitmap.clone().map(Into::into),
@@ -179,7 +179,7 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     info: ExecutorInfo,
     left: Executor,
     right: Executor,
-    right_table: StorageTable<S>,
+    right_table: BatchTable<S>,
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
     null_safe: Vec<bool>,
@@ -258,7 +258,7 @@ struct NestedLoopTemporalJoinExecutorDispatcherArgs<S: StateStore> {
     info: ExecutorInfo,
     left: Executor,
     right: Executor,
-    right_table: StorageTable<S>,
+    right_table: BatchTable<S>,
     condition: Option<NonStrictExpression>,
     output_indices: Vec<usize>,
     chunk_size: usize,

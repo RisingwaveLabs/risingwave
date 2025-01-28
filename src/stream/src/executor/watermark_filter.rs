@@ -25,7 +25,7 @@ use risingwave_expr::expr::{
 use risingwave_expr::Result as ExprResult;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::expr::expr_node::Type;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use super::filter::FilterExecutor;
 use crate::executor::prelude::*;
@@ -43,7 +43,7 @@ pub struct WatermarkFilterExecutor<S: StateStore> {
     /// The column we should generate watermark and filter on.
     event_time_col_idx: usize,
     table: StateTable<S>,
-    global_watermark_table: StorageTable<S>,
+    global_watermark_table: BatchTable<S>,
 
     eval_error_report: ActorEvalErrorReport,
 }
@@ -55,7 +55,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         watermark_expr: NonStrictExpression,
         event_time_col_idx: usize,
         table: StateTable<S>,
-        global_watermark_table: StorageTable<S>,
+        global_watermark_table: BatchTable<S>,
         eval_error_report: ActorEvalErrorReport,
     ) -> Self {
         Self {
@@ -336,7 +336,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
     /// If the returned if `Ok(None)`, it means there is no global max watermark.
     async fn get_global_max_watermark(
         table: &StateTable<S>,
-        global_watermark_table: &StorageTable<S>,
+        global_watermark_table: &BatchTable<S>,
         wait_epoch: HummockReadEpoch,
     ) -> StreamExecutorResult<Option<ScalarImpl>> {
         let handle_watermark_row = |watermark_row: Option<OwnedRow>| match watermark_row {
@@ -409,7 +409,7 @@ mod tests {
         pk_indices: &[usize],
         val_indices: &[usize],
         table_id: u32,
-    ) -> (StorageTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
+    ) -> (BatchTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let table = Table {
             id: table_id,
             columns: data_types
@@ -450,7 +450,7 @@ mod tests {
 
         let desc = TableDesc::from_pb_table(&table).try_to_protobuf().unwrap();
 
-        let storage_table = StorageTable::new_partial(
+        let storage_table = BatchTable::new_partial(
             mem_state,
             val_indices.iter().map(|i| ColumnId::new(*i as _)).collect(),
             Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),

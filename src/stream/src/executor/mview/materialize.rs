@@ -844,7 +844,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::batch_table::storage_table::StorageTable;
+    use risingwave_storage::table::batch_table::BatchTable;
 
     use super::*;
     use crate::executor::test_utils::*;
@@ -890,7 +890,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -993,7 +993,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -1085,7 +1085,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -1213,7 +1213,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -1391,7 +1391,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -1494,7 +1494,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -1612,7 +1612,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
@@ -1801,7 +1801,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,

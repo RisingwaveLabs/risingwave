@@ -39,7 +39,7 @@ use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::test_batch_query_epoch;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::error::StreamResult;
@@ -359,7 +359,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     ];
     let value_indices = (0..column_descs.len()).collect_vec();
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = StorageTable::for_test(
+    let table = BatchTable::for_test(
         memory_state_store.clone(),
         materialize_table_id,
         column_descs.clone(),

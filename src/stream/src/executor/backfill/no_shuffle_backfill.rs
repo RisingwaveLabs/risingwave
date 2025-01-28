@@ -22,7 +22,7 @@ use risingwave_common::{bail, row};
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
@@ -65,7 +65,7 @@ pub struct BackfillState {
 /// waiting.
 pub struct BackfillExecutor<S: StateStore> {
     /// Upstream table
-    upstream_table: StorageTable<S>,
+    upstream_table: BatchTable<S>,
     /// Upstream with the same schema with the upstream table.
     upstream: Executor,
 
@@ -93,7 +93,7 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        upstream_table: StorageTable<S>,
+        upstream_table: BatchTable<S>,
         upstream: Executor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
@@ -640,7 +640,7 @@ where
 
     #[try_stream(ok = Option<OwnedRow>, error = StreamExecutorError)]
     async fn make_snapshot_stream<'a>(
-        upstream_table: &'a StorageTable<S>,
+        upstream_table: &'a BatchTable<S>,
         epoch: u64,
         current_pos: Option<OwnedRow>,
         paused: bool,
@@ -672,7 +672,7 @@ where
     /// present, Then when we flush we contain duplicate rows.
     #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
     pub async fn snapshot_read(
-        upstream_table: &StorageTable<S>,
+        upstream_table: &BatchTable<S>,
         epoch: HummockReadEpoch,
         current_pos: Option<OwnedRow>,
     ) {

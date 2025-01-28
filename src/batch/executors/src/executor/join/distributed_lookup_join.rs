@@ -31,7 +31,7 @@ use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
@@ -197,7 +197,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
         let vnodes = Some(Bitmap::ones(table_desc.vnode_count()).into());
 
         dispatch_state_store!(source.context().state_store(), state_store, {
-            let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
+            let table = BatchTable::new_partial(state_store, column_ids, vnodes, table_desc);
             let inner_side_builder = InnerSideExecutorBuilder::new(
                 outer_side_key_types,
                 inner_side_key_types.clone(),
@@ -294,7 +294,7 @@ struct InnerSideExecutorBuilder<S: StateStore> {
     lookup_prefix_len: usize,
     epoch: BatchQueryEpoch,
     row_list: Vec<OwnedRow>,
-    table: StorageTable<S>,
+    table: BatchTable<S>,
     chunk_size: usize,
 }
 
@@ -305,7 +305,7 @@ impl<S: StateStore> InnerSideExecutorBuilder<S> {
         lookup_prefix_len: usize,
         epoch: BatchQueryEpoch,
         row_list: Vec<OwnedRow>,
-        table: StorageTable<S>,
+        table: BatchTable<S>,
         chunk_size: usize,
     ) -> Self {
         Self {

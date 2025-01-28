@@ -25,7 +25,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::StateStore;
 
 use super::join::{JoinType, JoinTypePrimitive};
@@ -52,7 +52,7 @@ pub struct NestedLoopTemporalJoinExecutor<S: StateStore, const T: JoinTypePrimit
 }
 
 struct TemporalSide<S: StateStore> {
-    source: StorageTable<S>,
+    source: BatchTable<S>,
 }
 
 impl<S: StateStore> TemporalSide<S> {}
@@ -103,7 +103,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
         info: ExecutorInfo,
         left: Executor,
         right: Executor,
-        table: StorageTable<S>,
+        table: BatchTable<S>,
         condition: Option<NonStrictExpression>,
         output_indices: Vec<usize>,
         metrics: Arc<StreamingMetrics>,

@@ -25,7 +25,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
@@ -210,7 +210,7 @@ async fn test_lookup_this_epoch() {
         stream_join_key_indices: vec![0],
         arrange_join_key_indices: vec![1],
         column_mapping: vec![2, 3, 0, 1],
-        storage_table: StorageTable::for_test(
+        batch_table: BatchTable::for_test(
             store.clone(),
             table_id,
             arrangement_col_descs(),
@@ -284,7 +284,7 @@ async fn test_lookup_last_epoch() {
         stream_join_key_indices: vec![0],
         arrange_join_key_indices: vec![1],
         column_mapping: vec![0, 1, 2, 3],
-        storage_table: StorageTable::for_test(
+        batch_table: BatchTable::for_test(
             store.clone(),
             table_id,
             arrangement_col_descs(),

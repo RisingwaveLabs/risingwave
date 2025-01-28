@@ -47,7 +47,7 @@ use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::panic_store::PanicStateStore;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::error::StreamResult;
@@ -253,7 +253,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let value_indices = (0..column_descs.len()).collect_vec();
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = StorageTable::for_test(
+    let table = BatchTable::for_test(
         memory_state_store.clone(),
         table_id,
         column_descs.clone(),
@@ -464,7 +464,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         None,
     )
     .await;
-    let table = StorageTable::for_test(
+    let table = BatchTable::for_test(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),

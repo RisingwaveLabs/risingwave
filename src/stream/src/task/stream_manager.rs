@@ -39,7 +39,7 @@ use risingwave_pb::stream_service::{
     StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 use risingwave_storage::monitor::HummockTraceFutureExt;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::{dispatch_state_store, StateStore};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -395,7 +395,7 @@ impl StreamActorManager {
         let barrier_rx = local_barrier_manager.subscribe_barrier(actor_context.id);
 
         let upstream_table =
-            StorageTable::new_partial(state_store.clone(), column_ids, vnodes.clone(), table_desc);
+            BatchTable::new_partial(state_store.clone(), column_ids, vnodes.clone(), table_desc);
 
         let state_table = node.get_state_table()?;
         let state_table =

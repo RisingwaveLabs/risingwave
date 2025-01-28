@@ -32,7 +32,7 @@ use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::as_of::AsOfType;
 use risingwave_pb::plan_common::{as_of, PbAsOf, StorageTableDesc};
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
 use crate::error::{BatchError, Result};
@@ -50,7 +50,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     /// None: Local mode don't record mertics.
     metrics: Option<BatchMetrics>,
 
-    table: StorageTable<S>,
+    table: BatchTable<S>,
     scan_ranges: Vec<ScanRange>,
     ordered: bool,
     epoch: BatchQueryEpoch,
@@ -165,7 +165,7 @@ impl ScanRange {
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
     pub fn new(
-        table: StorageTable<S>,
+        table: BatchTable<S>,
         scan_ranges: Vec<ScanRange>,
         ordered: bool,
         epoch: BatchQueryEpoch,
@@ -262,7 +262,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let metrics = source.context().batch_metrics();
 
         dispatch_state_store!(source.context().state_store(), state_store, {
-            let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
+            let table = BatchTable::new_partial(state_store, column_ids, vnodes, table_desc);
             Ok(Box::new(RowSeqScanExecutor::new(
                 table,
                 scan_ranges,
@@ -399,7 +399,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
     }
 
     async fn execute_point_get(
-        table: Arc<StorageTable<S>>,
+        table: Arc<BatchTable<S>>,
         scan_range: ScanRange,
         epoch: BatchQueryEpoch,
         histogram: Option<impl Deref<Target = Histogram>>,
@@ -421,7 +421,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn execute_range(
-        table: Arc<StorageTable<S>>,
+        table: Arc<BatchTable<S>>,
         scan_range: ScanRange,
         ordered: bool,
         epoch: BatchQueryEpoch,

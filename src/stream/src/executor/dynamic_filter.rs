@@ -524,7 +524,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::batch_table::storage_table::StorageTable;
+    use risingwave_storage::table::batch_table::BatchTable;
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
@@ -1184,7 +1184,7 @@ mod tests {
         Ok(())
     }
 
-    async fn in_table(table: &StorageTable<MemoryStateStore>, x: i64) -> bool {
+    async fn in_table(table: &BatchTable<MemoryStateStore>, x: i64) -> bool {
         let row = table
             .get_row(
                 &OwnedRow::new(vec![Some(x.into())]),
@@ -1226,7 +1226,7 @@ mod tests {
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
             create_executor(PbExprNodeType::LessThanOrEqual, mem_store.clone(), true).await;
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             mem_store.clone(),
             TableId::new(0),
             vec![column_descs],
