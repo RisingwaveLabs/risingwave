@@ -12,12 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod consume_upstream;
 mod executor;
-mod state;
-mod utils;
-mod vnode_stream;
+mod stream;
+mod upstream_table_trait;
 
-pub use consume_upstream::UpstreamTableExecutor;
-pub use executor::SnapshotBackfillExecutor;
-use utils::*;
+pub use executor::UpstreamTableExecutor;
