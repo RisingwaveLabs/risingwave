@@ -34,9 +34,33 @@ pub(crate) const TEST_PAID_LICENSE_KEY_CONTENT: &str =
   eyJzdWIiOiJydy10ZXN0IiwidGllciI6InBhaWQiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjo5OTk5OTk5OTk5fQ.\
   c6Gmb6xh3dBDYX_4cOnHUbwRXJbUCM7W3mrJA77nLC5FkoOLpGstzvQ7qfnPVBu412MFtKRDvh-Lk8JwG7pVa0WLw16DeHTtVHxZukMTZ1Q_ciZ1xKeUx_pwUldkVzv6c9j99gNqPSyTjzOXTdKlidBRLer2zP0v3Lf-ZxnMG0tEcIbTinTb3BNCtAQ8bwBSRP-X48cVTWafjaZxv_zGiJT28uV3bR6jwrorjVB4VGvqhsJi6Fd074XOmUlnOleoAtyzKvjmGC5_FvnL0ztIe_I0z_pyCMfWpyJ_J4C7rCP1aVWUImyoowLmVDA-IKjclzOW5Fvi0wjXsc6OckOc_A";
 
+/// A license key with the paid tier and 4 core CPU limit that works in production.
+///
+/// This allows users to evaluate paid features on a small scale. When the total CPU core in
+/// the cluster exceeds the limit (4), the paid features won't be available.
+///
+/// The content is a JWT token with the following payload:
+/// ```text
+/// License {
+///     sub: "rw-default-paid-4-core",
+///     iss: Prod,
+///     tier: Paid,
+///     cpu_core_limit: 4,
+///     exp: 2147471999,
+/// }
+/// ```
+pub(crate) const PROD_PAID_4_CORE_LICENSE_KEY_CONTENT: &str =
+ "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+  eyJzdWIiOiJydy1kZWZhdWx0LXBhaWQtNC1jb3JlIiwiaXNzIjoicHJvZC5yaXNpbmd3YXZlLmNvbSIsInRpZXIiOiJwYWlkIiwiZXhwIjoyMTQ3NDcxOTk5LCJpYXQiOjE3Mzc3MDQxMjQsImNwdV9jb3JlX2xpbWl0Ijo0fQ.\
+  BvCClH6vb_TH-UHKLK76nSP0RfuJDF8ay0WHBpaJFWTVt_phcl9claWPWWk6KTpj_5eJi-TWTDzThE2JKsHjRk9Uo48MtZcOUBZsGsc_NUyShRjd1DS9LmzzI6ouwEWO5BfMFxQ4ZuJFRcQP7_EtC5vHVGILXCThOE--Cj1YLz5rC4mi6WMNdgfWAmnJh6FtfruHvqQEqq8m23CuosS8XHG5DMOIwdmP9jCHYFtJQaYNOQVQW90vHp69Uqmcv8lZD57rUvrQYFGyekERg2JWlMWar2z2vyiN4u73Qje7MJ3EB9pkXE0wvAfJ3bPpATgKd96SxCJL1kYPeCJkVdFPQg";
+
 /// A newtype wrapping `String` or `&str` for the license key.
 ///
-/// - The default value is set to [`TEST_PAID_LICENSE_KEY_CONTENT`] in debug mode, and empty otherwise.
+/// - The default value is set to
+///   * [`TEST_PAID_LICENSE_KEY_CONTENT`] in debug mode, to allow all features in tests.
+///   * [`PROD_PAID_4_CORE_LICENSE_KEY_CONTENT`] in release mode, to allow evaluation of paid features
+///     on a small scale.
+///
 /// - The content will be redacted when printed or serialized.
 #[derive(Clone, Copy, Deserialize)]
 #[serde(transparent)]
@@ -51,7 +75,7 @@ impl<T: From<&'static str>> Default for LicenseKey<T> {
             if cfg!(debug_assertions) {
                 TEST_PAID_LICENSE_KEY_CONTENT
             } else {
-                ""
+                PROD_PAID_4_CORE_LICENSE_KEY_CONTENT
             }
             .into(),
         )
