@@ -34,6 +34,8 @@ sr_register avro_alter_source_test-value AVRO <<< '{"type":"record","name":"Root
 system ok
 echo '{"foo":"ABC", "bar":1}' | rpk topic produce --schema-id=topic avro_alter_source_test
 
+sleep 1s
+
 query ?
 select * from s
 ----
