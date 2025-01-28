@@ -37,7 +37,7 @@ impl StateStoreRead for PanicStateStore {
     async fn get_keyed_row(
         &self,
         _key: TableKey<Bytes>,
-        _epoch: u64,
+
         _read_options: ReadOptions,
     ) -> StorageResult<Option<StateStoreKeyedRow>> {
         panic!("should not read from the state store!");
@@ -47,7 +47,7 @@ impl StateStoreRead for PanicStateStore {
     async fn iter(
         &self,
         _key_range: TableKeyRange,
-        _epoch: u64,
+
         _read_options: ReadOptions,
     ) -> StorageResult<Self::Iter> {
         panic!("should not read from the state store!");
@@ -57,7 +57,7 @@ impl StateStoreRead for PanicStateStore {
     async fn rev_iter(
         &self,
         _key_range: TableKeyRange,
-        _epoch: u64,
+
         _read_options: ReadOptions,
     ) -> StorageResult<Self::RevIter> {
         panic!("should not read from the state store!");
@@ -148,7 +148,6 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!")
     }
 
-    #[allow(clippy::unused_async)]
     async fn try_flush(&mut self) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
@@ -168,8 +167,8 @@ impl LocalStateStore for PanicStateStore {
 
 impl StateStore for PanicStateStore {
     type Local = Self;
+    type ReadSnapshot = Self;
 
-    #[allow(clippy::unused_async)]
     async fn try_wait_epoch(
         &self,
         _epoch: HummockReadEpoch,
@@ -178,9 +177,16 @@ impl StateStore for PanicStateStore {
         panic!("should not wait epoch from the panic state store!");
     }
 
-    #[allow(clippy::unused_async)]
     async fn new_local(&self, _option: NewLocalOptions) -> Self::Local {
         panic!("should not call new local from the panic state store");
+    }
+
+    async fn new_read_snapshot(
+        &self,
+        _epoch: HummockReadEpoch,
+        _options: NewReadSnapshotOptions,
+    ) -> StorageResult<Self::ReadSnapshot> {
+        panic!()
     }
 }
 

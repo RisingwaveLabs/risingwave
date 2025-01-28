@@ -16,8 +16,12 @@ use core::ops::Bound::Unbounded;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::hummock::CachePolicy;
-use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreIter, StateStoreRead};
+use risingwave_storage::store::{
+    NewReadSnapshotOptions, PrefetchOptions, ReadOptions, StateStoreIter, StateStoreRead,
+};
+use risingwave_storage::StateStore;
 
 use crate::common::HummockServiceOpts;
 use crate::CtlContext;
@@ -39,10 +43,17 @@ pub async fn list_kv(
         tracing::info!("using MAX EPOCH as epoch");
     }
     let range = (Unbounded, Unbounded);
-    let mut scan_result = hummock
+    let read_snapshot = hummock
+        .new_read_snapshot(
+            HummockReadEpoch::Committed(epoch),
+            NewReadSnapshotOptions {
+                table_id: TableId { table_id },
+            },
+        )
+        .await?;
+    let mut scan_result = read_snapshot
         .iter(
             range,
-            epoch,
             ReadOptions {
                 table_id: TableId { table_id },
                 prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
