@@ -39,8 +39,6 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
         let options_with_secret =
             WithOptionsSecResolved::new(node.with_properties.clone(), node.secret_refs.clone());
         let source_desc_builder = super::source::create_source_desc_builder(
-            "source backfill",
-            &source_id,
             node.columns.clone(),
             &params,
             source_info.clone(),
