@@ -9,6 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
+assert_matches = "1"
 async-recursion = "1"
 async-trait = "0.1"
 either = "1"

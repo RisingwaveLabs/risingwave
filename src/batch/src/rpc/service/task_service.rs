@@ -18,13 +18,16 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
-    CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataResponse,
-    TaskInfoResponse,
+    fast_insert_response, CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest,
+    FastInsertRequest, FastInsertResponse, GetDataResponse, TaskInfoResponse,
 };
+use risingwave_storage::dispatch_state_store;
 use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
+use crate::error::BatchError;
+use crate::executor::FastInsertExecutor;
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::task::{
     BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext, StateReporter,
@@ -118,6 +121,31 @@ impl TaskService for BatchServiceImpl {
         let mgr = self.mgr.clone();
         BatchServiceImpl::get_execute_stream(env, mgr, req).await
     }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn fast_insert(
+        &self,
+        request: Request<FastInsertRequest>,
+    ) -> Result<Response<FastInsertResponse>, Status> {
+        let req = request.into_inner();
+        let res = self.do_fast_insert(req).await;
+        match res {
+            Ok(_) => Ok(Response::new(FastInsertResponse {
+                status: fast_insert_response::Status::Succeeded.into(),
+                error_message: "".to_owned(),
+            })),
+            Err(e) => match e {
+                BatchError::Dml(e) => Ok(Response::new(FastInsertResponse {
+                    status: fast_insert_response::Status::DmlFailed.into(),
+                    error_message: format!("{}", e.as_report()),
+                })),
+                _ => {
+                    error!(error = %e.as_report(), "failed to fast insert");
+                    Err(e.into())
+                }
+            },
+        }
+    }
 }
 
 impl BatchServiceImpl {
@@ -184,5 +212,34 @@ impl BatchServiceImpl {
             }
         });
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn do_fast_insert(&self, insert_req: FastInsertRequest) -> Result<(), BatchError> {
+        let table_id = insert_req.table_id;
+        let wait_for_persistence = insert_req.wait_for_persistence;
+        let (executor, data_chunk) =
+            FastInsertExecutor::build(self.env.dml_manager_ref(), insert_req)?;
+        let epoch = executor
+            .do_execute(data_chunk, wait_for_persistence)
+            .await?;
+        if wait_for_persistence {
+            dispatch_state_store!(self.env.state_store(), store, {
+                use risingwave_common::catalog::TableId;
+                use risingwave_hummock_sdk::HummockReadEpoch;
+                use risingwave_storage::store::TryWaitEpochOptions;
+                use risingwave_storage::StateStore;
+
+                store
+                    .try_wait_epoch(
+                        HummockReadEpoch::Committed(epoch.0),
+                        TryWaitEpochOptions {
+                            table_id: TableId::new(table_id),
+                        },
+                    )
+                    .await
+                    .map_err(BatchError::from)?;
+            });
+        }
+        Ok(())
     }
 }

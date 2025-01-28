@@ -60,6 +60,35 @@ message GetDataResponse {
   data.DataChunk record_batch = 2;
 }
 
+message FastInsertRequest {
+  // Id of the table to perform inserting.
+  uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 2;
+  repeated uint32 column_indices = 3;
+  data.DataChunk data_chunk = 4;
+
+  // An optional field and will be `None` for tables without user-defined pk.
+  // The `BatchInsertExecutor` should add a column with NULL value which will
+  // be filled in streaming.
+  optional uint32 row_id_index = 5;
+
+  // Use this number to assign the insert req to different worker nodes and dml channels.
+  uint32 request_id = 6;
+  bool wait_for_persistence = 7;
+  // TODO(kexiang): add support for default columns. plan_common.ExprContext expr_context is needed for it.
+}
+
+message FastInsertResponse {
+  enum Status {
+    UNSPECIFIED = 0;
+    SUCCEEDED = 1;
+    DML_FAILED = 2;
+  }
+  Status status = 1;
+  string error_message = 2;
+}
+
 message ExecuteRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
@@ -73,6 +102,8 @@ service TaskService {
   // Cancel an already-died (self execution-failure, previous aborted, completed) task will still succeed.
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
   rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
+  // A lightweight version insert, only for non-pgwire insert, such as inserts from webhooks and websockets.
+  rpc FastInsert(FastInsertRequest) returns (FastInsertResponse);
 }
 
 message GetDataRequest {

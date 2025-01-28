@@ -99,7 +99,7 @@ impl Sender {
                     .forget();
                 Some(PermitValue(card as _))
             }
-            TxnMsg::Begin(_) | TxnMsg::Rollback(_) | TxnMsg::End(_) => None,
+            TxnMsg::Begin(_) | TxnMsg::Rollback(_) | TxnMsg::End(..) => None,
         };
 
         self.tx

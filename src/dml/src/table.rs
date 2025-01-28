@@ -20,6 +20,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
+use risingwave_common::util::epoch::Epoch;
 use tokio::sync::oneshot;
 
 use crate::error::{DmlError, Result};
@@ -189,9 +190,25 @@ impl WriteHandle {
         assert_eq!(self.txn_state, TxnState::Begin);
         self.txn_state = TxnState::Committed;
         // Await the notifier.
-        let notifier = self.write_txn_control_msg(TxnMsg::End(self.txn_id))?;
+        let notifier = self.write_txn_control_msg(TxnMsg::End(self.txn_id, None))?;
         notifier.await.map_err(|_| DmlError::ReaderClosed)?;
         Ok(())
+    }
+
+    pub async fn end_returning_epoch(mut self) -> Result<Epoch> {
+        assert_eq!(self.txn_state, TxnState::Begin);
+        self.txn_state = TxnState::Committed;
+        // Await the notifier.
+        let (epoch_notifier_tx, epoch_notifier_rx) = oneshot::channel();
+        let notifier = self.write_txn_control_msg_returning_epoch(TxnMsg::End(
+            self.txn_id,
+            Some(epoch_notifier_tx),
+        ))?;
+        notifier.await.map_err(|_| DmlError::ReaderClosed)?;
+        let epoch = epoch_notifier_rx
+            .await
+            .map_err(|_| DmlError::ReaderClosed)?;
+        Ok(epoch)
     }
 
     pub fn rollback(mut self) -> Result<oneshot::Receiver<usize>> {
@@ -234,6 +251,21 @@ impl WriteHandle {
             Err(_) => Err(DmlError::ReaderClosed),
         }
     }
+
+    fn write_txn_control_msg_returning_epoch(
+        &self,
+        txn_msg: TxnMsg,
+    ) -> Result<oneshot::Receiver<usize>> {
+        assert_eq!(self.txn_id, txn_msg.txn_id());
+        let (notifier_tx, notifier_rx) = oneshot::channel();
+        match self.tx.send_immediate(txn_msg, notifier_tx) {
+            Ok(_) => Ok(notifier_rx),
+
+            // It's possible that the source executor is scaled in or migrated, so the channel
+            // is closed. To guarantee the transactional atomicity, bail out.
+            Err(_) => Err(DmlError::ReaderClosed),
+        }
+    }
 }
 
 /// [`TableStreamReader`] reads changes from a certain table continuously.
@@ -252,7 +284,7 @@ impl TableStreamReader {
         while let Some((txn_msg, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
             match txn_msg {
-                TxnMsg::Begin(_) | TxnMsg::End(_) | TxnMsg::Rollback(_) => {
+                TxnMsg::Begin(_) | TxnMsg::End(..) | TxnMsg::Rollback(_) => {
                     _ = notifier.send(0);
                 }
                 TxnMsg::Data(_, chunk) => {
@@ -268,7 +300,7 @@ impl TableStreamReader {
         while let Some((txn_msg, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
             match &txn_msg {
-                TxnMsg::Begin(_) | TxnMsg::End(_) | TxnMsg::Rollback(_) => {
+                TxnMsg::Begin(_) | TxnMsg::End(..) | TxnMsg::Rollback(_) => {
                     _ = notifier.send(0);
                     yield txn_msg;
                 }
@@ -343,7 +375,7 @@ mod tests {
             write_handle.end().await.unwrap();
         });
 
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(..));
 
         Ok(())
     }

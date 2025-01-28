@@ -13,16 +13,18 @@
 // limitations under the License.
 
 use enum_as_inner::EnumAsInner;
+use tokio::sync::oneshot;
 
 use crate::array::StreamChunk;
 use crate::transaction::transaction_id::TxnId;
 use crate::transaction::transaction_message::TxnMsg::{Begin, Data, End, Rollback};
+use crate::util::epoch::Epoch;
 
 #[derive(Debug, EnumAsInner)]
 pub enum TxnMsg {
     Begin(TxnId),
     Data(TxnId, StreamChunk),
-    End(TxnId),
+    End(TxnId, Option<oneshot::Sender<Epoch>>),
     Rollback(TxnId),
 }
 
@@ -31,14 +33,14 @@ impl TxnMsg {
         match self {
             Begin(txn_id) => *txn_id,
             Data(txn_id, _) => *txn_id,
-            End(txn_id) => *txn_id,
+            End(txn_id, _) => *txn_id,
             Rollback(txn_id) => *txn_id,
         }
     }
 
     pub fn as_stream_chunk(&self) -> Option<&StreamChunk> {
         match self {
-            Begin(_) | End(_) | Rollback(_) => None,
+            Begin(_) | End(..) | Rollback(_) => None,
             Data(_, chunk) => Some(chunk),
         }
     }

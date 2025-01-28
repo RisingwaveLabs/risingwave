@@ -874,4 +874,5 @@ impl fmt::Display for ReferentialAction {
 pub struct WebhookSourceInfo {
     pub secret_ref: SecretRefValue,
     pub signature_expr: Expr,
+    pub wait_for_persistence: bool,
 }

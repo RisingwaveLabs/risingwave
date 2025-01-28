@@ -32,6 +32,8 @@ mod snapshot;
 pub use snapshot::*;
 mod local;
 pub use local::*;
+mod fast_insert;
+pub use fast_insert::*;
 
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 

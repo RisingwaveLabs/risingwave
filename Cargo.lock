@@ -10327,6 +10327,7 @@ name = "risingwave_batch"
 version = "2.3.0-alpha"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-recursion",
  "async-trait",
  "either",

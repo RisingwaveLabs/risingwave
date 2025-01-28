@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod fast_insert;
 mod managed;
 pub mod test_utils;
 
@@ -20,6 +21,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use async_recursion::async_recursion;
+pub use fast_insert::*;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 pub use managed::*;

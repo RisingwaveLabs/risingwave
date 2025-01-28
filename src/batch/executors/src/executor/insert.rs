@@ -387,7 +387,7 @@ mod tests {
             assert_eq!(*chunk.columns()[2], array);
         });
 
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(..));
         let epoch = u64::MAX;
         let full_range = (Bound::Unbounded, Bound::Unbounded);
         let store_content = store

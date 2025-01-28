@@ -40,6 +40,8 @@ use crate::{impl_parse_to, parser_v2};
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const WEBHOOK_CONNECTOR: &str = "webhook";
 
+const WEBHOOK_WAIT_FOR_PERSISTENCE: &str = "webhook.wait_for_persistence";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
     TokenizerError(String),
@@ -2603,6 +2605,12 @@ impl Parser<'_> {
                 parser_err!("VALIDATE is only supported for tables created with webhook source");
             }
 
+            let wait_for_persistence = with_options
+                .iter()
+                .find(|&opt| opt.name.real_value() == WEBHOOK_WAIT_FOR_PERSISTENCE)
+                .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
+                .unwrap_or(true);
+
             self.expect_keyword(Keyword::SECRET)?;
             let secret_ref = self.parse_secret_ref()?;
             if secret_ref.ref_as == SecretRefAsType::File {
@@ -2615,6 +2623,7 @@ impl Parser<'_> {
             Some(WebhookSourceInfo {
                 secret_ref,
                 signature_expr,
+                wait_for_persistence,
             })
         } else {
             None

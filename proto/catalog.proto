@@ -100,6 +100,8 @@ message StreamSourceInfo {
 message WebhookSourceInfo {
   secret.SecretRef secret_ref = 1;
   expr.ExprNode signature_expr = 2;
+  // Return until the data is persisted in the storage layer or not. Default is true.
+  bool wait_for_persistence = 3;
 }
 
 message Source {

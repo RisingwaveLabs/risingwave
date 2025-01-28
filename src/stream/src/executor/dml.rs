@@ -130,6 +130,8 @@ impl DmlExecutor {
             stream.pause_stream();
         }
 
+        let mut epoch = barrier.get_curr_epoch();
+
         yield Message::Barrier(barrier);
 
         // Active transactions: txn_id -> TxnBuffer with transaction chunks.
@@ -150,6 +152,7 @@ impl DmlExecutor {
                 Either::Left(msg) => {
                     // Stream messages.
                     if let Message::Barrier(barrier) = &msg {
+                        epoch = barrier.get_curr_epoch();
                         // We should handle barrier messages here to pause or resume the data from
                         // DML.
                         if let Some(mutation) = barrier.mutation.as_deref() {
@@ -205,7 +208,10 @@ impl DmlExecutor {
                                     panic!("Transaction id collision txn_id = {}.", txn_id)
                                 });
                         }
-                        TxnMsg::End(txn_id) => {
+                        TxnMsg::End(txn_id, epoch_notifier) => {
+                            if let Some(sender) = epoch_notifier {
+                                let _ = sender.send(epoch);
+                            }
                             let mut txn_buffer = active_txn_map.remove(&txn_id)
                                 .unwrap_or_else(|| panic!("Receive an unexpected transaction end message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id));
 
@@ -312,13 +318,12 @@ async fn apply_dml_rate_limit(
 ) {
     #[for_await]
     for txn_msg in stream {
-        let txn_msg = txn_msg?;
-        match txn_msg {
+        match txn_msg? {
             TxnMsg::Begin(txn_id) => {
                 yield TxnMsg::Begin(txn_id);
             }
-            TxnMsg::End(txn_id) => {
-                yield TxnMsg::End(txn_id);
+            TxnMsg::End(txn_id, epoch_notifier) => {
+                yield TxnMsg::End(txn_id, epoch_notifier);
             }
             TxnMsg::Rollback(txn_id) => {
                 yield TxnMsg::Rollback(txn_id);
@@ -330,7 +335,6 @@ async fn apply_dml_rate_limit(
                     yield TxnMsg::Data(txn_id, chunk);
                     continue;
                 }
-
                 let rate_limit = loop {
                     match rate_limiter.rate_limit() {
                         RateLimit::Pause => rate_limiter.wait(0).await,

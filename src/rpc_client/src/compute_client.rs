@@ -40,8 +40,8 @@ use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
     permits, CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest,
-    GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
-    TaskInfoResponse,
+    FastInsertRequest, FastInsertResponse, GetDataRequest, GetDataResponse, GetStreamRequest,
+    GetStreamResponse, PbPermits, TaskInfoResponse,
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -205,6 +205,16 @@ impl ComputeClient {
             .task_client
             .to_owned()
             .cancel_task(req)
+            .await
+            .map_err(RpcError::from_compute_status)?
+            .into_inner())
+    }
+
+    pub async fn fast_insert(&self, req: FastInsertRequest) -> Result<FastInsertResponse> {
+        Ok(self
+            .task_client
+            .to_owned()
+            .fast_insert(req)
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner())
