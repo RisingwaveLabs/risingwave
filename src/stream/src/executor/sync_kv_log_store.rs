@@ -295,7 +295,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                 ).await?;
                                 Ok(None)
                             }
-                            // TODO(kwannoel): This should be written to the logstore,
+                            // FIXME(kwannoel): This should be written to the logstore,
                             // it will not bypass like barrier.
                             Message::Watermark(_watermark) => Ok(None),
                         }
