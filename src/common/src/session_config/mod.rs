@@ -337,6 +337,24 @@ pub struct SessionConfig {
     // a.k.a. vnode count
     #[parameter(default = VirtualNode::COUNT_FOR_COMPAT, check_hook = check_streaming_max_parallelism)]
     streaming_max_parallelism: usize,
+
+    /// Used to provide the connection information for the iceberg engine.
+    /// Format: iceberg_engine_connection = schema_name.connection_name.
+    #[parameter(default = "", check_hook = check_iceberg_engine_connection)]
+    iceberg_engine_connection: String,
+}
+
+fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {
+    if val.is_empty() {
+        return Ok(());
+    }
+
+    let parts: Vec<&str> = val.split('.').collect();
+    if parts.len() != 2 {
+        return Err("Invalid iceberg engine connection format, Should be set to this format: schema_name.connection_name.".to_owned());
+    }
+
+    Ok(())
 }
 
 fn check_timezone(val: &str) -> Result<(), String> {

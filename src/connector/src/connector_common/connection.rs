@@ -210,7 +210,7 @@ impl Connection for IcebergConnection {
             }
         };
 
-        // test storage
+        // Test warehouse
         if let Some((scheme, bucket, root)) = info {
             match scheme.as_str() {
                 "s3" | "s3a" => {
@@ -246,7 +246,13 @@ impl Connection for IcebergConnection {
             }
         }
 
-        // test catalog
+        // If there is no catalog type, we won't test the catalog.
+        // The iceberg connection could be used to provide warehouse information only.
+        if self.catalog_type.is_none() {
+            return Ok(());
+        }
+
+        // Test catalog
         let iceberg_common = IcebergCommon {
             catalog_type: self.catalog_type.clone(),
             region: self.region.clone(),

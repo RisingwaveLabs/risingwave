@@ -113,3 +113,46 @@ select count(_row_id) from t_without_pk;
 
 statement ok
 DROP TABLE t_without_pk
+
+# test iceberg connection in iceberg engine
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+statement ok
+create table t1(i int) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t1 values(1);
+
+statement ok
+FLUSH;
+
+query ?
+select * from t1;
+----
+1
+
+statement ok
+DROP TABLE t1;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;

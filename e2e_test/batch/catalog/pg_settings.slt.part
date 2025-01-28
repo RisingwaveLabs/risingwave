@@ -39,6 +39,7 @@ user enable_two_phase_agg
 user extra_float_digits
 user force_split_distinct_agg
 user force_two_phase_agg
+user iceberg_engine_connection
 user idle_in_transaction_session_timeout
 user implicit_flush
 user intervalstyle
