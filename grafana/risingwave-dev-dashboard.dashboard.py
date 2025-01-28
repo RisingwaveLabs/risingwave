@@ -927,6 +927,16 @@ def section_streaming(outer_panels):
                         )
                     ],
                 ),
+                panels.timeseries_count(
+                    "Source Reader Retry Count",
+                    "The number of times the source reader has retried to connect to the source. Basically the same as `Source Upstream Status` but from Compute Node.",
+                    [
+                        panels.target(
+                            f"sum({metric('source_init_stream_reader_retry_count')}) by (source_name)",
+                            "source_name={{source_name}}",
+                        )
+                    ],
+                ),
                 panels.timeseries_ops(
                     "Source Split Change Events frequency(events/s)",
                     "Source Split Change Events frequency by source_id and actor_id",

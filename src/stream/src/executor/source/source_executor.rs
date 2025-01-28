@@ -543,14 +543,20 @@ impl<S: StateStore> SourceExecutor<S> {
             let source_reader = source_desc.source.clone();
             let (column_ids, source_ctx) = self.prepare_source_stream_build(&source_desc);
             let source_ctx = Arc::new(source_ctx);
+            let source_ctx_clone = source_ctx.clone();
             let mut build_source_stream_fut = Box::pin(async move {
                 let backoff = get_infinite_backoff_strategy();
                 tokio_retry::Retry::spawn(backoff, || async {
+                    let source_ctx_inner = source_ctx_clone.clone();
+                    source_ctx_inner.metrics.init_stream_reader_retry_count.with_guarded_label_values(&[
+                        &source_ctx_inner.actor_id.to_string(),
+                        &source_ctx_inner.source_name,
+                    ]).inc();
                     match source_reader
                         .build_stream(
                             recover_state.clone(),
                             column_ids.clone(),
-                            source_ctx.clone(),
+                            source_ctx_inner,
                             false,  // not need to seek to latest since source state is initialized
                         )
                         .await {
@@ -619,7 +625,15 @@ impl<S: StateStore> SourceExecutor<S> {
                         );
                     }
                 } else {
-                    assert!(reader_and_splits.is_some());
+                    debug_assert!(reader_and_splits.is_some());
+                    source_ctx
+                        .metrics
+                        .init_stream_reader_retry_count
+                        .with_guarded_label_values(&[
+                            &source_ctx.actor_id.to_string(),
+                            &source_ctx.source_name,
+                        ])
+                        .reset();
                     tracing::info!("source stream created successfully");
                     break;
                 }

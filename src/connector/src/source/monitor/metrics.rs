@@ -60,6 +60,7 @@ impl Default for EnumeratorMetrics {
 #[derive(Debug, Clone)]
 pub struct SourceMetrics {
     pub partition_input_count: LabelGuardedIntCounterVec<5>,
+    pub init_stream_reader_retry_count: LabelGuardedIntCounterVec<2>,
 
     // **Note**: for normal messages, the metric is the message's payload size.
     // For messages from load generator, the metric is the size of stream chunk.
@@ -86,6 +87,13 @@ impl SourceMetrics {
                 "source_name",
                 "fragment_id"
             ],
+            registry
+        )
+        .unwrap();
+        let init_stream_reader_retry_count = register_guarded_int_counter_vec_with_registry!(
+            "source_init_stream_reader_retry_count",
+            "Total number of retries to initialize stream reader",
+            &["actor_id", "source_name",],
             registry
         )
         .unwrap();
@@ -121,6 +129,7 @@ impl SourceMetrics {
         let rdkafka_native_metric = Arc::new(RdKafkaStats::new(registry.clone()));
         SourceMetrics {
             partition_input_count,
+            init_stream_reader_retry_count,
             partition_input_bytes,
             latest_message_id,
             rdkafka_native_metric,
