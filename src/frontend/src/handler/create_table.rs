@@ -1448,6 +1448,9 @@ pub async fn create_iceberg_engine_table(
     constraints: Vec<TableConstraint>,
     table_name: ObjectName,
 ) -> Result<()> {
+    risingwave_common::license::Feature::IcebergEngine
+        .check_available()
+        .map_err(|e| anyhow::anyhow!(e))?;
     // 1. fetch iceberg engine options from the meta node.
     // 2. create a hummock table
     // 3. create an iceberg sink
