@@ -198,7 +198,7 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
             ($join_type:ident) => {
-                Ok(HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
+                HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
                     self.ctx,
                     self.info,
                     self.source_l,
@@ -219,10 +219,10 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                     self.chunk_size,
                     self.high_join_amplification_threshold,
                 )
-                .boxed())
+                .boxed()
             };
         }
-        match self.join_type_proto {
+        let executor = match self.join_type_proto {
             JoinTypeProto::AsofInner
             | JoinTypeProto::AsofLeftOuter
             | JoinTypeProto::Unspecified => unreachable!(),
@@ -234,7 +234,8 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
             JoinTypeProto::LeftAnti => build!(LeftAnti),
             JoinTypeProto::RightSemi => build!(RightSemi),
             JoinTypeProto::RightAnti => build!(RightAnti),
-        }
+        };
+        Ok(executor)
     }
 
     fn data_types(&self) -> &[DataType] {
