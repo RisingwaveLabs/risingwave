@@ -332,6 +332,15 @@ impl Binder {
                     .context("mysql_query error")?
                     .into());
             }
+            // `internal_backfill_progress` table function
+            if func_name.eq("internal_backfill_progress") {
+                reject_syntax!(
+                    arg_list.variadic,
+                    "`VARIADIC` is not allowed in table function call"
+                );
+                self.ensure_table_function_allowed()?;
+                return Ok(TableFunction::new_internal_backfill_progress().into());
+            }
             // UDTF
             if let Some(ref udf) = udf
                 && udf.kind.is_table()
