@@ -339,7 +339,7 @@ impl LogStoreBufferSender {
             {
                 if *flushed {
                     // Since we iterate from new data to old data, when we meet a flushed data, the
-                    // rest should all be flushed.
+                    // rest should have been flushed.
                     break;
                 }
                 flush_fn(chunk, *epoch, *start_seq_id, *end_seq_id)?;

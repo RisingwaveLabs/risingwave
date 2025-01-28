@@ -12005,6 +12005,7 @@ dependencies = [
  "tokio-retry",
  "tokio-stream 0.1.15",
  "tracing",
+ "tracing-subscriber",
  "tracing-test",
  "url",
  "workspace-hack",

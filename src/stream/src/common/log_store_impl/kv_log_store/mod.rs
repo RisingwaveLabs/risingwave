@@ -32,11 +32,11 @@ use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::writer::KvLogStoreWriter;
 use crate::executor::monitor::StreamingMetrics;
 
-mod buffer;
-mod reader;
+pub(crate) mod buffer;
+pub mod reader;
 pub(crate) mod serde;
 #[cfg(test)]
-mod test_utils;
+pub mod test_utils;
 mod writer;
 
 pub(crate) use reader::{REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY};
@@ -55,7 +55,7 @@ pub(crate) const FIRST_SEQ_ID: SeqIdType = 0;
 pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 #[derive(Clone)]
-pub(crate) struct KvLogStoreReadMetrics {
+pub struct KvLogStoreReadMetrics {
     pub storage_read_count: LabelGuardedIntCounter<5>,
     pub storage_read_size: LabelGuardedIntCounter<5>,
 }
@@ -190,7 +190,7 @@ impl KvLogStoreMetrics {
     }
 
     #[cfg(test)]
-    fn for_test() -> Self {
+    pub(crate) fn for_test() -> Self {
         KvLogStoreMetrics {
             storage_write_count: LabelGuardedIntCounter::test_int_counter(),
             storage_write_size: LabelGuardedIntCounter::test_int_counter(),

@@ -385,6 +385,7 @@ fn deserialize_list(item_type: &DataType, data: &mut impl Buf) -> Result<ScalarI
 
 fn deserialize_str(data: &mut impl Buf) -> Result<Box<str>> {
     let len = data.get_u32_le();
+    tracing::trace!("len: {len}");
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
     String::from_utf8(bytes)

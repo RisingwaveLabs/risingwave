@@ -88,6 +88,7 @@ risingwave_hummock_test = { path = "../storage/hummock_test", features = [
   "test",
 ] }
 serde_yaml = "0.9"
+tracing-subscriber = "0.3.17"
 tracing-test = "0.2"
 
 [features]
