@@ -267,51 +267,53 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone(), 0);
+            let trivial_move_picker = TrivialMovePicker::new(
+                0,
+                0,
+                overlap_strategy.clone(),
+                0,
+                self.config
+                    .sst_allowed_trivial_move_max_count
+                    .unwrap_or(compaction_config::sst_allowed_trivial_move_max_count())
+                    as usize,
+            );
 
-            let select_sst = trivial_move_picker.pick_trivial_move_sst(
+            if let Some(select_ssts) = trivial_move_picker.pick_multi_trivial_move_ssts(
                 &l0.sub_levels[idx + 1].table_infos,
                 &level.table_infos,
                 level_handlers,
                 stats,
-            );
+            ) {
+                let mut overlap = overlap_strategy.create_overlap_info();
+                select_ssts.iter().for_each(|ssts| overlap.update(ssts));
 
-            // only pick tables for trivial move
-            if select_sst.is_none() {
-                continue;
+                assert!(overlap
+                    .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
+                    .is_empty());
+
+                let select_input_size = select_ssts.iter().map(|sst| sst.sst_size).sum();
+                let total_file_count = select_ssts.len() as u64;
+                let input_levels = vec![
+                    InputLevel {
+                        level_idx: 0,
+                        level_type: LevelType::Nonoverlapping,
+                        table_infos: select_ssts,
+                    },
+                    InputLevel {
+                        level_idx: 0,
+                        level_type: LevelType::Nonoverlapping,
+                        table_infos: vec![],
+                    },
+                ];
+                return Some(CompactionInput {
+                    input_levels,
+                    target_level: 0,
+                    target_sub_level_id: level.sub_level_id,
+                    select_input_size,
+                    total_file_count,
+                    ..Default::default()
+                });
             }
-
-            let select_sst = select_sst.unwrap();
-
-            // support trivial move cross multi sub_levels
-            let mut overlap = overlap_strategy.create_overlap_info();
-            overlap.update(&select_sst);
-
-            assert!(overlap
-                .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
-                .is_empty());
-
-            let select_input_size = select_sst.sst_size;
-            let input_levels = vec![
-                InputLevel {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping,
-                    table_infos: vec![select_sst],
-                },
-                InputLevel {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping,
-                    table_infos: vec![],
-                },
-            ];
-            return Some(CompactionInput {
-                input_levels,
-                target_level: 0,
-                target_sub_level_id: level.sub_level_id,
-                select_input_size,
-                total_file_count: 1,
-                ..Default::default()
-            });
         }
         None
     }

@@ -72,6 +72,9 @@ impl CompactionConfigBuilder {
                     compaction_config::disable_auto_group_scheduling(),
                 ),
                 max_overlapping_level_size: Some(compaction_config::max_overlapping_level_size()),
+                sst_allowed_trivial_move_max_count: Some(
+                    compaction_config::sst_allowed_trivial_move_max_count(),
+                ),
             },
         }
     }
@@ -101,6 +104,8 @@ impl CompactionConfigBuilder {
             .level0_max_compact_file_number(opt.level0_max_compact_file_number)
             .tombstone_reclaim_ratio(opt.tombstone_reclaim_ratio)
             .max_level(opt.max_level as u64)
+            .sst_allowed_trivial_move_min_size(Some(opt.sst_allowed_trivial_move_min_size))
+            .sst_allowed_trivial_move_max_count(Some(opt.sst_allowed_trivial_move_max_count))
     }
 
     pub fn build(self) -> CompactionConfig {
@@ -162,4 +167,5 @@ builder_field! {
     level0_overlapping_sub_level_compact_level_count: u32,
     tombstone_reclaim_ratio: u32,
     sst_allowed_trivial_move_min_size: Option<u64>,
+    sst_allowed_trivial_move_max_count: Option<u32>,
 }

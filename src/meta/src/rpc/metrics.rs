@@ -169,6 +169,7 @@ pub struct MetaMetrics {
     pub split_compaction_group_count: IntCounterVec,
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
+    pub compact_task_trivial_move_sst_count: HistogramVec,
 
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
@@ -772,6 +773,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "storage_compact_task_trivial_move_sst_count",
+            "sst count of compact trivial-move task",
+            exponential_buckets(1.0, 2.0, 8).unwrap()
+        );
+        let compact_task_trivial_move_sst_count =
+            register_histogram_vec_with_registry!(opts, &["group"], registry).unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -834,6 +843,7 @@ impl MetaMetrics {
             compact_task_size,
             compact_task_file_count,
             compact_task_batch_count,
+            compact_task_trivial_move_sst_count,
             table_write_throughput,
             split_compaction_group_count,
             state_table_count,
