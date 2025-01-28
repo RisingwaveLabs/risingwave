@@ -193,6 +193,16 @@ impl QueryRewriter<'_> {
                         });
                     }
                     name.0[idx] = Ident::new_unchecked(self.to);
+
+                    // Strip out `a AS a` possibly from a previous rename
+                    if name.0.len() == 1
+                        && Some(TableAlias {
+                            name: name.0[0].clone(),
+                            columns: vec![],
+                        }) == *alias
+                    {
+                        *alias = None;
+                    }
                 }
             }
             TableFactor::Derived { subquery, .. } => self.visit_query(subquery),
