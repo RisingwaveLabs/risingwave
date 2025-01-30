@@ -372,7 +372,7 @@ impl SourceManagerCore {
                     };
                     let actors = match self
                         .metadata_manager
-                        .get_running_actors_for_source_backfill(*fragment_id)
+                        .get_running_actors_for_source_backfill(*fragment_id, *upstream_fragment_id)
                         .await
                     {
                         Ok(actors) => {

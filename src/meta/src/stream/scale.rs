@@ -38,7 +38,6 @@ use risingwave_pb::meta::table_fragments::fragment::{
 };
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State};
 use risingwave_pb::meta::FragmentWorkerSlotMappings;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, PbDispatcher, PbStreamActor, StreamActor,
     StreamNode,
@@ -52,7 +51,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 use crate::barrier::{Command, Reschedule};
 use crate::controller::scale::RescheduleWorkingSet;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
-use crate::model::{ActorId, ActorUpstreams, DispatcherId, FragmentId, TableParallelism};
+use crate::model::{ActorId, DispatcherId, FragmentId, TableParallelism};
 use crate::serving::{
     to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping, ServingVnodeMapping,
 };
@@ -138,8 +137,8 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
-use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_cont};
-
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use super::SourceChange;
 use crate::controller::id::IdCategory;
 use crate::controller::utils::filter_workers_by_resource_group;
@@ -1212,7 +1211,6 @@ impl ScaleController {
             for actor_to_create in &actors_to_create {
                 let new_actor_id = actor_to_create.0;
                 let mut new_actor = fragment.actor_template.clone();
-                let mut new_actor_upstream = ActorUpstreams::new();
 
                 // This should be assigned before the `modify_actor_upstream_and_downstream` call,
                 // because we need to use the new actor id to find the upstream and
@@ -1224,10 +1222,8 @@ impl ScaleController {
                     &fragment_actors_to_remove,
                     &fragment_actors_to_create,
                     &fragment_actor_bitmap,
-                    &no_shuffle_upstream_actor_map,
                     &no_shuffle_downstream_actors_map,
-                    (&mut new_actor, &mut new_actor_upstream),
-                    &fragment.node,
+                    &mut new_actor,
                 )?;
 
                 if let Some(bitmap) = fragment_actor_bitmap
@@ -1237,7 +1233,7 @@ impl ScaleController {
                     new_actor.vnode_bitmap = Some(bitmap.to_protobuf());
                 }
 
-                new_created_actors.insert(*new_actor_id, (new_actor, new_actor_upstream));
+                new_created_actors.insert(*new_actor_id, new_actor);
             }
         }
 
@@ -1450,11 +1446,11 @@ impl ScaleController {
         for (fragment_id, actors_to_create) in &fragment_actors_to_create {
             let mut created_actors = HashMap::new();
             for (actor_id, worker_id) in actors_to_create {
-                let (actor, actor_upstreams) = new_created_actors.get(actor_id).cloned().unwrap();
+                let actor = new_created_actors.get(actor_id).cloned().unwrap();
                 created_actors.insert(
                     *actor_id,
                     (
-                        (actor, actor_upstreams),
+                        actor,
                         ActorStatus {
                             location: PbActorLocation::from_worker(*worker_id as _),
                             state: ActorState::Inactive as i32,
@@ -1580,75 +1576,9 @@ impl ScaleController {
         fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, WorkerId>>,
         fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, WorkerId>>,
         fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
-        no_shuffle_upstream_actor_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         no_shuffle_downstream_actors_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
-        (new_actor, actor_upstreams): (&mut StreamActor, &mut ActorUpstreams),
-        stream_node: &StreamNode,
+        new_actor: &mut StreamActor,
     ) -> MetaResult<()> {
-        let fragment = &ctx.fragment_map[&new_actor.fragment_id];
-        let mut applied_upstream_fragment_actor_ids = HashMap::new();
-
-        for upstream_fragment_id in &fragment.upstream_fragment_ids {
-            let upstream_dispatch_type = &ctx
-                .fragment_dispatcher_map
-                .get(upstream_fragment_id)
-                .and_then(|map| map.get(&fragment.fragment_id))
-                .unwrap();
-
-            match upstream_dispatch_type {
-                DispatcherType::Unspecified => unreachable!(),
-                DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
-                    let upstream_fragment = &ctx.fragment_map[upstream_fragment_id];
-                    let mut upstream_actor_ids: HashSet<_> = upstream_fragment
-                        .actors
-                        .iter()
-                        .map(|actor| actor.actor_id as ActorId)
-                        .collect();
-
-                    if let Some(upstream_actors_to_remove) =
-                        fragment_actors_to_remove.get(upstream_fragment_id)
-                    {
-                        upstream_actor_ids
-                            .retain(|actor_id| !upstream_actors_to_remove.contains_key(actor_id));
-                    }
-
-                    if let Some(upstream_actors_to_create) =
-                        fragment_actors_to_create.get(upstream_fragment_id)
-                    {
-                        upstream_actor_ids.extend(upstream_actors_to_create.keys().cloned());
-                    }
-
-                    applied_upstream_fragment_actor_ids
-                        .insert(*upstream_fragment_id as FragmentId, upstream_actor_ids);
-                }
-                DispatcherType::NoShuffle => {
-                    let no_shuffle_upstream_actor_id = *no_shuffle_upstream_actor_map
-                        .get(&new_actor.actor_id)
-                        .and_then(|map| map.get(upstream_fragment_id))
-                        .unwrap();
-
-                    applied_upstream_fragment_actor_ids.insert(
-                        *upstream_fragment_id as FragmentId,
-                        HashSet::from_iter([no_shuffle_upstream_actor_id as ActorId]),
-                    );
-                }
-            }
-        }
-
-        {
-            visit_stream_node(stream_node, |node_body| {
-                if let NodeBody::Merge(s) = node_body {
-                    let upstream_actor_ids = applied_upstream_fragment_actor_ids
-                        .get(&s.upstream_fragment_id)
-                        .cloned()
-                        .unwrap();
-                    actor_upstreams
-                        .try_insert(s.upstream_fragment_id, upstream_actor_ids)
-                        .expect("non-duplicate");
-                }
-            });
-        }
-
         // Update downstream actor ids
         for dispatcher in &mut new_actor.dispatcher {
             let downstream_fragment_id = dispatcher

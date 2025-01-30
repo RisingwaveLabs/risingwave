@@ -20,12 +20,13 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbRecoveryStatus;
+use risingwave_pb::stream_plan::StreamActor;
 use tokio::sync::oneshot::Sender;
 
 use self::notifier::Notifier;
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, StreamActorWithUpstreams, StreamJobFragments};
+use crate::model::{ActorId, StreamJobFragments};
 use crate::{MetaError, MetaResult};
 
 mod checkpoint;
@@ -103,7 +104,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     database_fragment_infos: HashMap<DatabaseId, InflightDatabaseInfo>,
     state_table_committed_epochs: HashMap<TableId, u64>,
     subscription_infos: HashMap<DatabaseId, InflightSubscriptionInfo>,
-    stream_actors: HashMap<ActorId, StreamActorWithUpstreams>,
+    stream_actors: HashMap<ActorId, StreamActor>,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
     hummock_version_stats: HummockVersionStats,
@@ -114,7 +115,7 @@ impl BarrierWorkerRuntimeInfoSnapshot {
         database_id: DatabaseId,
         database_info: &InflightDatabaseInfo,
         active_streaming_nodes: &ActiveStreamingWorkerNodes,
-        stream_actors: &HashMap<ActorId, StreamActorWithUpstreams>,
+        stream_actors: &HashMap<ActorId, StreamActor>,
         state_table_committed_epochs: &HashMap<TableId, u64>,
     ) -> MetaResult<()> {
         {
@@ -189,7 +190,7 @@ struct DatabaseRuntimeInfoSnapshot {
     database_fragment_info: InflightDatabaseInfo,
     state_table_committed_epochs: HashMap<TableId, u64>,
     subscription_info: InflightSubscriptionInfo,
-    stream_actors: HashMap<ActorId, StreamActorWithUpstreams>,
+    stream_actors: HashMap<ActorId, StreamActor>,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
 }
