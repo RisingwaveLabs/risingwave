@@ -1188,6 +1188,9 @@ pub(super) async fn handle_create_table_plan(
                         .collect();
 
                     for col in &mut columns {
+                        if col.is_generated() {
+                            continue;
+                        }
                         let external_column_desc =
                             *external_columns.get(col.name()).ok_or_else(|| {
                                 ErrorCode::ConnectorError(

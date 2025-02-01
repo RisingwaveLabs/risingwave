@@ -668,12 +668,29 @@ impl DdlController {
                 );
                 let mut props = ConnectorProperties::extract(options_with_secret, true)?;
                 props.init_from_pb_cdc_table_desc(cdc_table_desc);
-
                 // try creating a split enumerator to validate
                 let _enumerator = props
                     .create_split_enumerator(SourceEnumeratorContext::dummy().into())
                     .await?;
                 tracing::debug!(?table.id, "validate cdc table success");
+            } else {
+                for input in &actor.nodes.as_ref().unwrap().input {
+                    if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) = input.node_body
+                        && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
+                    {
+                        let options_with_secret = WithOptionsSecResolved::new(
+                            cdc_table_desc.connect_properties.clone(),
+                            cdc_table_desc.secret_refs.clone(),
+                        );
+                        let mut props = ConnectorProperties::extract(options_with_secret, true)?;
+                        props.init_from_pb_cdc_table_desc(cdc_table_desc);
+                        // try creating a split enumerator to validate
+                        let _enumerator = props
+                            .create_split_enumerator(SourceEnumeratorContext::dummy().into())
+                            .await?;
+                        tracing::debug!(?table.id, "validate cdc table success");
+                    }
+                }
             }
         }
         Ok(())

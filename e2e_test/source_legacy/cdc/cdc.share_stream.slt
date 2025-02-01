@@ -161,7 +161,7 @@ create table non_exist ( id INT,
  PRIMARY KEY (id)
 ) from mysql_mytest table 'mytest.non_exist';
 
-
+# FIXME(kexiang): Currently, the generated rows (next_order_id in this case) must be at the end of schema, otherwise the frontend panics.
 statement ok
 create table orders_test (
    order_id int,
@@ -170,6 +170,7 @@ create table orders_test (
    price decimal,
    product_id int,
    order_status smallint,
+   next_order_id int as order_id + 1,
    PRIMARY KEY (order_id)
 ) from mysql_mytest table 'mytest.orders';
 
@@ -305,11 +306,11 @@ Milk Milk is a white liquid food
 Juice 100ml Juice
 
 query ITTT
-SELECT order_id,order_date,customer_name,product_id FROM orders_test order by order_id limit 3
+SELECT order_id,order_date,customer_name,product_id,next_order_id FROM orders_test order by order_id limit 3
 ----
-10001 2020-07-30 10:08:22 Jark 102
-10002 2020-07-30 10:11:09 Sally 105
-10003 2020-07-30 12:00:30 Edward 106
+10001 2020-07-30 10:08:22 Jark 102 10002
+10002 2020-07-30 10:11:09 Sally 105 10003
+10003 2020-07-30 12:00:30 Edward 106 10004
 
 query IIIIITTTTTTTTT
 SELECT c_boolean, c_bit, c_tinyint, c_smallint, c_mediumint, c_integer, c_bigint, c_decimal, c_float, c_double, c_char_255, c_varchar_10000, c_date, c_time, c_datetime, c_timestamp FROM mysql_all_types order by c_bigint;
@@ -393,6 +394,7 @@ CREATE TABLE upper_orders_shared (
     name varchar
 ) FROM pg_source TABLE 'public.Orders';
 
+# FIXME(kexiang): Currently, the generated rows (next_id in this case) must be at the end of schema, otherwise the frontend panics.
 statement ok
 CREATE TABLE person_new (
     id int,
@@ -400,6 +402,7 @@ CREATE TABLE person_new (
     email_address varchar,
     credit_card varchar,
     city varchar,
+    next_id int as id + 1,
     PRIMARY KEY (id)
 ) INCLUDE TIMESTAMP AS commit_ts
 INCLUDE DATABASE_NAME as database_name
@@ -459,22 +462,22 @@ cdc_test public person
 
 
 query ITTTT
-SELECT id,name,email_address,credit_card,city from person_new order by id;
+SELECT id,name,email_address,credit_card,city,next_id from person_new order by id;
 ----
-1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne
-1001 peter white myckhsp@xpmpe.com 1781 2313 8157 6974 boise
-1002 sarah spencer wipvdbm@dkaap.com 3453 4987 9481 6270 los angeles
-1100 noris ypl@qbxfg.com 1864 2539 enne
-1101 white myc@xpmpe.com 8157 6974 se
-1102 spencer wip@dkaap.com 9481 6270 angeles
+1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne 1001
+1001 peter white myckhsp@xpmpe.com 1781 2313 8157 6974 boise 1002
+1002 sarah spencer wipvdbm@dkaap.com 3453 4987 9481 6270 los angeles 1003
+1100 noris ypl@qbxfg.com 1864 2539 enne 1101
+1101 white myc@xpmpe.com 8157 6974 se 1102
+1102 spencer wip@dkaap.com 9481 6270 angeles 1103
 
 # historical data
 query ITTTT
-SELECT id,name,email_address,credit_card,city from person_new where commit_ts = '1970-01-01 00:00:00+00:00' order by id;
+SELECT id,name,email_address,credit_card,city,next_id from person_new where commit_ts = '1970-01-01 00:00:00+00:00' order by id;
 ----
-1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne
-1001 peter white myckhsp@xpmpe.com 1781 2313 8157 6974 boise
-1002 sarah spencer wipvdbm@dkaap.com 3453 4987 9481 6270 los angeles
+1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne 1001
+1001 peter white myckhsp@xpmpe.com 1781 2313 8157 6974 boise 1002
+1002 sarah spencer wipvdbm@dkaap.com 3453 4987 9481 6270 los angeles 1003
 
 # incremental data
 query ITTTT
