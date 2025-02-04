@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::optimizer::plan_node::StreamSyncLogStore;
 use crate::optimizer::rule::Rule;
 use crate::PlanRef;
 
@@ -19,7 +20,8 @@ pub struct AddLogstoreRule {}
 
 impl Rule for AddLogstoreRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let stream_hash_join = plan.as_stream_hash_join()?;
-        None
+        plan.as_stream_hash_join()?;
+        let log_store_plan = StreamSyncLogStore::new(plan);
+        Some(log_store_plan.into())
     }
 }
