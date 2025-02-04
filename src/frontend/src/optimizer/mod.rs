@@ -514,6 +514,16 @@ impl PlanRoot {
             ))?;
         }
 
+        if ctx.session_ctx().config().streaming_unaligned_join() {
+            // TODO: make it a logical optimization.
+            // Rewrite joins with index to delta join
+            plan = plan.optimize_by_rules(&OptimizationStage::new(
+                "Add Logstore for Unaligned join",
+                vec![AddLogstoreRule::create()],
+                ApplyOrder::BottomUp,
+            ))?;
+        }
+
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
