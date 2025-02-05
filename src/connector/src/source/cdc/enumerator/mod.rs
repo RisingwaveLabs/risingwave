@@ -84,6 +84,10 @@ where
                     is_source_job: props.is_cdc_source_job,
                     is_backfill_table: props.is_backfill_table,
                 };
+                println!(
+                    "WKXLOG after validate cdc source properties, request: {:?}",
+                    validate_source_request
+                );
 
                 let validate_source_request_bytes =
                     env.byte_array_from_slice(&Message::encode_to_vec(&validate_source_request))?;

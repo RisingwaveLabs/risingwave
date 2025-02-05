@@ -49,7 +49,7 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::stream_node::{self, NodeBody};
 use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
@@ -656,27 +656,68 @@ impl DdlController {
                     table_fragments.fragments
                 )
             })?;
-
+        assert_eq!(
+            stream_scan_fragment.actors.len(),
+            1,
+            "Stream scan fragment should have only one actor"
+        );
         for actor in &stream_scan_fragment.actors {
-            if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) =
-                actor.nodes.as_ref().unwrap().node_body
-                && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
-            {
-                let options_with_secret = WithOptionsSecResolved::new(
-                    cdc_table_desc.connect_properties.clone(),
-                    cdc_table_desc.secret_refs.clone(),
-                );
-                let mut props = ConnectorProperties::extract(options_with_secret, true)?;
-                props.init_from_pb_cdc_table_desc(cdc_table_desc);
-
-                // try creating a split enumerator to validate
-                let _enumerator = props
-                    .create_split_enumerator(SourceEnumeratorContext::dummy().into())
-                    .await?;
-                tracing::debug!(?table.id, "validate cdc table success");
+            let mut found_cdc_scan = false;
+            match &actor.nodes.as_ref().unwrap().node_body {
+                Some(NodeBody::StreamCdcScan(_)) => {
+                    if Self::validate_cdc_table_inner(
+                        &actor.nodes.as_ref().unwrap().node_body,
+                        table.id,
+                    )
+                    .await?
+                    {
+                        found_cdc_scan = true;
+                    }
+                }
+                // When there's generated columns, the cdc scan node is wrapped in a project node
+                Some(NodeBody::Project(_)) => {
+                    for input in &actor.nodes.as_ref().unwrap().input {
+                        if Self::validate_cdc_table_inner(&input.node_body, table.id).await? {
+                            found_cdc_scan = true;
+                        }
+                    }
+                }
+                _ => {
+                    bail!("Unexpected node body for stream cdc scan");
+                }
+            };
+            if !found_cdc_scan {
+                bail!("No stream cdc scan node found in stream scan fragment");
             }
         }
         Ok(())
+    }
+
+    async fn validate_cdc_table_inner(
+        node_body: &Option<stream_node::NodeBody>,
+        table_id: u32,
+    ) -> MetaResult<bool> {
+        if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) = node_body
+            && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
+        {
+            let options_with_secret = WithOptionsSecResolved::new(
+                cdc_table_desc.connect_properties.clone(),
+                cdc_table_desc.secret_refs.clone(),
+            );
+
+            let mut props = ConnectorProperties::extract(options_with_secret, true)?;
+            props.init_from_pb_cdc_table_desc(cdc_table_desc);
+
+            // Try creating a split enumerator to validate
+            let _enumerator = props
+                .create_split_enumerator(SourceEnumeratorContext::dummy().into())
+                .await?;
+
+            tracing::debug!(?table_id, "validate cdc table success");
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     // Here we modify the union node of the downstream table by the TableFragments of the to-be-created sink upstream.

@@ -1188,18 +1188,12 @@ pub(super) async fn handle_create_table_plan(
                         .collect();
 
                     for col in &mut columns {
-                        let external_column_desc =
-                            *external_columns.get(col.name()).ok_or_else(|| {
-                                ErrorCode::ConnectorError(
-                                    format!(
-                                        "Column '{}' not found in the upstream database",
-                                        col.name()
-                                    )
-                                    .into(),
-                                )
-                            })?;
-                        col.column_desc.generated_or_default_column =
-                            external_column_desc.generated_or_default_column.clone();
+                        // Keep the default column aligned with external table.
+                        // Note the generated columns have not been initialized yet. If a column is not found here, it should be a generated column.
+                        if let Some(external_column_desc) = external_columns.get(col.name()) {
+                            col.column_desc.generated_or_default_column =
+                                external_column_desc.generated_or_default_column.clone();
+                        }
                     }
                     (columns, pk_names)
                 }
