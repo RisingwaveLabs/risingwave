@@ -1,0 +1,49 @@
+statement ok
+DROP TABLE IF EXISTS fact;
+
+statement ok
+DROP TABLE IF EXISTS dim;
+
+statement ok
+set streaming_unaligned_join = true;
+
+statement ok
+create table fact(v0 int primary key, v1 int, v2 varchar, v3 varchar);
+
+# correspond to 1
+statement ok
+INSERT INTO fact
+  SELECT
+    x as v0,
+    1 as v1,
+    'abcdefgakjandjkw' as v2,
+    'jkb1ku1bu' as v3
+  FROM generate_series(1, 100000) t(x);
+
+# correspond to 2
+statement ok
+INSERT INTO fact
+  SELECT
+    x as v0,
+    2 as v1,
+    'abcdefgakjandjkw' as v2,
+    'jkb1ku1bu' as v3
+  FROM generate_series(100001, 200000) t(x);
+
+statement ok
+create table dim(v1 int);
+
+statement ok
+INSERT INTO dim VALUES(1), (2);
+
+statement ok
+create materialized view m1 as
+  select v0, count(*)
+  from fact join dim on fact.v1 = dim.v1
+  group by v0;
+
+statement ok
+DELETE FROM dim;
+
+statement ok
+flush;
