@@ -834,11 +834,8 @@ mod tests {
                 ),
             ])),
         );
-    }
 
-    #[test]
-    fn test_encode_avro_err() {
-        test_err(
+        test_ok(
             &DataType::Struct(StructType::new(vec![
                 (
                     "p",
@@ -864,8 +861,7 @@ mod tests {
                     Some(ScalarImpl::Int32(2)),
                     Some(ScalarImpl::Int32(1)),
                 ]))),
-            ])))
-            .to_datum_ref(),
+            ]))),
             r#"{
                 "type": "record",
                 "name": "Segment",
@@ -893,9 +889,27 @@ mod tests {
                     }
                 ]
             }"#,
-            "encode 'q' error: avro name ref unsupported yet",
+            Value::Record(vec![
+                (
+                    "p".to_owned(),
+                    Value::Record(vec![
+                        ("x".to_owned(), Value::Int(-2)),
+                        ("y".to_owned(), Value::Int(-1)),
+                    ]),
+                ),
+                (
+                    "q".to_owned(),
+                    Value::Record(vec![
+                        ("x".to_owned(), Value::Int(2)),
+                        ("y".to_owned(), Value::Int(1)),
+                    ]),
+                ),
+            ]),
         );
+    }
 
+    #[test]
+    fn test_encode_avro_err() {
         test_err(
             &DataType::Interval,
             Some(ScalarRefImpl::Interval(Interval::from_month_day_usec(
