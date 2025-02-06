@@ -87,7 +87,8 @@ use crate::hummock::manager::transaction::{
 };
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::metrics_utils::{
-    build_compact_task_level_type_metrics_label, trigger_local_table_stat, trigger_sst_stat,
+    build_compact_task_level_type_metrics_label, trigger_compact_tasks_stat,
+    trigger_local_table_stat,
 };
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::next_compaction_task_id;
@@ -147,7 +148,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
 impl HummockVersionTransaction<'_> {
     fn apply_compact_task(&mut self, compact_task: &CompactTask) {
         let mut version_delta = self.new_delta();
-        let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
+        let trivial_move = compact_task.is_trivial_move_task();
         version_delta.trivial_move = trivial_move;
 
         let group_deltas = &mut version_delta
@@ -797,8 +798,8 @@ impl HummockManager {
                     ..Default::default()
                 };
 
-                let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
-                let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
+                let is_trivial_reclaim = compact_task.is_trivial_reclaim();
+                let is_trivial_move = compact_task.is_trivial_move_task();
                 if is_trivial_reclaim || (is_trivial_move && can_trivial_move) {
                     let log_label = if is_trivial_reclaim {
                         "TrivialReclaim"
@@ -905,6 +906,14 @@ impl HummockManager {
                 .compact_task_batch_count
                 .with_label_values(&["batch_trivial_move"])
                 .observe(trivial_tasks.len() as f64);
+
+            for trivial_task in &trivial_tasks {
+                self.metrics
+                    .compact_task_trivial_move_sst_count
+                    .with_label_values(&[&trivial_task.compaction_group_id.to_string()])
+                    .observe(trivial_task.input_ssts[0].table_infos.len() as _);
+            }
+
             drop(versioning_guard);
         } else {
             // We are using a single transaction to ensure that each task has progress when it is
@@ -1044,10 +1053,7 @@ impl HummockManager {
             .await?;
         tasks.retain(|task| {
             if task.task_status == TaskStatus::Success {
-                debug_assert!(
-                    CompactStatus::is_trivial_reclaim(task)
-                        || CompactStatus::is_trivial_move_task(task)
-                );
+                debug_assert!(task.is_trivial_reclaim() || task.is_trivial_move_task());
                 false
             } else {
                 true
@@ -1072,10 +1078,7 @@ impl HummockManager {
             if task.task_status != TaskStatus::Success {
                 return Ok(Some(task));
             }
-            debug_assert!(
-                CompactStatus::is_trivial_reclaim(&task)
-                    || CompactStatus::is_trivial_move_task(&task)
-            );
+            debug_assert!(task.is_trivial_reclaim() || task.is_trivial_move_task());
         }
         Ok(None)
     }
@@ -1281,38 +1284,15 @@ impl HummockManager {
                 compact_task_assignment
             )?;
         }
-        let mut success_groups = vec![];
-        for compact_task in tasks {
-            let task_status = compact_task.task_status;
-            let task_status_label = task_status.as_str_name();
-            let task_type_label = compact_task.task_type.as_str_name();
 
+        let mut success_groups = vec![];
+        for compact_task in &tasks {
             self.compactor_manager
                 .remove_task_heartbeat(compact_task.task_id);
-
-            self.metrics
-                .compact_frequency
-                .with_label_values(&[
-                    "normal",
-                    &compact_task.compaction_group_id.to_string(),
-                    task_type_label,
-                    task_status_label,
-                ])
-                .inc();
-
             tracing::trace!(
                 "Reported compaction task. {}. cost time: {:?}",
-                compact_task_to_string(&compact_task),
+                compact_task_to_string(compact_task),
                 start_time.elapsed(),
-            );
-
-            trigger_sst_stat(
-                &self.metrics,
-                compaction
-                    .compaction_statuses
-                    .get(&compact_task.compaction_group_id),
-                &versioning_guard.current_version,
-                compact_task.compaction_group_id,
             );
 
             if !deterministic_mode
@@ -1326,10 +1306,17 @@ impl HummockManager {
                 );
             }
 
-            if task_status == TaskStatus::Success {
+            if compact_task.task_status == TaskStatus::Success {
                 success_groups.push(compact_task.compaction_group_id);
             }
         }
+
+        trigger_compact_tasks_stat(
+            &self.metrics,
+            &tasks,
+            &compaction.compaction_statuses,
+            &versioning_guard.current_version,
+        );
         drop(versioning_guard);
         if !success_groups.is_empty() {
             self.try_update_write_limits(&success_groups).await;

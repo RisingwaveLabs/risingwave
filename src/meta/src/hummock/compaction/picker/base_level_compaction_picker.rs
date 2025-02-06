@@ -142,6 +142,10 @@ impl LevelCompactionPicker {
             } else {
                 0
             },
+            self.config
+                .sst_allowed_trivial_move_max_count
+                .unwrap_or(compaction_config::sst_allowed_trivial_move_max_count())
+                as usize,
         );
 
         trivial_move_picker.pick_trivial_move_task(

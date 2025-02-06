@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::size_of;
 
 use itertools::Itertools;
-use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus};
+use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_request::PbReportTask;
 use risingwave_pb::hummock::{
-    PbCompactTask, PbKeyRange, PbTableOption, PbTableSchema, PbTableStats, PbValidationTask,
+    LevelType, PbCompactTask, PbKeyRange, PbTableOption, PbTableSchema, PbTableStats,
+    PbValidationTask,
 };
 
 use crate::key_range::KeyRange;
@@ -111,6 +112,47 @@ impl CompactTask {
                 .values()
                 .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
                 .sum::<usize>()
+    }
+
+    pub fn is_trivial_move_task(&self) -> bool {
+        if self.task_type != TaskType::Dynamic && self.task_type != TaskType::Emergency {
+            return false;
+        }
+
+        if self.input_ssts.len() != 2 || self.input_ssts[0].level_type != LevelType::Nonoverlapping
+        {
+            return false;
+        }
+
+        // it may be a manual compaction task
+        if self.input_ssts[0].level_idx == self.input_ssts[1].level_idx
+            && self.input_ssts[0].level_idx > 0
+        {
+            return false;
+        }
+
+        if self.input_ssts[1].level_idx == self.target_level
+            && self.input_ssts[1].table_infos.is_empty()
+        {
+            return true;
+        }
+
+        false
+    }
+
+    pub fn is_trivial_reclaim(&self) -> bool {
+        // Currently all VnodeWatermark tasks are trivial reclaim.
+        if self.task_type == TaskType::VnodeWatermark {
+            return true;
+        }
+        let exist_table_ids = HashSet::<u32>::from_iter(self.existing_table_ids.clone());
+        self.input_ssts.iter().all(|level| {
+            level.table_infos.iter().all(|sst| {
+                sst.table_ids
+                    .iter()
+                    .all(|table_id| !exist_table_ids.contains(table_id))
+            })
+        })
     }
 }
 

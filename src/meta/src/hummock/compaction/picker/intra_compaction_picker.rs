@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::config::default::compaction_config;
 use risingwave_hummock_sdk::level::{InputLevel, Levels, OverlappingLevel};
+use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
@@ -267,52 +268,91 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone(), 0);
+            let trivial_move_picker = TrivialMovePicker::new(
+                0,
+                0,
+                overlap_strategy.clone(),
+                0,
+                self.config
+                    .sst_allowed_trivial_move_max_count
+                    .unwrap_or(compaction_config::sst_allowed_trivial_move_max_count())
+                    as usize,
+            );
 
-            let select_sst = trivial_move_picker.pick_trivial_move_sst(
+            if let Some(select_ssts) = trivial_move_picker.pick_multi_trivial_move_ssts(
                 &l0.sub_levels[idx + 1].table_infos,
                 &level.table_infos,
                 level_handlers,
                 stats,
-            );
+            ) {
+                let select_input_size: u64 = select_ssts.iter().map(|sst| sst.sst_size).sum();
+                let total_file_count = select_ssts.len() as u64;
+                let mut target_sub_level_id = level.sub_level_id;
+                // This optimisation is only enabled for ssts at the end of the level. See https://github.com/risingwavelabs/risingwave/pull/15659
+                if select_ssts.last().unwrap().sst_id
+                    == l0.sub_levels[idx + 1].table_infos.last().unwrap().sst_id
+                    && idx != 0
+                {
+                    // Try to trivial move ssts cross multiple sub levels. It's very useful in append only scenarios.
+                    let left_bound = &select_ssts.first().unwrap().key_range.left;
+                    for probe_level in l0.sub_levels[0..idx].iter().rev() {
+                        let last_sst = probe_level.table_infos.last().unwrap();
+                        let level_max_bound = &last_sst.key_range.right;
+                        // compare the left bound of the first sst with the max bound of the level, if the left bound is greater than the max bound, we can trivial move to the next level
+                        if last_sst.key_range.right_exclusive {
+                            if !KeyComparator::compare_encoded_full_key(level_max_bound, left_bound)
+                                .is_le()
+                            {
+                                break;
+                            }
+                        } else if !KeyComparator::compare_encoded_full_key(
+                            level_max_bound,
+                            left_bound,
+                        )
+                        .is_lt()
+                        {
+                            break;
+                        }
 
-            // only pick tables for trivial move
-            if select_sst.is_none() {
-                continue;
+                        target_sub_level_id = probe_level.sub_level_id;
+                    }
+
+                    tracing::debug!(
+                        "optimize trivial move origin sub_level_id: {}, target_sub_level_id: {} sst_count: {}",
+                        level.sub_level_id, target_sub_level_id, select_ssts.len()
+                    );
+                }
+
+                let mut overlap = overlap_strategy.create_overlap_info();
+                select_ssts.iter().for_each(|ssts| overlap.update(ssts));
+
+                assert!(overlap
+                    .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
+                    .is_empty());
+
+                let input_levels = vec![
+                    InputLevel {
+                        level_idx: 0,
+                        level_type: LevelType::Nonoverlapping,
+                        table_infos: select_ssts,
+                    },
+                    InputLevel {
+                        level_idx: 0,
+                        level_type: LevelType::Nonoverlapping,
+                        table_infos: vec![],
+                    },
+                ];
+                return Some(CompactionInput {
+                    input_levels,
+                    target_level: 0,
+                    target_sub_level_id,
+                    select_input_size,
+                    total_file_count,
+                    ..Default::default()
+                });
             }
-
-            let select_sst = select_sst.unwrap();
-
-            // support trivial move cross multi sub_levels
-            let mut overlap = overlap_strategy.create_overlap_info();
-            overlap.update(&select_sst);
-
-            assert!(overlap
-                .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
-                .is_empty());
-
-            let select_input_size = select_sst.sst_size;
-            let input_levels = vec![
-                InputLevel {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping,
-                    table_infos: vec![select_sst],
-                },
-                InputLevel {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping,
-                    table_infos: vec![],
-                },
-            ];
-            return Some(CompactionInput {
-                input_levels,
-                target_level: 0,
-                target_sub_level_id: level.sub_level_id,
-                select_input_size,
-                total_file_count: 1,
-                ..Default::default()
-            });
         }
+
         None
     }
 }
@@ -868,5 +908,60 @@ pub mod tests {
             levels.l0.sub_levels[1].table_infos.len(),
             input.input_levels[1].table_infos.len()
         );
+    }
+
+    #[test]
+    fn test_trivial_move_multi_level() {
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(2)
+                .target_file_size_base(30)
+                .level0_sub_level_compact_level_count(20) // reject intra
+                .build(),
+        );
+        let mut picker =
+            IntraCompactionPicker::for_test(config, Arc::new(CompactionDeveloperConfig::default()));
+
+        // Cannot trivial move because there is only 1 sub-level.
+        let l0 = generate_l0_overlapping_sublevels(vec![vec![
+            generate_table(1, 1, 100, 110, 1),
+            generate_table(2, 1, 150, 250, 1),
+        ]]);
+        let levels = Levels {
+            l0,
+            levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
+            ..Default::default()
+        };
+        levels_handler[1].add_pending_task(100, 1, &levels.levels[0].table_infos);
+        let mut local_stats = LocalPickerStatistic::default();
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
+
+        // Cannot trivial move because sub-levels are overlapping
+        let l0: OverlappingLevel = generate_l0_overlapping_sublevels(vec![
+            vec![generate_table(1, 1, 100, 110, 1)],
+            vec![generate_table(3, 1, 10, 120, 1)],
+            vec![generate_table(4, 1, 10, 120, 1)],
+            vec![
+                generate_table(5, 1, 10, 120, 1),
+                generate_table(2, 1, 1500, 2500, 1),
+            ],
+        ]);
+        let mut levels = Levels {
+            l0,
+            levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
+            ..Default::default()
+        };
+        // trivial move
+        levels.l0.sub_levels[0].level_type = LevelType::Nonoverlapping;
+        levels.l0.sub_levels[1].level_type = LevelType::Nonoverlapping;
+        levels.l0.sub_levels[2].level_type = LevelType::Nonoverlapping;
+        levels.l0.sub_levels[3].level_type = LevelType::Nonoverlapping;
+        let input = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
+        assert!(is_l0_trivial_move(&input));
+        assert_eq!(input.target_sub_level_id, 0);
     }
 }
