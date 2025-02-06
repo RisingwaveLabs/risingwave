@@ -248,7 +248,9 @@ impl SplitEnumerator for IcebergSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<Self::Split>> {
-        // Iceberg source does not support streaming queries
+        // Like file source, iceberg streaming source has a List Executor and a Fetch Executor,
+        // instead of relying on SplitEnumerator on meta.
+        // TODO: add some validation logic here.
         Ok(vec![])
     }
 }
@@ -405,6 +407,7 @@ impl IcebergSplitEnumerator {
         Ok(splits)
     }
 
+    /// List all files in the snapshot to check if there are deletes.
     pub async fn all_delete_parameters(
         table: &Table,
         snapshot_id: i64,

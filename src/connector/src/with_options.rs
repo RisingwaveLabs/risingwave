@@ -150,7 +150,12 @@ pub trait WithPropertiesExt: Get + Sized {
 
     fn connector_need_pk(&self) -> bool {
         // Currently only iceberg connector doesn't need primary key
-        !self.is_iceberg_connector()
+        // introduced in https://github.com/risingwavelabs/risingwave/pull/14971
+        // XXX: This seems not the correct way. Iceberg doesn't necessarily has a PK.
+        // "batch source" doesn't need a PK?
+        // For streaming, if it has a PK, do we want to use it? It seems not safe.
+        // !self.is_iceberg_connector()
+        true
     }
 
     fn is_legacy_fs_connector(&self) -> bool {

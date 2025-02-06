@@ -64,10 +64,19 @@ impl LogicalIcebergScan {
     pub fn clone_with_required_cols(&self, required_cols: &[usize]) -> Self {
         assert!(!required_cols.is_empty());
         let mut core = self.core.clone();
+        let mut has_row_id = false;
         core.column_catalog = required_cols
             .iter()
-            .map(|idx| core.column_catalog[*idx].clone())
+            .map(|idx| {
+                if Some(*idx) == core.row_id_index {
+                    has_row_id = true;
+                }
+                core.column_catalog[*idx].clone()
+            })
             .collect();
+        if !has_row_id {
+            core.row_id_index = None;
+        }
         let base = PlanBase::new_logical_with_core(&core);
 
         LogicalIcebergScan {

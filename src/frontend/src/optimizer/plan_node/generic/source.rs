@@ -77,6 +77,8 @@ impl GenericPlanNode for Source {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
+        // FIXME: output col idx is not set. But iceberg source can prune cols.
+        // XXX: there's a RISINGWAVE_ICEBERG_ROW_ID. Should we use it?
         self.row_id_index.map(|idx| vec![idx])
     }
 
