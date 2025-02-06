@@ -47,3 +47,9 @@ DELETE FROM dim;
 
 statement ok
 flush;
+
+statement ok
+DROP TABLE fact cascade;
+
+statement ok
+DROP TABLE dim cascade;
