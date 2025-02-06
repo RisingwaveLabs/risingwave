@@ -34,12 +34,32 @@ Caused by these errors (recent errors listed first):
   2: circular reference detected in Avro schema: Node -> Node
 
 
+# Make sure circular reference does not lead to sink panic (stack overflow)
+# It is not necessary to reject such avro schema, because their SQL type is never circular
+statement ok
+create sink sk as select
+  2 as value, row(3, row(7))::struct<value int, next struct<value int>> as next
+WITH (${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'avro-ref') FORMAT PLAIN ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+
+statement ok
+drop sink sk;
+
+
 system ok
 curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro-ref-value"
 
 
 system ok
 curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro-ref-value?permanent=true"
+
+
+system ok
+rpk topic delete 'avro-ref'
+
+
+system ok
+rpk topic create avro-ref
 
 
 system ok
@@ -97,7 +117,17 @@ rpk topic produce avro-ref --schema-id=topic <<EOF
 EOF
 
 
-query IIIIIIII
+statement ok
+create sink sk as select
+  row(row(6, 7), row(8, 9))::struct<a struct<x int, y int>, b struct<x int, y int>> as foo,
+  row(row(9, 8), row(7, 6))::struct<a struct<x int, y int>, b struct<x int, y int>> as bar WITH
+(${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'avro-ref') FORMAT PLAIN ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+
+sleep 1s
+
+
+query IIIIIIII rowsort
 select
   (foo).a.x,
   (foo).a.y,
@@ -110,6 +140,11 @@ select
 from s;
 ----
 3 4 5 6 6 5 4 3
+6 7 8 9 9 8 7 6
+
+
+statement ok
+drop sink sk;
 
 
 statement ok
