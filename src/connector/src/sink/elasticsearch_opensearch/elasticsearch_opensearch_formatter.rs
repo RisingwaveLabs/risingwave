@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{Map, Value};
 
 use super::super::encoder::template::TemplateEncoder;
@@ -118,6 +119,7 @@ impl ElasticSearchOpenSearchFormatter {
         chunk: StreamChunk,
         is_append_only: bool,
     ) -> Result<Vec<BuildBulkPara>> {
+        let mut update_delete_row: Option<(String, RowRef<'_>)> = None;
         let mut result_vec = Vec::with_capacity(chunk.capacity());
         for (op, rows) in chunk.rows() {
             let index = if let Some(index_column) = self.index_column {
@@ -151,7 +153,30 @@ impl ElasticSearchOpenSearchFormatter {
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let key = self.key_encoder.encode(rows)?;
-                    let value = self.value_encoder.encode(rows)?;
+                    let mut modified_col_indices = Vec::new();
+                    if let Some((delete_key, delete_row)) = update_delete_row.take()
+                        && delete_key == key
+                    {
+                        delete_row
+                            .iter()
+                            .enumerate()
+                            .zip_eq_debug(rows.iter())
+                            .for_each(|((index, delete_column), insert_column)| {
+                                if let Some(insert_column) = insert_column
+                                    && let Some(delete_column) = delete_column
+                                    && insert_column == delete_column
+                                {
+                                    // do nothing
+                                } else {
+                                    modified_col_indices.push(index);
+                                }
+                            });
+                    } else {
+                        modified_col_indices = (0..self.value_encoder.schema().len()).collect();
+                    }
+                    let value = self
+                        .value_encoder
+                        .encode_cols(rows, modified_col_indices.into_iter())?;
                     result_vec.push(BuildBulkPara {
                         index: index.to_owned(),
                         key,
@@ -182,7 +207,8 @@ impl ElasticSearchOpenSearchFormatter {
                             "`UpdateDelete` operation is not supported in `append_only` mode"
                         )));
                     } else {
-                        continue;
+                        let key = self.key_encoder.encode(rows)?;
+                        update_delete_row = Some((key, rows));
                     }
                 }
             }
