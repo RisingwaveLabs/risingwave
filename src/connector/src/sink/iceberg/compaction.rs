@@ -153,35 +153,59 @@ fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, 
                     .ok_or_else(|| anyhow!("warehouse unspecified for jdbc catalog"))?,
             ),
         ])),
-        Some("jdbc") => Ok(HashMap::from_iter(
-            [
-                ("type".to_owned(), "jdbc".to_owned()),
-                (
-                    "warehouse".to_owned(),
-                    config
-                        .common
-                        .warehouse_path
-                        .clone()
-                        .ok_or_else(|| anyhow!("warehouse unspecified for jdbc catalog"))?,
-                ),
-                (
-                    "uri".to_owned(),
-                    config
-                        .common
-                        .catalog_uri
-                        .clone()
-                        .ok_or_else(|| anyhow!("uri unspecified for jdbc catalog"))?,
-                ),
-            ]
-            .into_iter()
-            .chain(
+        Some("jdbc") => {
+            let mut result = HashMap::new();
+            result.insert("type".to_owned(), "jdbc".to_owned());
+            result.insert(
+                "warehouse".to_owned(),
                 config
-                    .java_catalog_props
-                    .iter()
-                    .filter(|(key, _)| key.starts_with("jdbc."))
-                    .map(|(k, v)| (k.clone(), v.clone())),
-            ),
-        )),
+                    .common
+                    .warehouse_path
+                    .clone()
+                    .ok_or_else(|| anyhow!("warehouse unspecified for jdbc catalog"))?,
+            );
+            result.insert(
+                "uri".to_owned(),
+                config
+                    .common
+                    .catalog_uri
+                    .clone()
+                    .ok_or_else(|| anyhow!("uri unspecified for jdbc catalog"))?,
+            );
+            if let Some(region) = &config.common.region {
+                result.insert(
+                    "s3.endpoint".to_owned(),
+                    format!("https://s3.{}.amazonaws.com", region),
+                );
+            }
+            if let Some(endpoint) = &config.common.endpoint {
+                result.insert("s3.endpoint".to_owned(), endpoint.to_owned());
+            }
+            if let Some(access_key) = &config.common.access_key {
+                result.insert("s3.access-key-id".to_owned(), access_key.to_owned());
+            }
+            if let Some(secret_key) = &config.common.secret_key {
+                result.insert("s3.secret-access-key".to_owned(), secret_key.to_owned());
+            }
+            if let Some(path_style_access) = &config.common.path_style_access {
+                result.insert(
+                    "s3.path-style-access".to_owned(),
+                    path_style_access.to_string(),
+                );
+            }
+            result.insert(
+                "io-impl".to_owned(),
+                "risingwave.shaded.org.apache.iceberg.aws.s3.S3FileIO".to_owned(),
+            );
+            config
+                .java_catalog_props
+                .iter()
+                .filter(|(key, _)| key.starts_with("jdbc."))
+                .for_each(|(k, v)| {
+                    result.insert(k.clone(), v.clone());
+                });
+            Ok(result)
+        }
         Some(other) => Err(anyhow!("unsupported catalog type {} in compaction", other)),
     }
 }
