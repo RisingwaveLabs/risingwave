@@ -53,20 +53,18 @@ impl ObserverState for HummockObserverNode {
                 for object in object_group.objects {
                     match object.object_info.unwrap() {
                         PbObjectInfo::Table(table_catalog) => {
-                            assert!(
-                                resp.version > self.version,
-                                "resp version={:?}, current version={:?}",
-                                resp.version,
-                                self.version
-                            );
-
                             self.handle_catalog_notification(resp.operation(), table_catalog);
-
-                            self.version = resp.version;
                         }
                         _ => panic!("error type notification"),
                     };
                 }
+                assert!(
+                    resp.version > self.version,
+                    "resp version={:?}, current version={:?}",
+                    resp.version,
+                    self.version
+                );
+                self.version = resp.version;
             }
             Info::HummockVersionDeltas(hummock_version_deltas) => {
                 let _ = self

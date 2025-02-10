@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::*;
+use risingwave_pb::catalog::PbTable;
 
+use super::*;
 impl CatalogController {
     // Drop all kinds of objects including databases,
     // schemas, relations, connections, functions, etc.
@@ -23,7 +24,7 @@ impl CatalogController {
         object_id: ObjectId,
         drop_mode: DropMode,
     ) -> MetaResult<(ReleaseContext, NotificationVersion)> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let obj: PartialObject = Object::find_by_id(object_id)
             .into_partial_model()
@@ -229,7 +230,20 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-
+        let dropped_tables = Table::find()
+            .find_also_related(Object)
+            .filter(
+                table::Column::TableId.is_in(
+                    removed_state_table_ids
+                        .iter()
+                        .copied()
+                        .collect::<HashSet<ObjectId>>(),
+                ),
+            )
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
         // delete all in to_drop_objects.
         let res = Object::delete_many()
             .filter(object::Column::Oid.is_in(removed_objects.keys().cloned()))
@@ -247,7 +261,9 @@ impl CatalogController {
 
         // notify about them.
         self.notify_users_update(user_infos).await;
-
+        inner
+            .dropped_tables
+            .extend(dropped_tables.map(|t| (TableId::try_from(t.id).unwrap(), t)));
         let version = match object_type {
             ObjectType::Database => {
                 // TODO: Notify objects in other databases when the cross-database query is supported.
@@ -264,7 +280,6 @@ impl CatalogController {
                 let (schema_obj, mut to_notify_objs): (Vec<_>, Vec<_>) = removed_objects
                     .into_values()
                     .partition(|obj| obj.obj_type == ObjectType::Schema && obj.oid == object_id);
-
                 let schema_obj = schema_obj
                     .into_iter()
                     .exactly_one()
@@ -276,6 +291,8 @@ impl CatalogController {
                     .await
             }
             _ => {
+                // Hummock observers and compactor observers are notified once the corresponding barrier is completed.
+                // They only need RelationInfo::Table.
                 let relation_group =
                     build_object_group_for_delete(removed_objects.into_values().collect());
                 self.notify_frontend(NotificationOperation::Delete, relation_group)
