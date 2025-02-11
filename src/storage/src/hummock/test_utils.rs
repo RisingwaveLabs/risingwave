@@ -550,7 +550,11 @@ impl<S: StateStore> StateStoreReadTestExt for S {
                 },
             )
             .await?;
-        snapshot.get_keyed_row(key, read_options).await
+        snapshot
+            .on_key_value(key, read_options, |key, value| {
+                Ok((key.copy_into(), Bytes::copy_from_slice(value)))
+            })
+            .await
     }
 
     async fn iter(
@@ -605,5 +609,26 @@ impl<S: StateStore> StateStoreReadTestExt for S {
             ret.push((key.copy_into(), Bytes::copy_from_slice(value)))
         }
         Ok(ret)
+    }
+}
+
+pub trait StateStoreGetTestExt: StateStoreGet {
+    fn get(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, Option<Bytes>>;
+}
+
+impl<S: StateStoreGet> StateStoreGetTestExt for S {
+    async fn get(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+    ) -> StorageResult<Option<Bytes>> {
+        self.on_key_value(key, read_options, |_, value| {
+            Ok(Bytes::copy_from_slice(value))
+        })
+        .await
     }
 }

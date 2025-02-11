@@ -629,18 +629,30 @@ pub struct RangeKvStateStoreReadSnapshot<R: RangeKv> {
     table_id: TableId,
 }
 
-impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
-    type Iter = RangeKvStateStoreIter<R>;
-    type RevIter = RangeKvStateStoreRevIter<R>;
-
-    async fn get_keyed_row(
+impl<R: RangeKv> StateStoreGet for RangeKvStateStoreReadSnapshot<R> {
+    async fn on_key_value<O: Send + 'static>(
         &self,
         key: TableKey<Bytes>,
         _read_options: ReadOptions,
-    ) -> StorageResult<Option<StateStoreKeyedRow>> {
-        self.inner
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> StorageResult<Option<O>> {
+        let ret = self
+            .inner
             .get_keyed_row_impl(key, self.epoch, self.table_id)
+            .and_then(|option| {
+                if let Some((key, value)) = option {
+                    on_key_value_fn(key.to_ref(), value.as_ref()).map(Some)
+                } else {
+                    Ok(None)
+                }
+            });
+        ret
     }
+}
+
+impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
+    type Iter = RangeKvStateStoreIter<R>;
+    type RevIter = RangeKvStateStoreRevIter<R>;
 
     async fn iter(
         &self,
@@ -872,28 +884,37 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
     }
 }
 
+impl<R: RangeKv> StateStoreGet for RangeKvLocalStateStore<R> {
+    async fn on_key_value<O: Send + 'static>(
+        &self,
+        key: TableKey<Bytes>,
+        _read_options: ReadOptions,
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> StorageResult<Option<O>> {
+        if let Some((key, value)) = match self.mem_table.buffer.get(&key) {
+            None => self
+                .inner
+                .get_keyed_row_impl(key, self.epoch(), self.table_id)?,
+            Some(op) => match op {
+                KeyOp::Insert(value) | KeyOp::Update((_, value)) => Some((
+                    FullKey::new(self.table_id, key, self.epoch()),
+                    value.clone(),
+                )),
+                KeyOp::Delete(_) => None,
+            },
+        } {
+            Ok(Some(on_key_value_fn(key.to_ref(), value.as_ref())?))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     type FlushedSnapshotReader = RangeKvStateStoreReadSnapshot<R>;
 
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
-
-    async fn get(
-        &self,
-        key: TableKey<Bytes>,
-        _read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
-        match self.mem_table.buffer.get(&key) {
-            None => self
-                .inner
-                .get_keyed_row_impl(key, self.epoch(), self.table_id)
-                .map(|option| option.map(|(_, value)| value)),
-            Some(op) => match op {
-                KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
-                KeyOp::Delete(_) => Ok(None),
-            },
-        }
-    }
 
     async fn iter(
         &self,

@@ -240,11 +240,11 @@ impl SharedBufferBatchInner {
 
     /// Return `None` if cannot find a visible version
     /// Return `HummockValue::Delete` if the key has been deleted by some epoch <= `read_epoch`
-    fn get_value(
-        &self,
+    fn get_value<'a>(
+        &'a self,
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
-    ) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
+    ) -> Option<(HummockValue<&'a Bytes>, EpochWithGap)> {
         // Perform binary search on table key to find the corresponding entry
         if let Ok(i) = self
             .entries
@@ -258,7 +258,7 @@ impl SharedBufferBatchInner {
                 if read_epoch < e.pure_epoch() {
                     continue;
                 }
-                return Some((v.clone().into(), *e));
+                return Some((v.to_ref().into(), *e));
             }
             // cannot find a visible version
         }
@@ -414,12 +414,12 @@ impl SharedBufferBatch {
         self.inner.old_values.is_some()
     }
 
-    pub fn get(
-        &self,
+    pub fn get<'a>(
+        &'a self,
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
         _read_options: &ReadOptions,
-    ) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
+    ) -> Option<(HummockValue<&'a Bytes>, EpochWithGap)> {
         self.inner.get_value(table_key, read_epoch)
     }
 
@@ -870,8 +870,9 @@ mod tests {
                 shared_buffer_batch
                     .get(TableKey(k.as_slice()), epoch, &ReadOptions::default())
                     .unwrap()
-                    .0,
-                v.clone()
+                    .0
+                    .as_slice(),
+                v.as_slice()
             );
         }
         assert_eq!(
@@ -1388,8 +1389,9 @@ mod tests {
                             &ReadOptions::default()
                         )
                         .unwrap()
-                        .0,
-                    value.clone(),
+                        .0
+                        .as_slice(),
+                    value.as_slice(),
                     "epoch: {}, key: {:?}",
                     test_epoch(i as u64 + 1),
                     String::from_utf8(key.clone())
@@ -1573,8 +1575,9 @@ mod tests {
                             &ReadOptions::default()
                         )
                         .unwrap()
-                        .0,
-                    value.clone(),
+                        .0
+                        .as_slice(),
+                    value.as_slice(),
                     "epoch: {}, key: {:?}",
                     test_epoch(i as u64 + 1),
                     String::from_utf8(key.clone())

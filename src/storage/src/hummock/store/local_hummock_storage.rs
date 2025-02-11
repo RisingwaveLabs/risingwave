@@ -23,7 +23,9 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{MAX_EPOCH, MAX_SPILL_TIMES};
-use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{
+    is_empty_key_range, vnode_range, FullKey, TableKey, TableKeyRange,
+};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::EpochWithGap;
@@ -102,12 +104,13 @@ pub struct LocalHummockStorage {
 }
 
 impl LocalHummockFlushedSnapshotReader {
-    async fn get_flushed(
+    async fn get_flushed<O>(
         hummock_version_reader: &HummockVersionReader,
         read_version: &HummockReadVersionRef,
         table_key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> StorageResult<Option<StateStoreKeyedRow>> {
+        on_key_value_fn: impl crate::store::KeyValueFn<O>,
+    ) -> StorageResult<Option<O>> {
         let table_key_range = (
             Bound::Included(table_key.clone()),
             Bound::Included(table_key.clone()),
@@ -125,7 +128,13 @@ impl LocalHummockFlushedSnapshotReader {
         }
 
         hummock_version_reader
-            .get(table_key, MAX_EPOCH, read_options, read_snapshot)
+            .get(
+                table_key,
+                MAX_EPOCH,
+                read_options,
+                read_snapshot,
+                on_key_value_fn,
+            )
             .await
     }
 
@@ -175,10 +184,14 @@ impl LocalHummockFlushedSnapshotReader {
 }
 
 impl LocalHummockStorage {
+    fn current_epoch_with_gap(&self) -> EpochWithGap {
+        EpochWithGap::new(self.epoch(), self.spill_offset)
+    }
+
     fn mem_table_iter(&self) -> MemTableHummockIterator<'_> {
         MemTableHummockIterator::new(
             &self.mem_table.buffer,
-            EpochWithGap::new(self.epoch(), self.spill_offset),
+            self.current_epoch_with_gap(),
             self.table_id,
         )
     }
@@ -186,7 +199,7 @@ impl LocalHummockStorage {
     fn mem_table_rev_iter(&self) -> MemTableHummockRevIterator<'_> {
         MemTableHummockRevIterator::new(
             &self.mem_table.buffer,
-            EpochWithGap::new(self.epoch(), self.spill_offset),
+            self.current_epoch_with_gap(),
             self.table_id,
         )
     }
@@ -247,23 +260,28 @@ pub struct LocalHummockFlushedSnapshotReader {
     hummock_version_reader: HummockVersionReader,
 }
 
-impl StateStoreRead for LocalHummockFlushedSnapshotReader {
-    type Iter = HummockStorageIterator;
-    type RevIter = HummockStorageRevIterator;
-
-    fn get_keyed_row(
+impl StateStoreGet for LocalHummockFlushedSnapshotReader {
+    async fn on_key_value<O: Send + 'static>(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> StorageResult<Option<O>> {
         assert_eq!(self.table_id, read_options.table_id);
         Self::get_flushed(
             &self.hummock_version_reader,
             &self.read_version,
             key,
             read_options,
+            on_key_value_fn,
         )
+        .await
     }
+}
+
+impl StateStoreRead for LocalHummockFlushedSnapshotReader {
+    type Iter = HummockStorageIterator;
+    type RevIter = HummockStorageRevIterator;
 
     fn iter(
         &self,
@@ -284,32 +302,46 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
     }
 }
 
-impl LocalStateStore for LocalHummockStorage {
-    type FlushedSnapshotReader = LocalHummockFlushedSnapshotReader;
-    type Iter<'a> = LocalHummockStorageIterator<'a>;
-    type RevIter<'a> = LocalHummockStorageRevIterator<'a>;
-
-    async fn get(
+impl StateStoreGet for LocalHummockStorage {
+    async fn on_key_value<O: Send + 'static>(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> StorageResult<Option<O>> {
         assert_eq!(self.table_id, read_options.table_id);
         match self.mem_table.buffer.get(&key) {
-            None => LocalHummockFlushedSnapshotReader::get_flushed(
-                &self.hummock_version_reader,
-                &self.read_version,
-                key,
-                read_options,
-            )
-            .await
-            .map(|e| e.map(|item| item.1)),
+            None => {
+                LocalHummockFlushedSnapshotReader::get_flushed(
+                    &self.hummock_version_reader,
+                    &self.read_version,
+                    key,
+                    read_options,
+                    on_key_value_fn,
+                )
+                .await
+            }
             Some(op) => match op {
-                KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
+                KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok({
+                    Some(on_key_value_fn(
+                        FullKey::new_with_gap_epoch(
+                            self.table_id,
+                            key.to_ref(),
+                            self.current_epoch_with_gap(),
+                        ),
+                        value.as_ref(),
+                    )?)
+                }),
                 KeyOp::Delete(_) => Ok(None),
             },
         }
     }
+}
+
+impl LocalStateStore for LocalHummockStorage {
+    type FlushedSnapshotReader = LocalHummockFlushedSnapshotReader;
+    type Iter<'a> = LocalHummockStorageIterator<'a>;
+    type RevIter<'a> = LocalHummockStorageRevIterator<'a>;
 
     async fn iter(
         &self,

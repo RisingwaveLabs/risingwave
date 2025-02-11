@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use futures::{Stream, TryFutureExt, TryStreamExt};
+use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
 use risingwave_common::array::Op;
@@ -256,30 +256,21 @@ pub trait StateStoreReadLog: StaticSendSync {
     ) -> impl StorageFuture<'_, Self::ChangeLogIter>;
 }
 
-pub trait StateStoreRead: StaticSendSync {
+pub trait KeyValueFn<O> =
+    for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'static;
+
+pub trait StateStoreGet: StaticSendSync {
+    fn on_key_value<O: Send + 'static>(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> impl StorageFuture<'_, Option<O>>;
+}
+
+pub trait StateStoreRead: StateStoreGet + StaticSendSync {
     type Iter: StateStoreReadIter;
     type RevIter: StateStoreReadIter;
-
-    /// Point gets a value from the state store.
-    /// The result is based on a snapshot corresponding to the given `epoch`.
-    /// Both full key and the value are returned.
-    fn get_keyed_row(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-    ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>>;
-
-    /// Point gets a value from the state store.
-    /// The result is based on a snapshot corresponding to the given `epoch`.
-    /// Only the value is returned.
-    fn get(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-    ) -> impl StorageFuture<'_, Option<Bytes>> {
-        self.get_keyed_row(key, read_options)
-            .map_ok(|v| v.map(|(_, v)| v))
-    }
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
@@ -361,18 +352,10 @@ pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
-pub trait LocalStateStore: StaticSendSync {
+pub trait LocalStateStore: StateStoreGet + StaticSendSync {
     type FlushedSnapshotReader: StateStoreRead;
     type Iter<'a>: StateStoreIter + 'a;
     type RevIter<'a>: StateStoreIter + 'a;
-
-    /// Point gets a value from the state store.
-    /// The result is based on the latest written snapshot.
-    fn get(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-    ) -> impl StorageFuture<'_, Option<Bytes>>;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and

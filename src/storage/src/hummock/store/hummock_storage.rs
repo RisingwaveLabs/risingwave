@@ -254,11 +254,12 @@ impl HummockStorageReadSnapshot {
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
-    async fn get_inner(
+    async fn get_inner<O>(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> StorageResult<Option<StateStoreKeyedRow>> {
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> StorageResult<Option<O>> {
         let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
         let (key_range, read_version_tuple) = self
@@ -270,7 +271,13 @@ impl HummockStorageReadSnapshot {
         }
 
         self.hummock_version_reader
-            .get(key, self.raw_epoch, read_options, read_version_tuple)
+            .get(
+                key,
+                self.raw_epoch,
+                read_options,
+                read_version_tuple,
+                on_key_value_fn,
+            )
             .await
     }
 
@@ -607,17 +614,20 @@ pub struct HummockStorageReadSnapshot {
     simple_time_travel_version_cache: Arc<SimpleTimeTravelVersionCache>,
 }
 
-impl StateStoreRead for HummockStorageReadSnapshot {
-    type Iter = HummockStorageIterator;
-    type RevIter = HummockStorageRevIterator;
-
-    fn get_keyed_row(
+impl StateStoreGet for HummockStorageReadSnapshot {
+    fn on_key_value<O: Send + 'static>(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
-        self.get_inner(key, read_options)
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> impl StorageFuture<'_, Option<O>> {
+        self.get_inner(key, read_options, on_key_value_fn)
     }
+}
+
+impl StateStoreRead for HummockStorageReadSnapshot {
+    type Iter = HummockStorageIterator;
+    type RevIter = HummockStorageRevIterator;
 
     fn iter(
         &self,

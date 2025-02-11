@@ -95,72 +95,56 @@ impl<S> MonitoredStateStore<S> {
         &self.inner
     }
 
-    async fn monitored_get(
+    async fn monitored_on_key_value<O>(
         &self,
-        get_future: impl Future<Output = StorageResult<Option<Bytes>>>,
+        on_key_value_future: impl Future<Output = StorageResult<Option<(O, usize)>>>,
         table_id: TableId,
         key_len: usize,
-    ) -> StorageResult<Option<Bytes>> {
+    ) -> StorageResult<Option<O>> {
         let mut stats =
             MonitoredStateStoreGetStats::new(table_id.table_id, self.storage_metrics.clone());
 
-        let value = get_future
-            .verbose_instrument_await("store_get")
-            .instrument(tracing::trace_span!("store_get"))
+        let value = on_key_value_future
+            .verbose_instrument_await("store_on_key_value")
+            .instrument(tracing::trace_span!("store_on_key_value"))
             .await
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in get"))?;
 
         stats.get_key_size = key_len;
-        if let Some(value) = value.as_ref() {
-            stats.get_value_size = value.len();
-        }
-        stats.report();
-
-        Ok(value)
-    }
-
-    async fn monitored_get_keyed_row(
-        &self,
-        get_keyed_row_future: impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>>,
-        table_id: TableId,
-        key_len: usize,
-    ) -> StorageResult<Option<StateStoreKeyedRow>> {
-        let mut stats =
-            MonitoredStateStoreGetStats::new(table_id.table_id, self.storage_metrics.clone());
-
-        let value = get_keyed_row_future
-            .verbose_instrument_await("store_get_keyed_row")
-            .instrument(tracing::trace_span!("store_get_keyed_row"))
-            .await
-            .inspect_err(|e| error!(error = %e.as_report(), "Failed in get"))?;
-
-        stats.get_key_size = key_len;
-        if let Some((_, value)) = value.as_ref() {
-            stats.get_value_size = value.len();
-        }
+        let value = value.map(|(value, value_len)| {
+            stats.get_value_size = value_len;
+            value
+        });
         stats.report();
 
         Ok(value)
     }
 }
 
-impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
-    type Iter = impl StateStoreReadIter;
-    type RevIter = impl StateStoreReadIter;
-
-    fn get_keyed_row(
+impl<S: StateStoreGet> StateStoreGet for MonitoredStateStore<S> {
+    fn on_key_value<O: Send + 'static>(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + '_ {
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> impl StorageFuture<'_, Option<O>> {
         let table_id = read_options.table_id;
         let key_len = key.len();
-        self.monitored_get_keyed_row(
-            self.inner.get_keyed_row(key, read_options),
+        self.monitored_on_key_value(
+            self.inner
+                .on_key_value(key, read_options, move |key, value| {
+                    let result = on_key_value_fn(key, value);
+                    result.map(|output| (output, value.len()))
+                }),
             table_id,
             key_len,
         )
     }
+}
+
+impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
+    type Iter = impl StateStoreReadIter;
+    type RevIter = impl StateStoreReadIter;
 
     fn iter(
         &self,
@@ -210,17 +194,6 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
-
-    fn get(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
-        let table_id = read_options.table_id;
-        let key_len = key.len();
-        // TODO: may collect the metrics as local
-        self.monitored_get(self.inner.get(key, read_options), table_id, key_len)
-    }
 
     fn iter(
         &self,
