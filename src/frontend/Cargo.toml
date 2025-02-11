@@ -55,7 +55,7 @@ pretty_assertions = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
 quick-xml = { version = "0.37", features = ["serialize"] }
-rand = { version = "0.8", features = ["small_rng"] }
+rand = { version = "0.9", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
