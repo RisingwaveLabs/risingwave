@@ -405,7 +405,7 @@ impl CatalogController {
         let is_materialized_view = streaming_job.is_materialized_view();
         let fragment_actors =
             Self::extract_fragment_and_actors_from_fragments(stream_job_fragments)?;
-        let all_tables = stream_job_fragments.all_tables();
+        let mut all_tables = stream_job_fragments.all_tables();
         let inner = self.inner.write().await;
 
         let mut objects = vec![];
@@ -431,10 +431,11 @@ impl CatalogController {
                     // look up the table from `TableFragments`.
                     // See `ActorGraphBuilder::new`.
                     let table = all_tables
-                        .get(&(state_table_id as u32))
+                        .get_mut(&(state_table_id as u32))
                         .unwrap_or_else(|| panic!("table {} not found", state_table_id));
                     assert_eq!(table.id, state_table_id as u32);
                     assert_eq!(table.fragment_id, fragment_id as u32);
+                    table.job_id = Some(streaming_job.id() as u32);
                     let vnode_count = table.vnode_count();
 
                     table::ActiveModel {
