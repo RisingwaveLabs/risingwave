@@ -157,3 +157,22 @@ CREATE TABLE test_default_value (
     "city" varchar(200) default 'Shanghai',
     PRIMARY KEY ("id")
 );
+
+CREATE TABLE IF NOT EXISTS json_table(
+    id INT,
+    c_json JSONB,
+    c_jsonb JSONB,
+    c_json_array JSONB[],
+    c_jsonb_array JSONB[],
+    PRIMARY KEY (id)
+) 
+from pg_source table 'public.json_table';
+
+INSERT INTO
+  json_table 
+VALUES
+  (1, '{"id": 1, "name": "alice"}', '{"id": 1, "name": "alice"}', ARRAY['{"id": 1, "name": "alice"}'::json], ARRAY['{"id": 1, "name": "alice"}'::jsonb]),
+  (2, '{}', '{}', ARRAY['{}'::json], ARRAY['{}'::jsonb]),
+  (3, '{}', '{}', array[]::json[], array[]::jsonb[]),
+  (4, NULL, NULL, NULL, NULL);
+  

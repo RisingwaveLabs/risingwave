@@ -375,3 +375,27 @@ SELECT * FROM partitioned_timestamp_table_shared ORDER BY c_boolean, c_int;
 17 t 2024-09-07 16:45:00
 18 t 2025-01-08 18:30:00
 19 t 2025-07-09 07:10:00
+
+query II
+select * from json_table order by id;
+----
+1  {"id": 1, "name": "alice"} {"id": 1, "name": "alice"} {"{\"id\": 1, \"name\": \"alice\"}"} {"{\"id\": 1, \"name\": \"alice\"}"}
+2  {}                         {}                         {"{}"}                               {"{}"}
+3  {}                         {}                         {}                                   {}
+4  NULL                       NULL                       NULL                                 NULL
+11 {"id": 1, "name": "alice"} {"id": 1, "name": "alice"} {"{\"id\": 1, \"name\": \"alice\"}"} {"{\"id\": 1, \"name\": \"alice\"}"}
+12 {}                         {}                         {"{}"}                               {"{}"}
+13 {}                         {}                         {}                                   {}
+14 NULL                       NULL                       NULL                                 NULL
+
+query II
+select * from json_table_shared order by id;
+----
+1  {"id": 1, "name": "alice"} {"id": 1, "name": "alice"} {"{\"id\": 1, \"name\": \"alice\"}"} {"{\"id\": 1, \"name\": \"alice\"}"}
+2  {}                         {}                         {"{}"}                               {"{}"}
+3  {}                         {}                         {}                                   {}
+4  NULL                       NULL                       NULL                                 NULL
+11 {"id": 1, "name": "alice"} {"id": 1, "name": "alice"} {"{\"id\": 1, \"name\": \"alice\"}"} {"{\"id\": 1, \"name\": \"alice\"}"}
+12 {}                         {}                         {"{}"}                               {"{}"}
+13 {}                         {}                         {}                                   {}
+14 NULL                       NULL                       NULL                                 NULL

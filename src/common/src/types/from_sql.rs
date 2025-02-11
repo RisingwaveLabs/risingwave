@@ -33,7 +33,7 @@ impl<'a> FromSql<'a> for ScalarImpl {
             Type::TIME => ScalarImpl::from(Time::from_sql(ty, raw)?),
             Type::TIMESTAMP => ScalarImpl::from(Timestamp::from_sql(ty, raw)?),
             Type::TIMESTAMPTZ => ScalarImpl::from(Timestamptz::from_sql(ty, raw)?),
-            Type::JSONB => ScalarImpl::from(JsonbVal::from_sql(ty, raw)?),
+            Type::JSON | Type::JSONB => ScalarImpl::from(JsonbVal::from_sql(ty, raw)?),
             Type::INTERVAL => ScalarImpl::from(Interval::from_sql(ty, raw)?),
             Type::BYTEA => ScalarImpl::from(Vec::<u8>::from_sql(ty, raw)?.into_boxed_slice()),
             Type::VARCHAR | Type::TEXT | Type::BPCHAR => {
@@ -68,6 +68,7 @@ impl<'a> FromSql<'a> for ScalarImpl {
                 | Type::TIME
                 | Type::TIMESTAMP
                 | Type::TIMESTAMPTZ
+                | Type::JSON
                 | Type::JSONB
                 | Type::INTERVAL
                 | Type::BYTEA

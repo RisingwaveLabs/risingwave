@@ -589,17 +589,25 @@ impl ToSql for JsonbVal {
 
 impl<'a> FromSql<'a> for JsonbVal {
     fn from_sql(
-        _ty: &Type,
+        ty: &Type,
         mut raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        if raw.is_empty() || raw.get_u8() != 1 {
-            return Err("invalid jsonb encoding".into());
-        }
-        Ok(JsonbVal::from(Value::from_text(raw)?))
+        Ok(match *ty {
+            Type::JSON => JsonbVal::from(Value::from_text(raw)?),
+            Type::JSONB => {
+                if raw.is_empty() || raw.get_u8() != 1 {
+                    return Err("invalid jsonb encoding".into());
+                }
+                JsonbVal::from(Value::from_text(raw)?)
+            }
+            _ => {
+                bail_not_implemented!("the JsonbVal's postgres decoding for {ty} is unsupported")
+            }
+        })
     }
 
     fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::JSONB)
+        matches!(*ty, Type::JSONB | Type::JSON)
     }
 }
 
