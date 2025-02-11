@@ -428,10 +428,13 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {
+        let is_materialized_view = streaming_job.is_materialized_view();
         let fragment_actors =
             Self::extract_fragment_and_actors_from_fragments(stream_job_fragments)?;
         let all_tables = stream_job_fragments.all_tables();
         let inner = self.inner.write().await;
+
+        let mut objects = vec![];
         let txn = inner.db.begin().await?;
 
         // Add fragments.
@@ -447,7 +450,7 @@ impl CatalogController {
             Fragment::insert(fragment).exec(&txn).await?;
 
             // Fields including `fragment_id` and `vnode_count` were placeholder values before.
-            // After table fragments are created, update them for all internal tables.
+            // After table fragments are created, update them for all tables.
             if !for_replace {
                 for state_table_id in state_table_ids {
                     // Table's vnode count is not always the fragment's vnode count, so we have to
@@ -456,6 +459,7 @@ impl CatalogController {
                     let table = all_tables
                         .get(&(state_table_id as u32))
                         .unwrap_or_else(|| panic!("table {} not found", state_table_id));
+                    assert_eq!(table.id, state_table_id as u32);
                     assert_eq!(table.fragment_id, fragment_id as u32);
                     let vnode_count = table.vnode_count();
 
@@ -467,6 +471,12 @@ impl CatalogController {
                     }
                     .update(&txn)
                     .await?;
+
+                    if is_materialized_view {
+                        objects.push(PbObject {
+                            object_info: Some(PbObjectInfo::Table(table.clone())),
+                        });
+                    }
                 }
             }
         }
@@ -500,6 +510,11 @@ impl CatalogController {
         }
 
         txn.commit().await?;
+
+        if !objects.is_empty() {
+            self.notify_frontend(Operation::Add, Info::ObjectGroup(PbObjectGroup { objects }))
+                .await;
+        }
 
         Ok(())
     }
