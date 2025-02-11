@@ -18,18 +18,20 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{internal_table_name_to_parts, Field, Schema, StreamJobStatus};
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_expr::aggregate::AggType;
 
 use super::{ApplyResult, BoxedRule, FallibleRule};
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::table_catalog::TableType;
-use crate::expr::{ExprImpl, InputRef, Literal, TableFunctionType};
+use crate::expr::{AggCall, ExprImpl, InputRef, Literal, OrderBy, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
 };
 use crate::optimizer::PlanRef;
-use crate::utils::GroupBy;
+use crate::utils::{Condition, GroupBy};
 use crate::TableCatalog;
+pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 
 /// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalFileScan`
 pub struct TableFunctionToInternalBackfillProgressRule {}
@@ -79,27 +81,66 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
                 None,
                 Default::default(),
             );
-            let project = LogicalProject::new(
-                scan.into(),
-                vec![ExprImpl::InputRef(Box::new(InputRef {
+            let project = {
+                let job_id_expr = ExprImpl::Literal(Box::new(Literal::new(
+                    Some(ScalarImpl::Int32(job_id.table_id as i32)),
+                    DataType::Int32,
+                )));
+                let row_count_expr = ExprImpl::InputRef(Box::new(InputRef {
                     index: row_count_column_index,
                     data_type: DataType::Int64,
-                }))],
-            );
-            let select_exprs = vec![ExprImpl::Literal(Box::new(Literal::new(
-                Some(ScalarImpl::Int32(job_id.table_id as i32)),
-                DataType::Int32,
-            )))];
-            let group_key = GroupBy::GroupKey(vec![ExprImpl::InputRef(Box::new(InputRef {
+                }));
+                LogicalProject::new(
+                    scan.into(),
+                    vec![job_id_expr, row_count_expr],
+                )
+            };
+            counts.push(project.into());
+        }
+        let union = LogicalUnion::new(true, counts);
+        let select_exprs = {
+            let job_id = ExprImpl::InputRef(Box::new(InputRef {
                 index: 0,
                 data_type: DataType::Int32,
-            }))]);
-            let (count, _rewritten_select_exprs, _) =
-                LogicalAgg::create(select_exprs, group_key, None, project.into())?;
-            counts.push(count);
-        }
-        println!("counts: {:?}", counts);
-        ApplyResult::Ok(LogicalUnion::new(true, counts).into())
+            }));
+            let sum_agg = ExprImpl::AggCall(Box::new(AggCall::new(
+                AggType::Builtin(PbAggKind::Sum),
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef {
+                        index: 1,
+                        data_type: DataType::Int64,
+                    })),
+                ],
+                false,
+                OrderBy::any(),
+                Condition::true_cond(),
+                vec![],
+            )?));
+            vec![
+                job_id,
+                sum_agg,
+            ]
+        };
+        let group_key = GroupBy::GroupKey(vec![ExprImpl::InputRef(Box::new(InputRef {
+            index: 0,
+            data_type: DataType::Int32,
+        }))]);
+        let (agg, _rewritten_select_exprs, _rewritten_having_exprs) =
+            LogicalAgg::create(select_exprs, group_key, None, union.into())?;
+        let project = LogicalProject::new(
+            agg.into(),
+            vec![
+                ExprImpl::InputRef(Box::new(InputRef {
+                    index: 0,
+                    data_type: DataType::Int32,
+                })),
+                ExprImpl::InputRef(Box::new(InputRef {
+                    index: 1,
+                    data_type: DataType::Decimal,
+                })).cast_explicit(DataType::Int64)?,
+            ],
+        );
+        ApplyResult::Ok(project.into())
     }
 }
 

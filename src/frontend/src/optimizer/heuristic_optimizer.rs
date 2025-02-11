@@ -102,7 +102,7 @@ impl<'a> HeuristicOptimizer<'a> {
     #[cfg(debug_assertions)]
     pub fn check_equivalent_plan(rule_desc: &str, input_plan: &PlanRef, output_plan: &PlanRef) {
         if !input_plan.schema().type_eq(output_plan.schema()) {
-            panic!("{} fails to generate equivalent plan.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
+            panic!("{} fails to generate equivalent schema.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
                    rule_desc,
                    input_plan.schema(),
                    input_plan.explain_to_string(),
