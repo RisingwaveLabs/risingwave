@@ -158,15 +158,14 @@ CREATE TABLE test_default_value (
     PRIMARY KEY ("id")
 );
 
-CREATE TABLE IF NOT EXISTS json_table(
+CREATE TABLE json_table(
     id INT,
-    c_json JSONB,
+    c_json JSON,
     c_jsonb JSONB,
-    c_json_array JSONB[],
+    c_json_array JSON[],
     c_jsonb_array JSONB[],
     PRIMARY KEY (id)
-)
-from pg_source table 'public.json_table';
+);
 
 INSERT INTO
   json_table
