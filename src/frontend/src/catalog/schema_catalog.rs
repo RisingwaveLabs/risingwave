@@ -648,8 +648,7 @@ impl SchemaCatalog {
         table_name: &str,
     ) -> Option<&Arc<TableCatalog>> {
         self.table_by_name.get(table_name).filter(|&table| {
-            table.stream_job_status == StreamJobStatus::Created
-                || table.is_internal_table()
+            table.stream_job_status == StreamJobStatus::Created || table.is_internal_table()
         })
     }
 
