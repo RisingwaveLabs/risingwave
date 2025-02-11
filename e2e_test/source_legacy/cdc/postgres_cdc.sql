@@ -175,4 +175,3 @@ VALUES
   (2, '{}', '{}', ARRAY['{}'::json], ARRAY['{}'::jsonb]),
   (3, '{}', '{}', array[]::json[], array[]::jsonb[]),
   (4, NULL, NULL, NULL, NULL);
-  
