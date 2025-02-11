@@ -26,9 +26,9 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
-    user_privilege, view, ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId,
+    actor, actor_dispatcher, connection, database, fragment, fragment_relation, function, index,
+    object, object_dependency, schema, secret, sink, source, streaming_job, subscription, table,
+    user, user_privilege, view, ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId,
     I32Array, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, TableId, UserId, VnodeBitmap,
     WorkerId,
 };
@@ -927,6 +927,20 @@ where
             .push(actor_dispatcher);
     }
     Ok(actor_dispatchers_map)
+}
+
+pub async fn get_fragment_upstreams<C>(
+    db: &C,
+    fragment_id: FragmentId,
+) -> MetaResult<Vec<fragment_relation::Model>>
+where
+    C: ConnectionTrait,
+{
+    let upstreams = FragmentRelation::find()
+        .filter(fragment_relation::Column::TargetFragmentId.eq(fragment_id))
+        .all(db)
+        .await?;
+    Ok(upstreams)
 }
 
 /// `get_fragment_mappings` returns the fragment vnode mappings of the given job.

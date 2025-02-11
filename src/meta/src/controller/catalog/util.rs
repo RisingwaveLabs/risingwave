@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_meta_model::fragment_relation;
+
 use super::*;
 
 pub(crate) async fn update_internal_tables(
@@ -392,11 +394,10 @@ impl CatalogController {
                 .exec(txn)
                 .await?;
 
-            let fragments: Vec<(FragmentId, I32Array, StreamNode, i32)> = Fragment::find()
+            let fragments: Vec<(FragmentId, StreamNode, i32)> = Fragment::find()
                 .select_only()
                 .columns(vec![
                     fragment::Column::FragmentId,
-                    fragment::Column::UpstreamFragmentId,
                     fragment::Column::StreamNode,
                     fragment::Column::FragmentTypeMask,
                 ])
@@ -405,8 +406,33 @@ impl CatalogController {
                 .all(txn)
                 .await?;
 
-            for (fragment_id, upstream_fragment_ids, stream_node, fragment_mask) in fragments {
-                let mut upstream_fragment_ids = upstream_fragment_ids.into_inner();
+            let fragment_ids = fragments
+                .iter()
+                .map(|(fragment_id, _, _)| *fragment_id)
+                .collect_vec();
+
+            let fragment_relations: Vec<(FragmentId, FragmentId)> = FragmentRelation::find()
+                .select_only()
+                .columns([
+                    fragment_relation::Column::SourceFragmentId,
+                    fragment_relation::Column::TargetFragmentId,
+                ])
+                .filter(fragment_relation::Column::TargetFragmentId.is_in(fragment_ids))
+                .into_tuple()
+                .all(txn)
+                .await?;
+
+            let mut fragment_upstreams = HashMap::new();
+
+            for (src, dst) in fragment_relations {
+                fragment_upstreams.entry(dst).or_insert(vec![]).push(src);
+            }
+
+            for (fragment_id, stream_node, fragment_mask) in fragments {
+                let mut upstream_fragment_ids = fragment_upstreams
+                    .get(&fragment_id)
+                    .cloned()
+                    .unwrap_or(vec![]);
 
                 let dirty_upstream_fragment_ids = upstream_fragment_ids
                     .extract_if(|id| !all_fragment_ids.contains(id))
@@ -440,11 +466,19 @@ impl CatalogController {
                         true
                     });
 
-                    Fragment::update_many()
-                        .col_expr(
-                            fragment::Column::UpstreamFragmentId,
-                            I32Array::from(upstream_fragment_ids).into(),
+                    FragmentRelation::delete_many()
+                        .filter(
+                            fragment_relation::Column::TargetFragmentId
+                                .eq(fragment_id)
+                                .and(
+                                    fragment_relation::Column::SourceFragmentId
+                                        .is_in(dirty_upstream_fragment_ids),
+                                ),
                         )
+                        .exec(txn)
+                        .await?;
+
+                    Fragment::update_many()
                         .col_expr(
                             fragment::Column::StreamNode,
                             StreamNode::from(&pb_stream_node).into(),
