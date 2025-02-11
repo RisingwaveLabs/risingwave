@@ -178,8 +178,6 @@ impl CatalogController {
             }
         }
 
-        let mut objects = vec![];
-
         match streaming_job {
             StreamingJob::MaterializedView(table) => {
                 let job_id = Self::create_streaming_job_obj(
@@ -198,10 +196,6 @@ impl CatalogController {
                 table.id = job_id as _;
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
-
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Table(table.to_owned())),
-                });
             }
             StreamingJob::Sink(sink, _) => {
                 if let Some(target_table_id) = sink.target_table {
@@ -351,11 +345,6 @@ impl CatalogController {
         }
 
         txn.commit().await?;
-
-        if !objects.is_empty() {
-            self.notify_frontend(Operation::Add, Info::ObjectGroup(PbObjectGroup { objects }))
-                .await;
-        }
 
         Ok(())
     }
