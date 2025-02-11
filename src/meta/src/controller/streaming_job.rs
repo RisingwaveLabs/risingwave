@@ -389,21 +389,6 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        if job.is_materialized_view() {
-            self.notify_frontend(
-                Operation::Add,
-                Info::ObjectGroup(PbObjectGroup {
-                    objects: incomplete_internal_tables
-                        .iter()
-                        .map(|table| PbObject {
-                            object_info: Some(PbObjectInfo::Table(table.clone())),
-                        })
-                        .collect(),
-                }),
-            )
-            .await;
-        }
-
         Ok(table_id_map)
     }
 
