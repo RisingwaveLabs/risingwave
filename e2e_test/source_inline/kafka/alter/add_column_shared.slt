@@ -107,8 +107,7 @@ cat << EOF | rpk topic produce shared_source_alter -f "%p %v\n" -p 0
 3 {"v1": 8, "v2": "h", "v3": "h1"}
 EOF
 
-sleep 2s
-
+sleep 5s
 
 query ??? rowsort
 select * from mv_after_alter;
