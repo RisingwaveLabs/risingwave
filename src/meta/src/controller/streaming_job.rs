@@ -1244,19 +1244,27 @@ impl CatalogController {
         }
         // 2.2 update downstream fragment's Merge node, and upstream_fragment_id
         for fragment_id in to_update_fragment_ids {
-            let (fragment_id, mut stream_node, mut upstream_fragment_id) =
-                Fragment::find_by_id(fragment_id)
-                    .select_only()
-                    .columns([
-                        fragment::Column::FragmentId,
-                        fragment::Column::StreamNode,
-                        fragment::Column::UpstreamFragmentId,
-                    ])
-                    .into_tuple::<(FragmentId, StreamNode, I32Array)>()
-                    .one(txn)
-                    .await?
-                    .map(|(id, node, upstream)| (id, node.to_protobuf(), upstream))
-                    .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
+            let (fragment_id, mut stream_node) = Fragment::find_by_id(fragment_id)
+                .select_only()
+                .columns([
+                    fragment::Column::FragmentId,
+                    fragment::Column::StreamNode,
+                    // fragment::Column::UpstreamFragmentId,
+                ])
+                .into_tuple::<(FragmentId, StreamNode)>()
+                .one(txn)
+                .await?
+                .map(|(id, node)| (id, node.to_protobuf()))
+                .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
+
+            let mut upstream_fragments: Vec<FragmentId> = FragmentRelation::find()
+                .select_only()
+                .column(fragment_relation::Column::SourceFragmentId)
+                .filter(fragment_relation::Column::TargetFragmentId.eq(fragment_id))
+                .into_tuple()
+                .all(txn)
+                .await?;
+
             visit_stream_node_mut(&mut stream_node, |body| {
                 if let PbNodeBody::Merge(m) = body
                     && let Some(new_fragment_id) = fragment_replace_map.get(&m.upstream_fragment_id)
@@ -1264,7 +1272,7 @@ impl CatalogController {
                     m.upstream_fragment_id = *new_fragment_id;
                 }
             });
-            for fragment_id in &mut upstream_fragment_id.0 {
+            for fragment_id in &mut upstream_fragments {
                 if let Some(new_fragment_id) = fragment_replace_map.get(&(*fragment_id as _)) {
                     *fragment_id = *new_fragment_id as _;
                 }
@@ -1272,11 +1280,14 @@ impl CatalogController {
             fragment::ActiveModel {
                 fragment_id: Set(fragment_id),
                 stream_node: Set(StreamNode::from(&stream_node)),
-                upstream_fragment_id: Set(upstream_fragment_id),
+                // upstream_fragment_id: Set(upstream_fragment_id),
                 ..Default::default()
             }
             .update(txn)
             .await?;
+
+            todo!()
+            // todo,
         }
 
         // 3. remove dummy object.

@@ -30,7 +30,7 @@ pub struct Model {
     /// Specifically, `Merge` nodes' `upstream_actor_id` will be filled. (See `compose_fragment`)
     pub stream_node: StreamNode,
     pub state_table_ids: I32Array,
-    pub upstream_fragment_id: I32Array,
+    // pub upstream_fragment_id: I32Array,
     pub vnode_count: i32,
 }
 

@@ -505,7 +505,7 @@ impl ScaleController {
                 actors,
                 mut actor_dispatchers,
                 fragment_downstreams: _,
-                fragment_upstreams: _,
+                fragment_upstreams,
                 related_jobs,
                 job_resource_groups: _job_resource_groups,
             } = mgr
@@ -568,7 +568,6 @@ impl ScaleController {
                     distribution_type,
                     stream_node,
                     state_table_ids,
-                    upstream_fragment_id,
                     vnode_count: _,
                 },
             ) in fragments
@@ -587,13 +586,18 @@ impl ScaleController {
                 let (related_job, job_definition) =
                     related_jobs.get(&job_id).expect("job not found");
 
+                let upstream_fragment_ids = fragment_upstreams
+                    .get(&(fragment_id as _))
+                    .map(|upstreams| upstreams.iter().map(|&(id, _)| id as u32).collect_vec())
+                    .unwrap_or_default();
+
                 #[expect(deprecated)]
                 let fragment = CustomFragmentInfo {
                     fragment_id: fragment_id as _,
                     fragment_type_mask: fragment_type_mask as _,
                     distribution_type: distribution_type.into(),
                     state_table_ids: state_table_ids.into_u32_array(),
-                    upstream_fragment_ids: upstream_fragment_id.into_u32_array(),
+                    upstream_fragment_ids,
                     actor_template: PbStreamActor {
                         nodes: Some(stream_node.to_protobuf()),
                         actor_id,
