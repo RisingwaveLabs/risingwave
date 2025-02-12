@@ -435,7 +435,7 @@ impl CatalogController {
                         .unwrap_or_else(|| panic!("table {} not found", state_table_id));
                     assert_eq!(table.id, state_table_id as u32);
                     assert_eq!(table.fragment_id, fragment_id as u32);
-                    table.job_id = Some(streaming_job.id() as u32);
+                    table.job_id = Some(streaming_job.id());
                     let vnode_count = table.vnode_count();
 
                     table::ActiveModel {
