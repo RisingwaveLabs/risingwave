@@ -38,6 +38,8 @@ pub struct FunctionCatalog {
     pub link: Option<String>,
     pub compressed_binary: Option<Vec<u8>>,
     pub always_retry_on_network_error: bool,
+    pub is_async: Option<bool>,
+    pub is_batched: Option<bool>,
 }
 
 #[derive(Clone, Display, PartialEq, Eq, Hash, Debug, EnumAsInner)]
@@ -76,6 +78,8 @@ impl From<&PbFunction> for FunctionCatalog {
             link: prost.link.clone(),
             compressed_binary: prost.compressed_binary.clone(),
             always_retry_on_network_error: prost.always_retry_on_network_error,
+            is_async: prost.is_async,
+            is_batched: prost.is_batched,
         }
     }
 }

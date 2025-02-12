@@ -334,6 +334,9 @@ message Function {
   optional string runtime = 18;
   reserved 19;
   reserved "function_type";
+  // additional options for javascript functions
+  optional bool is_async = 20;
+  optional bool is_batched = 21;
 
   oneof kind {
     ScalarFunction scalar = 11;

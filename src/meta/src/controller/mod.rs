@@ -457,6 +457,8 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
             always_retry_on_network_error: value.0.always_retry_on_network_error,
+            is_async: value.0.options.0.get("async").map(|v| v == "true"),
+            is_batched: value.0.options.0.get("batch").map(|v| v == "true"),
         }
     }
 }

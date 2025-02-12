@@ -133,6 +133,8 @@ pub async fn handle_create_aggregate(
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),
         always_retry_on_network_error: false,
+        is_async: None,
+        is_batched: None,
     };
 
     let catalog_writer = session.catalog_writer()?;

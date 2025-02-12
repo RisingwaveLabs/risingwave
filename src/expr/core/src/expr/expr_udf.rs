@@ -185,6 +185,9 @@ impl Build for UserDefinedFunction {
             arg_names: &udf.arg_names,
             return_type: &return_type,
             always_retry_on_network_error: udf.always_retry_on_network_error,
+            language,
+            is_async: udf.is_async,
+            is_batched: udf.is_batched,
         })
         .context("failed to build UDF runtime")?;
 

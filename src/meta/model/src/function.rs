@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use risingwave_pb::catalog::function::Kind;
 use risingwave_pb::catalog::PbFunction;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
 
-use crate::{DataType, DataTypeArray, FunctionId};
+use crate::{DataType, DataTypeArray, FunctionId, Property};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
@@ -48,7 +50,9 @@ pub struct Model {
     pub body: Option<String>,
     pub compressed_binary: Option<Vec<u8>>,
     pub kind: FunctionKind,
+    // To keep compatible with legacy code, this is not included in `options`.
     pub always_retry_on_network_error: bool,
+    pub options: Property,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -93,6 +97,13 @@ impl From<FunctionKind> for Kind {
 
 impl From<PbFunction> for ActiveModel {
     fn from(function: PbFunction) -> Self {
+        let mut options = BTreeMap::new();
+        if let Some(b) = function.is_batched {
+            options.insert("batch".to_string(), b.to_string());
+        }
+        if let Some(b) = function.is_async {
+            options.insert("async".to_string(), b.to_string());
+        }
         Self {
             function_id: Set(function.id as _),
             name: Set(function.name),
@@ -107,6 +118,7 @@ impl From<PbFunction> for ActiveModel {
             compressed_binary: Set(function.compressed_binary),
             kind: Set(function.kind.unwrap().into()),
             always_retry_on_network_error: Set(function.always_retry_on_network_error),
+            options: Set(options.into()),
         }
     }
 }

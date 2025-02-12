@@ -619,6 +619,9 @@ message UserDefinedFunction {
   optional string runtime = 11;
   reserved 12;
   reserved "function_type";
+  // additional options for javascript functions
+  optional bool is_async = 13;
+  optional bool is_batched = 14;
 }
 
 // Additional information for user defined table/aggregate functions.

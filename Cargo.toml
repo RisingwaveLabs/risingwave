@@ -164,7 +164,7 @@ iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.g
 opendal = "0.49"
 # used only by arrow-udf-flight
 arrow-flight = "53"
-arrow-udf-js = "0.5"
+arrow-udf-js = { git = "https://github.com/arrow-udf/arrow-udf.git", rev = "05e6dc9b5d0403fe7b88643925992da00cda22e3" }
 arrow-udf-wasm = { version = "0.4", features = ["build"] }
 arrow-udf-python = "0.4"
 arrow-udf-flight = "0.4"

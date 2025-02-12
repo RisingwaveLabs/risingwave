@@ -283,3 +283,20 @@ select series_legacy(5);
 
 statement ok
 drop function series_legacy;
+
+statement ok
+create function echo_batch(s varchar) returns varchar language javascript as $$
+export function echo_batch(vals) {
+    return vals.map(v => v + "!");
+}
+$$ WITH (batch = true);
+
+query T
+select echo_batch(x) from (values ('hello'), (null), ('world')) as t(x);
+----
+hello!
+null!
+world!
+
+statement ok
+drop function echo_batch;

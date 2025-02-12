@@ -1,0 +1,48 @@
+statement ok
+create function int_42() returns int language javascript as $$
+export async function int_42() {
+    return 42;
+}
+$$ WITH (async = true);
+
+query I
+select int_42();
+----
+42
+
+statement ok
+drop function int_42;
+
+statement ok
+create function fetch_todo(id int) returns varchar language javascript as $$
+export async function fetch_todo(id) {
+    const response = await fetch('https://dummyjson.com/todos/' + id);
+    const data = await response.json();
+    return data.todo;
+}
+$$ WITH (async = true);
+
+query I
+select fetch_todo(1);
+----
+Do something nice for someone you care about
+
+statement ok
+drop function fetch_todo;
+
+statement ok
+create function echo_batch_async(s varchar) returns varchar language javascript as $$
+export async function echo_batch_async(vals) {
+    return vals.map(v => v + "!");
+}
+$$ WITH (async = true, batch = true);
+
+query T
+select echo_batch_async(x) from (values ('hello'), (null), ('world')) as t(x);
+----
+hello!
+null!
+world!
+
+statement ok
+drop function echo_batch_async;

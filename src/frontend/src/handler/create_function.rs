@@ -173,6 +173,8 @@ pub async fn handle_create_function(
         always_retry_on_network_error: with_options
             .always_retry_on_network_error
             .unwrap_or_default(),
+        is_async: with_options.r#async,
+        is_batched: with_options.batch,
     };
 
     let catalog_writer = session.catalog_writer()?;
