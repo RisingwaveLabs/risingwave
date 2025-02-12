@@ -11,24 +11,18 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::future::IntoFuture;
+
 use std::sync::Arc;
 
-use deltalake::parquet::arrow::async_reader::AsyncFileReader;
 use futures_async_stream::try_stream;
 use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
-use risingwave_common::bail;
 use risingwave_common::types::{Datum, ScalarImpl};
-use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 
 use crate::parser::ConnectorResult;
-use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
-use crate::source::filesystem::opendal_source::{OpendalGcs, OpendalPosixFs, OpendalS3};
 use crate::source::iceberg::is_parquet_schema_match_source_schema;
-use crate::source::reader::desc::SourceDesc;
-use crate::source::{ConnectorProperties, SourceColumnDesc};
+use crate::source::SourceColumnDesc;
 /// `ParquetParser` is responsible for converting the incoming `record_batch_stream`
 /// into a `streamChunk`.
 #[derive(Debug)]
@@ -185,85 +179,4 @@ impl ParquetParser {
         let data_chunk = DataChunk::new(chunk_columns.clone(), record_batch.num_rows());
         Ok(data_chunk.into())
     }
-}
-
-/// Retrieves the total number of rows in the specified Parquet file.
-///
-/// This function constructs an `OpenDAL` operator using the information
-/// from the provided `source_desc`. It then accesses the metadata of the
-/// Parquet file to determine and return the total row count.
-///
-/// # Arguments
-///
-/// * `file_name` - The parquet file name.
-/// * `source_desc` - A struct or type containing the necessary information
-///                   to construct the `OpenDAL` operator.
-///
-/// # Returns
-///
-/// Returns the total number of rows in the Parquet file as a `usize`.
-pub async fn get_total_row_nums_for_parquet_file(
-    parquet_file_name: &str,
-    source_desc: SourceDesc,
-) -> ConnectorResult<usize> {
-    let total_row_num = match source_desc.source.config {
-        ConnectorProperties::Gcs(prop) => {
-            let connector: OpendalEnumerator<OpendalGcs> =
-                OpendalEnumerator::new_gcs_source(*prop)?;
-            let mut reader = connector
-                .op
-                .reader_with(parquet_file_name)
-                .into_future()
-                .await?
-                .into_futures_async_read(..)
-                .await?
-                .compat();
-
-            reader
-                .get_metadata()
-                .await
-                .map_err(anyhow::Error::from)?
-                .file_metadata()
-                .num_rows()
-        }
-        ConnectorProperties::OpendalS3(prop) => {
-            let connector: OpendalEnumerator<OpendalS3> =
-                OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
-            let mut reader = connector
-                .op
-                .reader_with(parquet_file_name)
-                .into_future()
-                .await?
-                .into_futures_async_read(..)
-                .await?
-                .compat();
-            reader
-                .get_metadata()
-                .await
-                .map_err(anyhow::Error::from)?
-                .file_metadata()
-                .num_rows()
-        }
-
-        ConnectorProperties::PosixFs(prop) => {
-            let connector: OpendalEnumerator<OpendalPosixFs> =
-                OpendalEnumerator::new_posix_fs_source(*prop)?;
-            let mut reader = connector
-                .op
-                .reader_with(parquet_file_name)
-                .into_future()
-                .await?
-                .into_futures_async_read(..)
-                .await?
-                .compat();
-            reader
-                .get_metadata()
-                .await
-                .map_err(anyhow::Error::from)?
-                .file_metadata()
-                .num_rows()
-        }
-        other => bail!("Unsupported source: {:?}", other),
-    };
-    Ok(total_row_num as usize)
 }

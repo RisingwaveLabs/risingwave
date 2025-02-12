@@ -21,8 +21,6 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::ScalarRef;
-use risingwave_connector::parser::parquet_parser::get_total_row_nums_for_parquet_file;
-use risingwave_connector::parser::EncodingProperties;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
@@ -317,50 +315,20 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     // For Parquet encoding, the offset indicates the current row being read.
                                     // Therefore, to determine if the end of a Parquet file has been reached, we need to compare its offset with the total number of rows.
                                     // We directly obtain the total row count and set the size in `OpendalFsSplit` to this value.
-                                    let file_assignment = if let EncodingProperties::Parquet =
-                                        source_desc.source.parser_config.encoding_config
-                                    {
-                                        let filename_list: Vec<_> = chunk
-                                            .data_chunk()
-                                            .rows()
-                                            .map(|row| {
-                                                let filename = row.datum_at(0).unwrap().into_utf8();
-                                                filename.to_owned()
-                                            })
-                                            .collect();
-                                        let mut parquet_file_assignment = vec![];
-                                        for filename in &filename_list {
-                                            let total_row_num =
-                                                get_total_row_nums_for_parquet_file(
-                                                    filename,
-                                                    source_desc.clone(),
-                                                )
-                                                .await?;
-                                            parquet_file_assignment.push(
-                                                OpendalFsSplit::<Src>::new(
-                                                    filename.to_owned(),
-                                                    0,
-                                                    total_row_num - 1, // -1 because offset start from 0.
-                                                ),
-                                            )
-                                        }
-                                        parquet_file_assignment
-                                    } else {
-                                        chunk
-                                            .data_chunk()
-                                            .rows()
-                                            .map(|row| {
-                                                let filename = row.datum_at(0).unwrap().into_utf8();
+                                    let file_assignment = chunk
+                                        .data_chunk()
+                                        .rows()
+                                        .map(|row| {
+                                            let filename = row.datum_at(0).unwrap().into_utf8();
 
-                                                let size = row.datum_at(2).unwrap().into_int64();
-                                                OpendalFsSplit::<Src>::new(
-                                                    filename.to_owned(),
-                                                    0,
-                                                    size as usize,
-                                                )
-                                            })
-                                            .collect()
-                                    };
+                                            let size = row.datum_at(2).unwrap().into_int64();
+                                            OpendalFsSplit::<Src>::new(
+                                                filename.to_owned(),
+                                                0,
+                                                size as usize,
+                                            )
+                                        })
+                                        .collect();
                                     state_store_handler.set_states(file_assignment).await?;
                                     state_store_handler.state_table.try_flush().await?;
                                 }
@@ -372,32 +340,37 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                             let mapping =
                                 get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
                                     .unwrap();
-                            debug_assert_eq!(mapping.len(), 1);
                             if let Some((split_id, offset)) = mapping.into_iter().next() {
-                                let row = state_store_handler
-                                    .get(split_id.clone())
-                                    .await?
-                                    .expect("The fs_split should be in the state table.");
-                                let fs_split = match row.datum_at(1) {
-                                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                                        OpendalFsSplit::<Src>::restore_from_json(
-                                            jsonb_ref.to_owned_scalar(),
-                                        )?
-                                    }
-                                    _ => unreachable!(),
-                                };
-                                // FIXME(rc): Here we compare `offset` with `fs_split.size` to determine
-                                // whether the file is finished, where the `offset` is the starting position
-                                // of the NEXT message line in the file. However, In other source connectors,
-                                // we use the word `offset` to represent the offset of the current message.
-                                // We have to be careful about this semantical inconsistency.
-                                if offset.parse::<usize>().unwrap() >= fs_split.size {
+                                // When `offset = usize::MAX` , it indicates that reading the current file (split_id) is finished.
+                                // At this point, it can be deleted from the state table.
+                                // This chunk serves only as an EOF marker, so it will be skipped and not yielded to downstream.
+                                if offset.parse::<usize>().unwrap() == usize::MAX {
                                     splits_on_fetch -= 1;
                                     state_store_handler.delete(split_id).await?;
                                 } else {
+                                    let row = state_store_handler.get(split_id.clone()).await?
+                                    .unwrap_or_else(|| {
+                                        panic!("The fs_split (file_name) {:?} should be in the state table.",
+                                      split_id)
+                                    });
+                                    let fs_split = match row.datum_at(1) {
+                                        Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                                            OpendalFsSplit::<Src>::restore_from_json(
+                                                jsonb_ref.to_owned_scalar(),
+                                            )?
+                                        }
+                                        _ => unreachable!(),
+                                    };
                                     state_store_handler
                                         .set(split_id, fs_split.encode_to_json())
                                         .await?;
+                                    let chunk = prune_additional_cols(
+                                        &chunk,
+                                        split_idx,
+                                        offset_idx,
+                                        &source_desc.columns,
+                                    );
+                                    yield Message::Chunk(chunk);
                                 }
                             }
 
