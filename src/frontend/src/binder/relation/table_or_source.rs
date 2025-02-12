@@ -175,7 +175,7 @@ impl Binder {
                                     return Ok(self
                                         .resolve_source_relation(&source_catalog.clone(), as_of));
                                 } else if let Some(table_catalog) = schema
-                                    .get_created_table_or_all_internal_tables_by_name(table_name)
+                                    .get_created_table_or_any_internal_table_by_name(table_name)
                                 {
                                     return self.resolve_table_relation(
                                         table_catalog.clone(),

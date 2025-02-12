@@ -643,7 +643,7 @@ impl SchemaCatalog {
             .filter(|&table| table.stream_job_status == StreamJobStatus::Created)
     }
 
-    pub fn get_created_table_or_all_internal_tables_by_name(
+    pub fn get_created_table_or_any_internal_table_by_name(
         &self,
         table_name: &str,
     ) -> Option<&Arc<TableCatalog>> {
