@@ -643,6 +643,8 @@ impl SchemaCatalog {
             .filter(|&table| table.stream_job_status == StreamJobStatus::Created)
     }
 
+    /// Get a table by name, if it's a created table,
+    /// or if it's an internal table (whether created or not).
     pub fn get_created_table_or_any_internal_table_by_name(
         &self,
         table_name: &str,
