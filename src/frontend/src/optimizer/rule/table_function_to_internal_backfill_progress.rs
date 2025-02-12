@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::{internal_table_name_to_parts, Field, Schema, StreamJobStatus};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::AggType;
@@ -23,15 +24,14 @@ use risingwave_expr::aggregate::AggType;
 use super::{ApplyResult, BoxedRule, FallibleRule};
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::table_catalog::TableType;
-use crate::expr::{AggCall, ExprImpl, InputRef, Literal, OrderBy, TableFunctionType};
+use crate::expr::{AggCall, ExprImpl, ExprType, FunctionCall, InputRef, Literal, OrderBy, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
-};
+use crate::optimizer::plan_node::{LogicalAgg, LogicalJoin, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues};
 use crate::optimizer::PlanRef;
 use crate::utils::{Condition, GroupBy};
 use crate::TableCatalog;
 pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
+use risingwave_pb::plan_common::JoinType;
 
 /// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalFileScan`
 pub struct TableFunctionToInternalBackfillProgressRule {}
@@ -60,12 +60,14 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
         }
 
         let mut counts = Vec::with_capacity(backfilling_tables.len());
+        let mut backfilling_job_ids = vec![];
         for table in backfilling_tables {
             let Some(job_id) = table.job_id else {
                 return ApplyResult::Err(
                     anyhow!("`job_id` column not found in backfill table").into(),
                 );
             };
+            backfilling_job_ids.push(job_id);
             let Some(row_count_column_index) =
                 table.columns.iter().position(|c| c.name() == "row_count")
             else {
@@ -127,7 +129,7 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
         }))]);
         let (agg, _rewritten_select_exprs, _rewritten_having_exprs) =
             LogicalAgg::create(select_exprs, group_key, None, union.into())?;
-        let project = LogicalProject::new(
+        let current_counts = LogicalProject::new(
             agg.into(),
             vec![
                 ExprImpl::InputRef(Box::new(InputRef {
@@ -137,9 +139,92 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
                 ExprImpl::InputRef(Box::new(InputRef {
                     index: 1,
                     data_type: DataType::Decimal,
-                })).cast_explicit(DataType::Int64)?,
+                })).cast_explicit(DataType::Decimal)?,
             ],
         );
+
+        let total_counts = {
+            let catalog = plan.ctx().session_ctx().env().catalog_reader().read_guard();
+            let mut total_counts = vec![];
+            for job_id in backfilling_job_ids {
+                let total_key_count = if let Some(stats) = catalog.table_stats().table_stats.get(&(job_id.table_id)) {
+                    stats.total_key_count
+                } else {
+                    return ApplyResult::Err(
+                        anyhow!("Table stats not found for table_id: {}", job_id.table_id).into(),
+                    );
+                };
+                let job_id_expr = ExprImpl::Literal(Box::new(Literal::new(
+                    Some(ScalarImpl::Int32(job_id.table_id as i32)),
+                    DataType::Int32,
+                )));
+                let total_key_count_expr = ExprImpl::Literal(Box::new(Literal::new(
+                    Some(ScalarImpl::Int64(total_key_count as i64)),
+                    DataType::Int64,
+                )));
+                let total_count = LogicalValues::new(
+                    vec![vec![job_id_expr, total_key_count_expr]],
+                    Schema::new(vec![
+                        Field::new("job_id", DataType::Int32),
+                        Field::new("total_key_count", DataType::Int64),
+                    ]),
+                    plan.ctx().clone(),
+                );
+                total_counts.push(total_count.into());
+            }
+            LogicalUnion::new(true, total_counts)
+        };
+
+        let join = {
+            let conjunctions = vec![
+                ExprImpl::FunctionCall(Box::new(FunctionCall::new(
+                    ExprType::Equal,
+                    vec![
+                        ExprImpl::InputRef(Box::new(InputRef {
+                            index: 0,
+                            data_type: DataType::Int32,
+                        })),
+                        ExprImpl::InputRef(Box::new(InputRef {
+                            index: 2,
+                            data_type: DataType::Int32,
+                        })),
+                    ],
+                )?)),
+            ];
+            let condition = Condition { conjunctions };
+            LogicalJoin::new(
+                current_counts.into(),
+                total_counts.into(),
+                JoinType::Inner,
+                condition,
+            )
+        };
+
+        let project = {
+            let op1 = ExprImpl::InputRef(Box::new(InputRef {
+                index: 1,
+                data_type: DataType::Int64,
+            })).cast_implicit(DataType::Decimal)?;
+            let op2 = ExprImpl::InputRef(Box::new(InputRef {
+                index: 3,
+                data_type: DataType::Int64,
+            })).cast_implicit(DataType::Decimal)?;
+            let div_expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new(
+                ExprType::Divide,
+                vec![op1, op2],
+            )?));
+            LogicalProject::new(
+                join.into(),
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef {
+                        index: 0,
+                        data_type: DataType::Int32,
+                    })),
+                    div_expr,
+                ],
+            )
+        };
+
         ApplyResult::Ok(project.into())
     }
 }
