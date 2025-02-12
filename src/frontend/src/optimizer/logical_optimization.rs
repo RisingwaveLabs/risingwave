@@ -134,7 +134,7 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
         "Table Function Convert",
         vec![
             // Apply file scan rule first
-            TableFunctionToFileScanRule::create(),
+            TableFunctionToInternalBackfillProgressRule::create(),
             // Apply postgres query rule next
             TableFunctionToPostgresQueryRule::create(),
             // Apply mysql query rule next
@@ -149,7 +149,7 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
 static TABLE_FUNCTION_TO_FILE_SCAN: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Table Function To FileScan",
-        vec![TableFunctionToFileScanRule::create()],
+        vec![TableFunctionToInternalBackfillProgressRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -169,6 +169,15 @@ static TABLE_FUNCTION_TO_MYSQL_QUERY: LazyLock<OptimizationStage> = LazyLock::ne
         ApplyOrder::TopDown,
     )
 });
+
+static TABLE_FUNCTION_TO_INTERNAL_BACKFILL_PROGRESS: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Table Function To Internal Backfill Progress",
+            vec![TableFunctionToInternalBackfillProgressRule::create()],
+            ApplyOrder::TopDown,
+        )
+    });
 
 static VALUES_EXTRACT_PROJECT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
@@ -734,6 +743,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_FILE_SCAN)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_POSTGRES_QUERY)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MYSQL_QUERY)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_BACKFILL_PROGRESS)?;
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
