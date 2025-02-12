@@ -26,11 +26,11 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr_context::FRAGMENT_ID;
-use risingwave_pb::expr::ExprNode;
+use risingwave_pb::expr::{ExprNode, PbUdfExprVersion};
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
-use crate::sig::{UdfImpl, UdfKind, UdfOptions};
+use crate::sig::{BuildOptions, UdfImpl, UdfKind};
 use crate::{bail, ExprError, Result};
 
 #[derive(Debug)]
@@ -168,21 +168,39 @@ impl Build for UserDefinedFunction {
     ) -> Result<Self> {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
-        let identifier = udf.get_identifier()?;
+        let name = udf.get_name();
+        let arg_types = udf.arg_types.iter().map(|t| t.into()).collect::<Vec<_>>();
 
         let language = udf.language.as_str();
         let runtime = udf.runtime.as_deref();
         let link = udf.link.as_deref();
 
+        let name_in_runtime = if udf.version() < PbUdfExprVersion::NameInRuntime {
+            if language == "rust" || language == "wasm" {
+                // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
+                // is not used any more. The real bound function name should be the same
+                // as `name`.
+                Some(name)
+            } else {
+                // `identifier`s of other UDFs already mean `name_in_runtime` before `NameInRuntime`.
+                udf.identifier.as_ref()
+            }
+        } else {
+            // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
+            udf.identifier.as_ref()
+        }
+        .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
+
         // lookup UDF builder
         let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
-        let runtime = build_fn(UdfOptions {
+        let runtime = build_fn(BuildOptions {
             kind: UdfKind::Scalar,
             body: udf.body.as_deref(),
             compressed_binary: udf.compressed_binary.as_deref(),
             link: udf.link.as_deref(),
-            identifier,
+            name_in_runtime,
             arg_names: &udf.arg_names,
+            arg_types: &arg_types,
             return_type: &return_type,
             always_retry_on_network_error: udf.always_retry_on_network_error,
         })
@@ -202,7 +220,7 @@ impl Build for UserDefinedFunction {
         let metrics = GLOBAL_METRICS.with_label_values(
             link.unwrap_or(""),
             language,
-            identifier,
+            name,
             // batch query does not have a fragment_id
             &FRAGMENT_ID::try_with(ToOwned::to_owned)
                 .unwrap_or(0)
@@ -211,12 +229,12 @@ impl Build for UserDefinedFunction {
 
         Ok(Self {
             children: udf.children.iter().map(build_child).try_collect()?,
-            arg_types: udf.arg_types.iter().map(|t| t.into()).collect(),
+            arg_types,
             return_type,
             arg_schema,
             runtime,
             arrow_convert,
-            span: format!("udf_call({})", identifier).into(),
+            span: format!("udf_call({})", name).into(),
             metrics,
         })
     }
@@ -348,15 +366,15 @@ impl MetricsVec {
         &self,
         link: &str,
         language: &str,
-        identifier: &str,
+        name: &str,
         fragment_id: &str,
     ) -> Metrics {
         // generate an unique id for each instance
         static NEXT_INSTANCE_ID: AtomicU64 = AtomicU64::new(0);
         let instance_id = NEXT_INSTANCE_ID.fetch_add(1, Ordering::Relaxed).to_string();
 
-        let labels = &[link, language, identifier, fragment_id];
-        let labels5 = &[link, language, identifier, fragment_id, &instance_id];
+        let labels = &[link, language, name, fragment_id];
+        let labels5 = &[link, language, name, fragment_id, &instance_id];
 
         Metrics {
             success_count: self.success_count.with_guarded_label_values(labels),

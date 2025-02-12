@@ -20,10 +20,10 @@ use risingwave_common::array::arrow::arrow_schema_udf::{Field, Fields, Schema, S
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_pb::expr::PbUserDefinedFunctionMetadata;
+use risingwave_pb::expr::{PbUdfExprVersion, PbUserDefinedFunctionMetadata};
 
 use super::*;
-use crate::sig::{UdfImpl, UdfKind, UdfOptions};
+use crate::sig::{BuildOptions, UdfImpl, UdfKind};
 
 #[derive(Debug)]
 pub struct UserDefinedAggregateFunction {
@@ -123,19 +123,36 @@ pub fn new_user_defined(
     return_type: &DataType,
     udf: &PbUserDefinedFunctionMetadata,
 ) -> Result<BoxedAggregateFunction> {
-    let identifier = udf.get_identifier()?;
+    let arg_types = udf.arg_types.iter().map(|t| t.into()).collect::<Vec<_>>();
     let language = udf.language.as_str();
     let runtime = udf.runtime.as_deref();
     let link = udf.link.as_deref();
 
+    // `identifier` field is re-interpreted as `name_in_runtime`.
+    if udf.version() < PbUdfExprVersion::NameInRuntime {
+        assert_ne!(
+            language, "rust",
+            "Rust UDAF was not supported yet before this version"
+        );
+        assert_ne!(
+            language, "wasm",
+            "WASM UDAF was not supported yet before this version"
+        );
+    }
+    let name_in_runtime = udf
+        .identifier
+        .as_ref()
+        .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
+
     let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
-    let runtime = build_fn(UdfOptions {
+    let runtime = build_fn(BuildOptions {
         kind: UdfKind::Aggregate,
         body: udf.body.as_deref(),
         compressed_binary: udf.compressed_binary.as_deref(),
         link: udf.link.as_deref(),
-        identifier,
+        name_in_runtime,
         arg_names: &udf.arg_names,
+        arg_types: &arg_types,
         return_type,
         always_retry_on_network_error: false,
     })
@@ -145,9 +162,9 @@ pub fn new_user_defined(
     // so we can assume that the runtime is not legacy
     let arrow_convert = UdfArrowConvert::default();
     let arg_schema = Arc::new(Schema::new(
-        udf.arg_types
+        arg_types
             .iter()
-            .map(|t| arrow_convert.to_arrow_field("", &DataType::from(t)))
+            .map(|t| arrow_convert.to_arrow_field("", t))
             .try_collect::<_, Fields, _>()?,
     ));
 

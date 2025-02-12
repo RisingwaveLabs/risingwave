@@ -26,7 +26,7 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
     },
     create_fn: |opts| {
         Ok(CreateFunctionOutput {
-            identifier: opts.name.to_owned(),
+            name_in_runtime: opts.name.to_owned(),
             body: Some(opts.as_.context("AS must be specified")?.to_owned()),
             compressed_binary: None,
         })
@@ -35,7 +35,7 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
         let mut runtime = Runtime::new()?;
         if opts.kind.is_aggregate() {
             runtime.add_aggregate(
-                opts.identifier,
+                opts.name_in_runtime,
                 Field::new("state", DataType::Binary, true).with_metadata(
                     [("ARROW:extension:name".into(), "arrowudf.json".into())].into(),
                 ),
@@ -45,7 +45,7 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
             )?;
         } else {
             let res = runtime.add_function(
-                opts.identifier,
+                opts.name_in_runtime,
                 UdfArrowConvert::default().to_arrow_field("", opts.return_type)?,
                 CallMode::CalledOnNullInput,
                 opts.body.context("body is required")?,
@@ -71,7 +71,7 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
         }
         Ok(Box::new(QuickJsFunction {
             runtime,
-            identifier: opts.identifier.to_owned(),
+            name: opts.name_in_runtime.to_owned(),
         }))
     },
 };
@@ -79,13 +79,13 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
 #[derive(Debug)]
 struct QuickJsFunction {
     runtime: Runtime,
-    identifier: String,
+    name: String,
 }
 
 #[async_trait::async_trait]
 impl UdfImpl for QuickJsFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
-        self.runtime.call(&self.identifier, input)
+        self.runtime.call(&self.name, input)
     }
 
     async fn call_table_function<'a>(
@@ -93,12 +93,12 @@ impl UdfImpl for QuickJsFunction {
         input: &'a RecordBatch,
     ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
         self.runtime
-            .call_table_function(&self.identifier, input, 1024)
+            .call_table_function(&self.name, input, 1024)
             .map(|s| futures_util::stream::iter(s).boxed())
     }
 
     fn call_agg_create_state(&self) -> Result<ArrayRef> {
-        self.runtime.create_state(&self.identifier)
+        self.runtime.create_state(&self.name)
     }
 
     fn call_agg_accumulate_or_retract(
@@ -108,11 +108,11 @@ impl UdfImpl for QuickJsFunction {
         input: &RecordBatch,
     ) -> Result<ArrayRef> {
         self.runtime
-            .accumulate_or_retract(&self.identifier, state, ops, input)
+            .accumulate_or_retract(&self.name, state, ops, input)
     }
 
     fn call_agg_finish(&self, state: &ArrayRef) -> Result<ArrayRef> {
-        self.runtime.finish(&self.identifier, state)
+        self.runtime.finish(&self.name, state)
     }
 
     fn memory_usage(&self) -> usize {

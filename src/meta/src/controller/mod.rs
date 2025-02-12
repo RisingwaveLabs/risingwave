@@ -452,7 +452,7 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             language: value.0.language,
             runtime: value.0.runtime,
             link: value.0.link,
-            identifier: value.0.identifier,
+            name_in_runtime: value.0.name_in_runtime,
             body: value.0.body,
             compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
