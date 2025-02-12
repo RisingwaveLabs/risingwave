@@ -16,8 +16,7 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
-use risingwave_connector::source::DataType;
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 use risingwave_sqlparser::ast::AsOf;
@@ -178,51 +177,24 @@ impl LogicalSource {
         Ok(Some(exprs))
     }
 
-    /// `StreamSource` (list) -> shuffle -> `StreamDedup`
-    fn create_fs_list_plan(core: generic::Source) -> Result<PlanRef> {
-        let logical_source = generic::Source {
-            column_catalog: vec![
-                ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field {
-                            name: "filename".to_owned(),
-                            data_type: DataType::Varchar,
-                            sub_fields: vec![],
-                            type_name: "".to_owned(),
-                        },
-                        0,
-                    ),
-                    is_hidden: false,
-                },
-                ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field {
-                            name: "last_edit_time".to_owned(),
-                            data_type: DataType::Timestamptz,
-                            sub_fields: vec![],
-                            type_name: "".to_owned(),
-                        },
-                        1,
-                    ),
-                    is_hidden: false,
-                },
-                ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field {
-                            name: "file_size".to_owned(),
-                            data_type: DataType::Int64,
-                            sub_fields: vec![],
-                            type_name: "".to_owned(),
-                        },
-                        0,
-                    ),
-                    is_hidden: false,
-                },
-            ],
-            row_id_index: None,
-            ..core
-        };
-        let mut new_s3_plan: PlanRef = StreamSource {
+    fn create_source_plan(core: generic::Source) -> Result<PlanRef> {
+        let mut plan: PlanRef;
+        if core.is_new_fs_connector() {
+            plan = Self::create_list_plan(core.clone(), true)?;
+            plan = StreamFsFetch::new(plan, core.clone()).into();
+        } else if core.is_iceberg_connector() {
+            plan = Self::create_list_plan(core.clone(), false)?;
+            plan = StreamFsFetch::new(plan, core.clone()).into();
+        } else {
+            plan = StreamSource::new(core.clone()).into()
+        }
+        Ok(plan)
+    }
+
+    /// `StreamSource` (list) -> shuffle -> (optional) `StreamDedup`
+    fn create_list_plan(core: generic::Source, dedup: bool) -> Result<PlanRef> {
+        let logical_source = generic::Source::file_list_node(core);
+        let mut list_plan: PlanRef = StreamSource {
             base: PlanBase::new_stream_with_core(
                 &logical_source,
                 Distribution::Single,
@@ -234,15 +206,17 @@ impl LogicalSource {
             core: logical_source,
         }
         .into();
-        new_s3_plan = RequiredDist::shard_by_key(3, &[0])
-            .enforce_if_not_satisfies(new_s3_plan, &Order::any())?;
-        new_s3_plan = StreamDedup::new(generic::Dedup {
-            input: new_s3_plan,
-            dedup_cols: vec![0],
-        })
-        .into();
+        list_plan = RequiredDist::shard_by_key(list_plan.schema().len(), &[0])
+            .enforce_if_not_satisfies(list_plan, &Order::any())?;
+        if dedup {
+            list_plan = StreamDedup::new(generic::Dedup {
+                input: list_plan,
+                dedup_cols: vec![0],
+            })
+            .into();
+        }
 
-        Ok(new_s3_plan)
+        Ok(list_plan)
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
@@ -360,12 +334,7 @@ impl ToStream for LogicalSource {
             SourceNodeKind::CreateTable | SourceNodeKind::CreateSharedSource => {
                 // Note: for create table, row_id and generated columns is created in plan_root.gen_table_plan.
                 // for shared source, row_id and generated columns is created after SourceBackfill node.
-                if self.core.is_new_fs_connector() {
-                    plan = Self::create_fs_list_plan(self.core.clone())?;
-                    plan = StreamFsFetch::new(plan, self.core.clone()).into();
-                } else {
-                    plan = StreamSource::new(self.core.clone()).into()
-                }
+                plan = Self::create_source_plan(self.core.clone())?;
             }
             SourceNodeKind::CreateMViewOrBatch => {
                 // Create MV on source.
@@ -376,12 +345,7 @@ impl ToStream for LogicalSource {
                     plan = StreamSourceScan::new(self.core.clone()).into();
                 } else {
                     // non-shared source
-                    if self.core.is_new_fs_connector() {
-                        plan = Self::create_fs_list_plan(self.core.clone())?;
-                        plan = StreamFsFetch::new(plan, self.core.clone()).into();
-                    } else {
-                        plan = StreamSource::new(self.core.clone()).into()
-                    }
+                    plan = Self::create_source_plan(self.core.clone())?;
                 }
 
                 if let Some(exprs) = &self.output_exprs {

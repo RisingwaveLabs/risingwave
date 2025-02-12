@@ -41,6 +41,10 @@ mod fs_list_executor;
 pub use fs_list_executor::*;
 mod fs_fetch_executor;
 pub use fs_fetch_executor::*;
+mod iceberg_list_executor;
+pub use iceberg_list_executor::*;
+mod iceberg_fetch_executor;
+pub use iceberg_fetch_executor::*;
 
 mod source_backfill_state_table;
 pub use source_backfill_state_table::BackfillStateTableHandler;

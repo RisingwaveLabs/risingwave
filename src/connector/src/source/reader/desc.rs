@@ -173,6 +173,10 @@ impl SourceDescBuilder {
             metrics: self.metrics.clone(),
         })
     }
+
+    pub fn with_properties(&self) -> WithOptionsSecResolved {
+        self.with_properties.clone()
+    }
 }
 
 pub mod test_utils {

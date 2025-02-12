@@ -12,20 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use iceberg::spec::TableMetadataRef;
 use itertools::Itertools;
-use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
 use risingwave_common::catalog::{
     Field, Schema, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_connector::source::iceberg::{IcebergFileScanTask, IcebergProperties, IcebergSplit};
+use risingwave_connector::source::iceberg::{
+    scan_task_to_chunk, IcebergFileScanTask, IcebergProperties, IcebergSplit,
+};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -112,59 +111,30 @@ impl IcebergScanExecutor {
             }
         };
 
-        let mut read_bytes = 0;
-        let _metrics_report_guard = scopeguard::guard(
-            (read_bytes, table_name, self.metrics.clone()),
-            |(read_bytes, table_name, metrics)| {
-                if let Some(metrics) = metrics {
-                    metrics
-                        .iceberg_scan_metrics()
-                        .iceberg_read_bytes
-                        .with_guarded_label_values(&[&table_name])
-                        .inc_by(read_bytes as _);
-                }
-            },
-        );
+        // let mut read_bytes = 0;
+        // let _metrics_report_guard = scopeguard::guard(
+        //     (read_bytes, table_name, self.metrics.clone()),
+        //     |(read_bytes, table_name, metrics)| {
+        //         if let Some(metrics) = metrics {
+        //             metrics
+        //                 .iceberg_scan_metrics()
+        //                 .iceberg_read_bytes
+        //                 .with_guarded_label_values(&[&table_name])
+        //                 .inc_by(read_bytes as _);
+        //         }
+        //     },
+        // );
         for data_file_scan_task in data_file_scan_tasks {
-            let data_file_path = data_file_scan_task.data_file_path.clone();
-            let data_sequence_number = data_file_scan_task.sequence_number;
-
-            let reader = table
-                .reader_builder()
-                .with_batch_size(self.batch_size)
-                .build();
-            let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
-
-            let mut record_batch_stream =
-                reader.read(Box::pin(file_scan_stream)).await?.enumerate();
-
-            while let Some((index, record_batch)) = record_batch_stream.next().await {
-                let record_batch = record_batch?;
-
-                // iceberg_t1_source
-                let mut chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-                if self.need_seq_num {
-                    let (mut columns, visibility) = chunk.into_parts();
-                    columns.push(Arc::new(ArrayImpl::Int64(I64Array::from_iter(
-                        vec![data_sequence_number; visibility.len()],
-                    ))));
-                    chunk = DataChunk::from_parts(columns.into(), visibility)
-                };
-                if self.need_file_path_and_pos {
-                    let (mut columns, visibility) = chunk.into_parts();
-                    columns.push(Arc::new(ArrayImpl::Utf8(Utf8Array::from_iter(
-                        vec![data_file_path.as_str(); visibility.len()],
-                    ))));
-                    let index_start = (index * self.batch_size) as i64;
-                    columns.push(Arc::new(ArrayImpl::Int64(I64Array::from_iter(
-                        (index_start..(index_start + visibility.len() as i64))
-                            .collect::<Vec<i64>>(),
-                    ))));
-                    chunk = DataChunk::from_parts(columns.into(), visibility)
-                }
-                assert_eq!(chunk.data_types(), data_types);
-                read_bytes += chunk.estimated_heap_size() as u64;
-                yield chunk;
+            #[for_await]
+            for chunk in scan_task_to_chunk(
+                table.clone(),
+                data_file_scan_task,
+                self.batch_size,
+                // self.schema.clone(),
+                self.need_seq_num,
+                self.need_file_path_and_pos,
+            ) {
+                yield chunk?;
             }
         }
     }
@@ -230,7 +200,8 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
 
             Ok(Box::new(IcebergScanExecutor::new(
                 iceberg_properties,
-                Some(split.snapshot_id),
+                // Some(split.snapshot_id),
+                None,
                 split.table_meta.clone(),
                 split.task,
                 source.context().get_config().developer.chunk_size,

@@ -25,7 +25,9 @@ use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
-use crate::executor::source::{FsFetchExecutor, SourceStateTableHandler, StreamSourceCore};
+use crate::executor::source::{
+    FsFetchExecutor, IcebergFetchExecutor, SourceStateTableHandler, StreamSourceCore,
+};
 use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
 use crate::task::ExecutorParams;
@@ -97,6 +99,15 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             }
             risingwave_connector::source::ConnectorProperties::OpendalS3(_) => {
                 FsFetchExecutor::<_, OpendalS3>::new(
+                    params.actor_context.clone(),
+                    stream_source_core,
+                    upstream,
+                    source.rate_limit,
+                )
+                .boxed()
+            }
+            risingwave_connector::source::ConnectorProperties::Iceberg(_) => {
+                IcebergFetchExecutor::new(
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,

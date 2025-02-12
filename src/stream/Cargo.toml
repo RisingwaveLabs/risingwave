@@ -27,6 +27,7 @@ foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hytra = "0.1.2"
+iceberg = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 local_stats_alloc = { path = "../utils/local_stats_alloc" }

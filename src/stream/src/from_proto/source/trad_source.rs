@@ -30,7 +30,7 @@ use risingwave_storage::panic_store::PanicStateStore;
 
 use super::*;
 use crate::executor::source::{
-    FsListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+    FsListExecutor, IcebergListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
 use crate::executor::TroublemakerExecutor;
 
@@ -196,10 +196,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     state_table_handler,
                 );
 
-                let is_fs_connector = source.with_properties.is_legacy_fs_connector();
-                let is_fs_v2_connector = source.with_properties.is_new_fs_connector();
-
-                if is_fs_connector {
+                if source.with_properties.is_legacy_fs_connector() {
                     #[expect(deprecated)]
                     crate::executor::source::LegacyFsSourceExecutor::new(
                         params.actor_context.clone(),
@@ -210,8 +207,18 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         source.rate_limit,
                     )?
                     .boxed()
-                } else if is_fs_v2_connector {
+                } else if source.with_properties.is_new_fs_connector() {
                     FsListExecutor::new(
+                        params.actor_context.clone(),
+                        Some(stream_source_core),
+                        params.executor_stats.clone(),
+                        barrier_receiver,
+                        system_params,
+                        source.rate_limit,
+                    )
+                    .boxed()
+                } else if source.with_properties.is_iceberg_connector() {
+                    IcebergListExecutor::new(
                         params.actor_context.clone(),
                         Some(stream_source_core),
                         params.executor_stats.clone(),

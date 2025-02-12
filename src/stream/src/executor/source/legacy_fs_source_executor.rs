@@ -317,6 +317,8 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
             .build_fs_source_desc()
             .map_err(StreamExecutorError::connector_error)?;
 
+        let properties = source_desc_builder.with_properties();
+
         let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");

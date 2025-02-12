@@ -15,7 +15,7 @@
 use std::rc::Rc;
 
 use educe::Educe;
-use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::WithPropertiesExt;
@@ -98,6 +98,84 @@ impl GenericPlanNode for Source {
 }
 
 impl Source {
+    /// The output is [`risingwave_connector::source::filesystem::FsPageItem`] / [`risingwave_connector::source::iceberg::IcebergSplit`]
+    pub fn file_list_node(core: Self) -> Self {
+        let column_catalog = if core.is_iceberg_connector() {
+            vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "partition_id".to_owned(),
+                            data_type: DataType::Varchar,
+                            sub_fields: vec![],
+                            type_name: "".to_owned(),
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                }
+                ,ColumnCatalog {
+                column_desc: ColumnDesc::from_field_with_column_id(
+                    &Field {
+                        name: "split".to_owned(),
+                        data_type: DataType::Jsonb,
+                        sub_fields: vec![],
+                        type_name: "".to_owned(),
+                    },
+                    0,
+                ),
+                is_hidden: false,
+            }]
+        } else if core.is_new_fs_connector() {
+            vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "filename".to_owned(),
+                            data_type: DataType::Varchar,
+                            sub_fields: vec![],
+                            type_name: "".to_owned(),
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+                // This columns seems unused.
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "last_edit_time".to_owned(),
+                            data_type: DataType::Timestamptz,
+                            sub_fields: vec![],
+                            type_name: "".to_owned(),
+                        },
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "file_size".to_owned(),
+                            data_type: DataType::Int64,
+                            sub_fields: vec![],
+                            type_name: "".to_owned(),
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+            ]
+        } else {
+            unreachable!()
+        };
+        Self {
+            column_catalog,
+            row_id_index: None,
+            ..core
+        }
+    }
+
     pub fn is_new_fs_connector(&self) -> bool {
         self.catalog
             .as_ref()
