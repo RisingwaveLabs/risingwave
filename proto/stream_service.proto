@@ -70,15 +70,6 @@ message BarrierCompleteResponse {
   uint32 database_id = 10;
 }
 
-message WaitEpochCommitRequest {
-  uint64 epoch = 1;
-  uint32 table_id = 2;
-}
-
-message WaitEpochCommitResponse {
-  common.Status status = 1;
-}
-
 message StreamingControlStreamRequest {
   message InitialPartialGraph {
     uint32 partial_graph_id = 1;
@@ -152,7 +143,6 @@ message GetMinUncommittedSstIdResponse {
 }
 
 service StreamService {
-  rpc WaitEpochCommit(WaitEpochCommitRequest) returns (WaitEpochCommitResponse);
   rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
   rpc GetMinUncommittedSstId(GetMinUncommittedSstIdRequest) returns (GetMinUncommittedSstIdResponse);
 }

@@ -26,9 +26,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
-use risingwave_pb::common::PbWorkerNode;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
-use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -281,12 +279,12 @@ pub enum Command {
 
     /// `Pause` command generates a `Pause` barrier with the provided [`PausedReason`] **only if**
     /// the cluster is not already paused. Otherwise, a barrier with no mutation will be generated.
-    Pause(PausedReason),
+    Pause,
 
     /// `Resume` command generates a `Resume` barrier with the provided [`PausedReason`] **only
     /// if** the cluster is paused with the same reason. Otherwise, a barrier with no mutation
     /// will be generated.
-    Resume(PausedReason),
+    Resume,
 
     /// `DropStreamingJobs` command generates a `Stop` barrier to stop the given
     /// [`Vec<ActorId>`]. The catalog has ensured that these streaming jobs are safe to be
@@ -367,12 +365,12 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn pause(reason: PausedReason) -> Self {
-        Self::Pause(reason)
+    pub fn pause() -> Self {
+        Self::Pause
     }
 
-    pub fn resume(reason: PausedReason) -> Self {
-        Self::Resume(reason)
+    pub fn resume() -> Self {
+        Self::Resume
     }
 
     pub fn cancel(table_fragments: &StreamJobFragments) -> Self {
@@ -390,8 +388,8 @@ impl Command {
     pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
             Command::Flush => None,
-            Command::Pause(_) => None,
-            Command::Resume(_) => None,
+            Command::Pause => None,
+            Command::Resume => None,
             Command::DropStreamingJobs {
                 unregistered_fragment_ids,
                 ..
@@ -455,19 +453,9 @@ impl Command {
         }
     }
 
-    /// If we need to send a barrier to modify actor configuration, we will pause the barrier
-    /// injection. return true.
-    pub fn should_pause_inject_barrier(&self) -> bool {
-        // Note: the meaning for `Pause` is not pausing the periodic barrier injection, but for
-        // pausing the sources on compute nodes. However, when `Pause` is used for configuration
-        // change like scaling and migration, it must pause the concurrent checkpoint to ensure the
-        // previous checkpoint has been done.
-        matches!(self, Self::Pause(PausedReason::ConfigChange))
-    }
-
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
-        !matches!(self, Command::Resume(_))
+        !matches!(self, Command::Resume)
     }
 }
 
@@ -504,8 +492,6 @@ impl BarrierKind {
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
 pub(super) struct CommandContext {
-    /// Resolved info in this barrier loop.
-    pub(super) node_map: HashMap<WorkerId, PbWorkerNode>,
     subscription_info: InflightSubscriptionInfo,
 
     pub(super) barrier_info: BarrierInfo,
@@ -533,7 +519,6 @@ impl std::fmt::Debug for CommandContext {
 
 impl CommandContext {
     pub(super) fn new(
-        node_map: HashMap<WorkerId, PbWorkerNode>,
         barrier_info: BarrierInfo,
         subscription_info: InflightSubscriptionInfo,
         table_ids_to_commit: HashSet<TableId>,
@@ -541,7 +526,6 @@ impl CommandContext {
         span: tracing::Span,
     ) -> Self {
         Self {
-            node_map,
             subscription_info,
             barrier_info,
             table_ids_to_commit,
@@ -649,24 +633,24 @@ impl CommandContext {
 
 impl Command {
     /// Generate a mutation for the given command.
-    pub fn to_mutation(&self, current_paused_reason: Option<PausedReason>) -> Option<Mutation> {
+    pub fn to_mutation(&self, is_currently_paused: bool) -> Option<Mutation> {
         let mutation =
             match self {
                 Command::Flush => None,
 
-                Command::Pause(_) => {
+                Command::Pause => {
                     // Only pause when the cluster is not already paused.
                     // XXX: what if pause(r1) - pause(r2) - resume(r1) - resume(r2)??
-                    if current_paused_reason.is_none() {
+                    if !is_currently_paused {
                         Some(Mutation::Pause(PauseMutation {}))
                     } else {
                         None
                     }
                 }
 
-                Command::Resume(reason) => {
+                Command::Resume => {
                     // Only resume when the cluster is paused with the same reason.
-                    if current_paused_reason == Some(*reason) {
+                    if is_currently_paused {
                         Some(Mutation::Resume(ResumeMutation {}))
                     } else {
                         None
@@ -750,7 +734,7 @@ impl Command {
                         added_actors,
                         actor_splits,
                         // If the cluster is already paused, the new actors should be paused too.
-                        pause: current_paused_reason.is_some(),
+                        pause: is_currently_paused,
                         subscriptions_to_add,
                     }));
 
@@ -1064,34 +1048,6 @@ impl Command {
             actor_splits,
             ..Default::default()
         }))
-    }
-
-    /// Returns the paused reason after executing the current command.
-    pub fn next_paused_reason(
-        this: Option<&Self>,
-        current_paused_reason: Option<PausedReason>,
-    ) -> Option<PausedReason> {
-        match this {
-            Some(Command::Pause(reason)) => {
-                // Only pause when the cluster is not already paused.
-                if current_paused_reason.is_none() {
-                    Some(*reason)
-                } else {
-                    current_paused_reason
-                }
-            }
-
-            Some(Command::Resume(reason)) => {
-                // Only resume when the cluster is paused with the same reason.
-                if current_paused_reason == Some(*reason) {
-                    None
-                } else {
-                    current_paused_reason
-                }
-            }
-
-            _ => current_paused_reason,
-        }
     }
 
     /// For `CancelStreamingJob`, returns the table id of the target table.

@@ -169,16 +169,6 @@ message FlushResponse {
   uint64 hummock_version_id = 2;
 }
 
-// The reason why the data sources in the cluster are paused.
-enum PausedReason {
-  PAUSED_REASON_UNSPECIFIED = 0;
-  // The cluster is paused due to configuration change, e.g. altering table schema and scaling.
-  PAUSED_REASON_CONFIG_CHANGE = 1;
-  // The cluster is paused due to manual operation, e.g. `risectl` command or the
-  // `pause_on_next_bootstrap` system variable.
-  PAUSED_REASON_MANUAL = 2;
-}
-
 message PauseRequest {}
 
 message PauseResponse {}

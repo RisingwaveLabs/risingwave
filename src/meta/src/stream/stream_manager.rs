@@ -359,8 +359,6 @@ impl GlobalStreamManager {
             "built actors finished"
         );
 
-        let need_pause = replace_table_job_info.is_some();
-
         if let Some((streaming_job, context, stream_job_fragments)) = replace_table_job_info {
             self.metadata_manager
                 .catalog_controller
@@ -431,16 +429,9 @@ impl GlobalStreamManager {
             cross_db_snapshot_backfill_info,
         };
 
-        if need_pause {
-            // Special handling is required when creating sink into table, we need to pause the stream to avoid data loss.
-            self.barrier_scheduler
-                .run_config_change_command_with_pause(streaming_job.database_id().into(), command)
-                .await?;
-        } else {
-            self.barrier_scheduler
-                .run_command(streaming_job.database_id().into(), command)
-                .await?;
-        }
+        self.barrier_scheduler
+            .run_command(streaming_job.database_id().into(), command)
+            .await?;
 
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
         let version = self
@@ -475,7 +466,7 @@ impl GlobalStreamManager {
         };
 
         self.barrier_scheduler
-            .run_config_change_command_with_pause(
+            .run_command(
                 streaming_job.database_id().into(),
                 Command::ReplaceStreamJob(ReplaceStreamJobPlan {
                     old_fragments,

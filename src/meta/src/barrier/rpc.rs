@@ -30,7 +30,6 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{
     AddMutation, Barrier, BarrierMutation, StreamNode, SubscriptionUpstreamInfo,
@@ -330,7 +329,7 @@ impl ControlStreamManager {
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
         background_jobs: &mut HashMap<TableId, (String, StreamJobFragments)>,
         subscription_info: InflightSubscriptionInfo,
-        paused_reason: Option<PausedReason>,
+        is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
     ) -> MetaResult<(HashSet<WorkerId>, DatabaseCheckpointControl, u64)> {
         let source_split_assignments = info
@@ -348,7 +347,7 @@ impl ControlStreamManager {
             actor_dispatchers: Default::default(),
             added_actors: Default::default(),
             actor_splits: build_actor_connector_splits(&source_split_assignments),
-            pause: paused_reason.is_some(),
+            pause: is_paused,
             subscriptions_to_add: Default::default(),
         });
 
@@ -417,7 +416,7 @@ impl ControlStreamManager {
         );
 
         let new_epoch = barrier_info.curr_epoch;
-        let state = BarrierWorkerState::recovery(new_epoch, info, subscription_info, paused_reason);
+        let state = BarrierWorkerState::recovery(new_epoch, info, subscription_info, is_paused);
         Ok((
             node_to_collect,
             DatabaseCheckpointControl::recovery(
@@ -435,11 +434,11 @@ impl ControlStreamManager {
         database_id: DatabaseId,
         command: Option<&Command>,
         barrier_info: &BarrierInfo,
-        prev_paused_reason: Option<PausedReason>,
+        is_paused: bool,
         pre_applied_graph_info: &InflightDatabaseInfo,
         applied_graph_info: &InflightDatabaseInfo,
     ) -> MetaResult<HashSet<WorkerId>> {
-        let mutation = command.and_then(|c| c.to_mutation(prev_paused_reason));
+        let mutation = command.and_then(|c| c.to_mutation(is_paused));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
             add.subscriptions_to_add.clone()
         } else {

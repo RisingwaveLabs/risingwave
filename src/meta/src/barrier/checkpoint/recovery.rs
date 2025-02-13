@@ -360,7 +360,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 &mut source_splits,
                 &mut background_jobs,
                 subscription_info,
-                None,
+                false,
                 &self.control.hummock_version_stats,
             )?
         };
