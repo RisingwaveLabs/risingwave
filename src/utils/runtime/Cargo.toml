@@ -57,7 +57,7 @@ opentelemetry_sdk = { workspace = true, features = [
 ] } # only enable `rt-tokio` feature under non-madsim target
 workspace-hack = { path = "../../workspace-hack" }
 fastrace = "0.7"
-fastrace-opentelemetry = "0.7"
+fastrace-opentelemetry = "0.8"
 
 [lints]
 workspace = true
