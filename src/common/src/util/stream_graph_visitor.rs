@@ -266,6 +266,7 @@ pub fn visit_stream_node_tables_inner<F>(
                 always!(node.table, "Materialize")
             }
 
+            // Global Approx Percentile
             NodeBody::GlobalApproxPercentile(node) => {
                 always!(node.bucket_state_table, "GlobalApproxPercentileBucketState");
                 always!(node.count_state_table, "GlobalApproxPercentileCountState");
@@ -275,6 +276,11 @@ pub fn visit_stream_node_tables_inner<F>(
             NodeBody::AsOfJoin(node) => {
                 always!(node.left_table, "AsOfJoinLeft");
                 always!(node.right_table, "AsOfJoinRight");
+            }
+
+            // Synced Log Store
+            NodeBody::SyncLogStore(node) => {
+                always!(node.log_store_table, "StreamSyncLogStore");
             }
             _ => {}
         }
