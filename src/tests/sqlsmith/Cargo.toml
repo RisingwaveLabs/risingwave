@@ -12,7 +12,7 @@ anyhow = "1"
 chrono = "0.4"
 clap = { workspace = true }
 itertools = { workspace = true }
-rand = { version = "0.8", features = ["small_rng"] }
+rand = { version = "0.9", features = ["small_rng"] }
 rand_chacha = { version = "0.3.1" }
 regex = "1"
 risingwave_common = { workspace = true }
