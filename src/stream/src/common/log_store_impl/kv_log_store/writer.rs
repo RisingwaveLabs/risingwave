@@ -152,7 +152,9 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         Ok(LogWriterPostFlushCurrentEpoch::new(
             move |new_vnodes: Option<Arc<Bitmap>>| {
                 async move {
-                    post_seal_epoch.post_yield_barrier(new_vnodes.clone());
+                    post_seal_epoch
+                        .post_yield_barrier(new_vnodes.clone())
+                        .await?;
                     if let Some(new_vnodes) = new_vnodes {
                         tx.update_vnode(next_epoch, new_vnodes);
                     }

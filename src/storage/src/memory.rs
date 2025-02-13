@@ -1052,8 +1052,8 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
         Ok(())
     }
 
-    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-        std::mem::replace(&mut self.vnodes, vnodes)
+    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        Ok(std::mem::replace(&mut self.vnodes, vnodes))
     }
 
     fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {

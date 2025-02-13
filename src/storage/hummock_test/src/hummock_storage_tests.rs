@@ -2164,12 +2164,18 @@ async fn test_table_watermark() {
         .init_for_test_with_prev_epoch(epoch1, prev_epoch)
         .await
         .unwrap();
-    local1.update_vnode_bitmap(vnode_bitmap1.clone());
+    local1
+        .update_vnode_bitmap(vnode_bitmap1.clone())
+        .await
+        .unwrap();
     local2
         .init_for_test_with_prev_epoch(epoch1, prev_epoch)
         .await
         .unwrap();
-    local2.update_vnode_bitmap(vnode_bitmap2.clone());
+    local2
+        .update_vnode_bitmap(vnode_bitmap2.clone())
+        .await
+        .unwrap();
 
     fn gen_inner_key(index: usize) -> Bytes {
         Bytes::copy_from_slice(format!("key_{:05}", index).as_bytes())

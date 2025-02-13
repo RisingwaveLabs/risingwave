@@ -146,15 +146,20 @@ pub(crate) struct LogStorePostSealCurrentEpoch<'a, S: LocalStateStore> {
     inner: &'a mut LogStoreWriteState<S>,
 }
 
-impl<S: LocalStateStore> LogStorePostSealCurrentEpoch<'_, S> {
-    pub(crate) fn post_yield_barrier(self, new_vnodes: Option<Arc<Bitmap>>) {
+impl<'a, S: LocalStateStore> LogStorePostSealCurrentEpoch<'a, S> {
+    pub(crate) async fn post_yield_barrier(
+        self,
+        new_vnodes: Option<Arc<Bitmap>>,
+    ) -> LogStoreResult<()> {
         if let Some(new_vnodes) = new_vnodes {
             self.inner.serde.update_vnode_bitmap(new_vnodes.clone());
             self.inner
                 .state_store
-                .update_vnode_bitmap(new_vnodes.clone());
+                .update_vnode_bitmap(new_vnodes.clone())
+                .await?;
         }
         self.inner.on_post_seal = false;
+        Ok(())
     }
 }
 

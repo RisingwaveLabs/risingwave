@@ -323,8 +323,8 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
             .verbose_instrument_await("store_try_flush")
     }
 
-    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-        self.inner.update_vnode_bitmap(vnodes)
+    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        self.inner.update_vnode_bitmap(vnodes).await
     }
 
     fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {

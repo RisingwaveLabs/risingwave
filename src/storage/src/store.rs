@@ -462,7 +462,7 @@ pub trait LocalStateStore: StaticSendSync {
 
     // Updates the vnode bitmap corresponding to the local state store
     // Returns the previous vnode bitmap
-    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> impl StorageFuture<'_, Arc<Bitmap>>;
 }
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory

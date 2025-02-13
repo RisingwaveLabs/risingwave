@@ -539,12 +539,12 @@ pub mod verify {
             ret
         }
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-            let ret = self.actual.update_vnode_bitmap(vnodes.clone());
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            let ret = self.actual.update_vnode_bitmap(vnodes.clone()).await?;
             if let Some(expected) = &mut self.expected {
-                assert_eq!(ret, expected.update_vnode_bitmap(vnodes));
+                assert_eq!(ret, expected.update_vnode_bitmap(vnodes).await?);
             }
-            ret
+            Ok(ret)
         }
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
@@ -997,7 +997,7 @@ mod dyn_state_store {
 
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>>;
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
     }
@@ -1071,8 +1071,8 @@ mod dyn_state_store {
             self.seal_current_epoch(next_epoch, opts)
         }
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-            self.update_vnode_bitmap(vnodes)
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            self.update_vnode_bitmap(vnodes).await
         }
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
@@ -1159,8 +1159,8 @@ mod dyn_state_store {
             (*self.0).seal_current_epoch(next_epoch, opts)
         }
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-            (*self.0).update_vnode_bitmap(vnodes)
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            (*self.0).update_vnode_bitmap(vnodes).await
         }
     }
 
