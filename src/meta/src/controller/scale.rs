@@ -863,26 +863,26 @@ impl CatalogController {
             }
         }
 
-        for (fragment_id, fragment) in &fragment_map {
-            let discovered_upstream_fragment_ids = discovered_upstream_fragments
-                .get(&fragment.fragment_id)
-                .cloned()
-                .unwrap_or_default();
-            // let upstream_fragment_ids: HashSet<_> = fragment
-            //     .upstream_fragment_id
-            //     .inner_ref()
-            //     .iter()
-            //     .copied()
-            //     .collect();
-            //
-            // crit_check_in_loop!(
-            //     flag,
-            //     discovered_upstream_fragment_ids == upstream_fragment_ids,
-            //     format!(
-            //         "Fragment {fragment_id} has different upstream_fragment_ids from discovered: {discovered_upstream_fragment_ids:?} != fragment upstream fragment ids: {upstream_fragment_ids:?}",
-            //     )
-            // );
-        }
+        // for (fragment_id, fragment) in &fragment_map {
+        //     let discovered_upstream_fragment_ids = discovered_upstream_fragments
+        //         .get(&fragment.fragment_id)
+        //         .cloned()
+        //         .unwrap_or_default();
+        //     // let upstream_fragment_ids: HashSet<_> = fragment
+        //     //     .upstream_fragment_id
+        //     //     .inner_ref()
+        //     //     .iter()
+        //     //     .copied()
+        //     //     .collect();
+        //     //
+        //     // crit_check_in_loop!(
+        //     //     flag,
+        //     //     discovered_upstream_fragment_ids == upstream_fragment_ids,
+        //     //     format!(
+        //     //         "Fragment {fragment_id} has different upstream_fragment_ids from discovered: {discovered_upstream_fragment_ids:?} != fragment upstream fragment ids: {upstream_fragment_ids:?}",
+        //     //     )
+        //     // );
+        // }
 
         for PartialActor {
             actor_id,

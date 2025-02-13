@@ -2138,7 +2138,7 @@ mod tests {
             distribution_type: pb_distribution_type,
             actors: _,
             state_table_ids: pb_state_table_ids,
-            upstream_fragment_ids: pb_upstream_fragment_ids,
+            upstream_fragment_ids: _upstream_fragment_ids,
             maybe_vnode_count: _,
         } = pb_fragment;
 
