@@ -106,13 +106,14 @@ pub static ALL_AVAILABLE_SOURCE_MODES: LazyLock<AclModeSet> = LazyLock::new(AclM
 pub static ALL_AVAILABLE_MVIEW_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
 pub static ALL_AVAILABLE_SINK_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
 pub static ALL_AVAILABLE_SUBSCRIPTION_MODES: LazyLock<AclModeSet> =
-    LazyLock::new(AclModeSet::empty);
+    LazyLock::new(AclModeSet::readonly);
 pub static ALL_AVAILABLE_FUNCTION_MODES: LazyLock<AclModeSet> =
     LazyLock::new(|| BitFlags::from(AclMode::Execute).into());
 pub static ALL_AVAILABLE_CONNECTION_MODES: LazyLock<AclModeSet> =
     LazyLock::new(|| BitFlags::from(AclMode::Usage).into());
 
 impl AclModeSet {
+    #[allow(dead_code)]
     pub fn empty() -> Self {
         Self {
             modes: BitFlags::empty(),

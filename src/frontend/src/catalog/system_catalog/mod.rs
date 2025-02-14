@@ -34,7 +34,7 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::table_parallelism::{PbFixedParallelism, PbParallelism};
-use risingwave_pb::user::grant_privilege::Object;
+use risingwave_pb::user::grant_privilege::Object as GrantObject;
 
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::view_catalog::ViewCatalog;
@@ -233,7 +233,7 @@ fn extract_parallelism_from_table_state(state: &StreamingJobState) -> String {
 
 /// get acl items of `object` in string, ignore public.
 fn get_acl_items(
-    object: &Object,
+    object: &GrantObject,
     for_dml_table: bool,
     users: &Vec<UserCatalog>,
     username_map: &HashMap<UserId, String>,

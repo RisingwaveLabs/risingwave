@@ -42,6 +42,7 @@ use crate::handler::create_connection::print_connection_params;
 use crate::handler::HandlerArgs;
 use crate::session::cursor_manager::SubscriptionCursor;
 use crate::session::SessionImpl;
+use crate::user::has_access_to_object;
 
 pub fn get_columns_from_table(
     session: &SessionImpl,
@@ -645,6 +646,10 @@ pub fn handle_show_create_object(
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+    let user_reader = session.env().user_info_reader().read_guard();
+    let current_user = user_reader
+        .get_user_by_name(user_name)
+        .expect("user not found");
 
     let (sql, schema_name) = match show_create_type {
         ShowCreateType::MaterializedView => {
@@ -654,7 +659,15 @@ pub fn handle_show_create_object(
                         catalog_reader
                             .get_schema_by_name(&database, schema_name)?
                             .get_created_table_by_name(&object_name)
-                            .filter(|t| t.is_mview()),
+                            .filter(|t| {
+                                t.is_mview()
+                                    && has_access_to_object(
+                                        current_user,
+                                        schema_name,
+                                        t.id.table_id,
+                                        t.owner,
+                                    )
+                            }),
                     )
                 })?
                 .ok_or_else(|| CatalogError::NotFound("materialized view", name.to_string()))?;
@@ -663,6 +676,11 @@ pub fn handle_show_create_object(
         ShowCreateType::View => {
             let (view, schema) =
                 catalog_reader.get_view_by_name(&database, schema_path, &object_name)?;
+            if !view.is_system_view()
+                && !has_access_to_object(current_user, schema, view.id, view.owner)
+            {
+                return Err(CatalogError::NotFound("view", name.to_string()).into());
+            }
             (view.create_sql(schema.to_owned()), schema)
         }
         ShowCreateType::Table => {
@@ -672,7 +690,15 @@ pub fn handle_show_create_object(
                         catalog_reader
                             .get_schema_by_name(&database, schema_name)?
                             .get_created_table_by_name(&object_name)
-                            .filter(|t| t.is_user_table()),
+                            .filter(|t| {
+                                t.is_user_table()
+                                    && has_access_to_object(
+                                        current_user,
+                                        schema_name,
+                                        t.id.table_id,
+                                        t.owner,
+                                    )
+                            }),
                     )
                 })?
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
@@ -682,6 +708,9 @@ pub fn handle_show_create_object(
         ShowCreateType::Sink => {
             let (sink, schema) =
                 catalog_reader.get_sink_by_name(&database, schema_path, &object_name)?;
+            if !has_access_to_object(current_user, schema, sink.id.sink_id, sink.owner.user_id) {
+                return Err(CatalogError::NotFound("sink", name.to_string()).into());
+            }
             (sink.create_sql(), schema)
         }
         ShowCreateType::Source => {
@@ -691,7 +720,15 @@ pub fn handle_show_create_object(
                         catalog_reader
                             .get_schema_by_name(&database, schema_name)?
                             .get_source_by_name(&object_name)
-                            .filter(|s| s.associated_table_id.is_none()),
+                            .filter(|s| {
+                                s.associated_table_id.is_none()
+                                    && has_access_to_object(
+                                        current_user,
+                                        schema_name,
+                                        s.id,
+                                        s.owner,
+                                    )
+                            }),
                     )
                 })?
                 .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
@@ -704,7 +741,15 @@ pub fn handle_show_create_object(
                         catalog_reader
                             .get_schema_by_name(&database, schema_name)?
                             .get_created_table_by_name(&object_name)
-                            .filter(|t| t.is_index()),
+                            .filter(|t| {
+                                t.is_index()
+                                    && has_access_to_object(
+                                        current_user,
+                                        schema_name,
+                                        t.id.table_id,
+                                        t.owner,
+                                    )
+                            }),
                     )
                 })?
                 .ok_or_else(|| CatalogError::NotFound("index", name.to_string()))?;
@@ -716,6 +761,14 @@ pub fn handle_show_create_object(
         ShowCreateType::Subscription => {
             let (subscription, schema) =
                 catalog_reader.get_subscription_by_name(&database, schema_path, &object_name)?;
+            if !has_access_to_object(
+                current_user,
+                schema,
+                subscription.id.subscription_id,
+                subscription.owner.user_id,
+            ) {
+                return Err(CatalogError::NotFound("subscription", name.to_string()).into());
+            }
             (subscription.create_sql(), schema)
         }
     };
