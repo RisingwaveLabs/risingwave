@@ -277,11 +277,11 @@ pub enum Command {
     /// all messages before the checkpoint barrier should have been committed.
     Flush,
 
-    /// `Pause` command generates a `Pause` barrier with the provided [`PausedReason`] **only if**
+    /// `Pause` command generates a `Pause` barrier **only if**
     /// the cluster is not already paused. Otherwise, a barrier with no mutation will be generated.
     Pause,
 
-    /// `Resume` command generates a `Resume` barrier with the provided [`PausedReason`] **only
+    /// `Resume` command generates a `Resume` barrier **only
     /// if** the cluster is paused with the same reason. Otherwise, a barrier with no mutation
     /// will be generated.
     Resume,
