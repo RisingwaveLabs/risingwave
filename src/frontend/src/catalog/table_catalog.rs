@@ -912,11 +912,6 @@ mod tests {
                             .into(),
                             column_id: ColumnId::new(1),
                             name: "country".to_owned(),
-                            field_descs: vec![
-                                ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
-                                ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
-                            ],
-                            type_name: ".test.Country".to_owned(),
                             description: None,
                             generated_or_default_column: None,
                             additional_column: AdditionalColumn { column_type: None },

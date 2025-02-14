@@ -30,7 +30,6 @@ pub struct SourceColumnDesc {
     pub name: String,
     pub data_type: DataType,
     pub column_id: ColumnId,
-    pub fields: Vec<ColumnDesc>,
     /// `additional_column` and `column_type` are orthogonal
     /// `additional_column` is used to indicate the column is from which part of the message
     /// `column_type` is used to indicate the type of the column, only used in cdc scenario
@@ -78,19 +77,14 @@ impl SourceColumnType {
 }
 
 impl SourceColumnDesc {
-    /// Create a [`SourceColumnDesc`] without composite types.
-    #[track_caller]
+    /// Create a [`SourceColumnDesc`].
+    // TODO(struct): rename to `new`?
     pub fn simple(name: impl Into<String>, data_type: DataType, column_id: ColumnId) -> Self {
-        assert!(
-            !matches!(data_type, DataType::List { .. } | DataType::Struct(..)),
-            "called `SourceColumnDesc::simple` with a composite type."
-        );
         let name = name.into();
         Self {
             name,
             data_type,
             column_id,
-            fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: false,
             is_hidden_addition_col: false,
@@ -129,11 +123,9 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             data_type,
             column_id,
             name,
-            field_descs,
             additional_column,
             // ignored fields below
             generated_or_default_column,
-            type_name: _,
             description: _,
             version: _,
             system_column: _,
@@ -151,7 +143,6 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             name: name.clone(),
             data_type: data_type.clone(),
             column_id: *column_id,
-            fields: field_descs.clone(),
             additional_column: additional_column.clone(),
             // additional fields below
             column_type: SourceColumnType::from_name(name),
@@ -167,7 +158,6 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             name,
             data_type,
             column_id,
-            fields,
             additional_column,
             // ignored fields below
             column_type: _,
@@ -179,10 +169,8 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             data_type: data_type.clone(),
             column_id: *column_id,
             name: name.clone(),
-            field_descs: fields.clone(),
             additional_column: additional_column.clone(),
             // additional fields below
-            type_name: "".to_owned(),
             generated_or_default_column: None,
             description: None,
             version: ColumnDescVersion::LATEST,

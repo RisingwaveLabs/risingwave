@@ -22,7 +22,7 @@ use pgwire::pg_server::Session;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
-use risingwave_common::types::{DataType, Fields, Timestamptz};
+use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
@@ -170,11 +170,8 @@ impl ShowColumnRow {
             .flatten()
             .into_iter()
             .map(|c| {
-                let type_name = if let DataType::Struct { .. } = c.data_type {
-                    c.type_name.clone()
-                } else {
-                    c.data_type.to_string()
-                };
+                // TODO(struct): use struct's type name, if possible.
+                let type_name = c.data_type.to_string();
                 ShowColumnRow {
                     name: c.name,
                     r#type: type_name,

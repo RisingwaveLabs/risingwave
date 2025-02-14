@@ -142,12 +142,13 @@ fn avro_field_to_column_desc(
                 })
                 .collect::<anyhow::Result<_>>()?;
             *index += 1;
+            #[allow(deprecated)]
             Ok(ColumnDesc {
                 column_type: Some(data_type.to_protobuf()),
                 column_id: *index,
                 name: name.to_owned(),
-                field_descs: vec_column,
-                type_name: schema_name.to_string(),
+                field_descs: vec_column,            // deprecated
+                type_name: schema_name.to_string(), // deprecated
                 generated_or_default_column: None,
                 description: None,
                 additional_column_type: 0, // deprecated

@@ -170,8 +170,6 @@ impl std::fmt::Debug for ColumnDescTestDisplay<'_> {
             data_type,
             column_id,
             name,
-            field_descs,
-            type_name,
             generated_or_default_column,
             description,
             additional_column: AdditionalColumn { column_type },
@@ -184,18 +182,7 @@ impl std::fmt::Debug for ColumnDescTestDisplay<'_> {
             "{name}(#{column_id}): {:#?}",
             DataTypeTestDisplay(data_type)
         )?;
-        if !type_name.is_empty() {
-            write!(f, ", type_name: {}", type_name)?;
-        }
-        if !field_descs.is_empty() {
-            write!(
-                f,
-                ", field_descs: [{}]",
-                field_descs.iter().format_with(", ", |field_desc, f| {
-                    f(&format_args!("{:?}", ColumnDescTestDisplay(field_desc)))
-                })
-            )?;
-        }
+
         if let Some(generated_or_default_column) = generated_or_default_column {
             write!(
                 f,

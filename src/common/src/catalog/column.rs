@@ -115,8 +115,6 @@ pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub name: String,
-    pub field_descs: Vec<ColumnDesc>,
-    pub type_name: String,
     pub generated_or_default_column: Option<GeneratedOrDefaultColumn>,
     pub description: Option<String>,
     pub additional_column: AdditionalColumn,
@@ -128,18 +126,7 @@ pub struct ColumnDesc {
 
 impl ColumnDesc {
     pub fn unnamed(column_id: ColumnId, data_type: DataType) -> ColumnDesc {
-        ColumnDesc {
-            data_type,
-            column_id,
-            name: String::new(),
-            field_descs: vec![],
-            type_name: String::new(),
-            generated_or_default_column: None,
-            description: None,
-            additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::LATEST,
-            system_column: None,
-        }
+        Self::named("", column_id, data_type)
     }
 
     pub fn named(name: impl Into<String>, column_id: ColumnId, data_type: DataType) -> ColumnDesc {
@@ -147,8 +134,6 @@ impl ColumnDesc {
             data_type,
             column_id,
             name: name.into(),
-            field_descs: vec![],
-            type_name: String::new(),
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
@@ -185,16 +170,8 @@ impl ColumnDesc {
         additional_column_type: AdditionalColumn,
     ) -> ColumnDesc {
         ColumnDesc {
-            data_type,
-            column_id,
-            name: name.into(),
-            field_descs: vec![],
-            type_name: String::new(),
-            generated_or_default_column: None,
-            description: None,
             additional_column: additional_column_type,
-            version: ColumnDescVersion::LATEST,
-            system_column: None,
+            ..Self::named(name, column_id, data_type)
         }
     }
 
@@ -205,32 +182,20 @@ impl ColumnDesc {
         system_column: SystemColumn,
     ) -> ColumnDesc {
         ColumnDesc {
-            data_type,
-            column_id,
-            name: name.into(),
-            field_descs: vec![],
-            type_name: String::new(),
-            generated_or_default_column: None,
-            description: None,
-            additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::LATEST,
             system_column: Some(system_column),
+            ..Self::named(name, column_id, data_type)
         }
     }
 
     /// Convert to proto
     pub fn to_protobuf(&self) -> PbColumnDesc {
+        #[allow(deprecated)]
         PbColumnDesc {
             column_type: Some(self.data_type.to_protobuf()),
             column_id: self.column_id.get_id(),
             name: self.name.clone(),
-            field_descs: self
-                .field_descs
-                .clone()
-                .into_iter()
-                .map(|f| f.to_protobuf())
-                .collect_vec(),
-            type_name: self.type_name.clone(),
+            field_descs: Vec::new(),  // deprecated
+            type_name: String::new(), // deprecated
             generated_or_default_column: self.generated_or_default_column.clone(),
             description: self.description.clone(),
             additional_column_type: 0, // deprecated
@@ -243,66 +208,45 @@ impl ColumnDesc {
     /// If the type is atomic, it returns simply itself.
     /// If the type has multiple nesting levels, it traverses for the tree-like schema,
     /// and returns every tree node.
+    ///
+    /// The name will reflect the full path of the column, and the id will be the placeholder.
     pub fn flatten(&self) -> Vec<ColumnDesc> {
         let mut descs = vec![self.clone()];
-        descs.extend(self.field_descs.iter().flat_map(|d| {
-            let mut desc = d.clone();
-            desc.name = self.name.clone() + "." + &desc.name;
-            desc.flatten()
-        }));
+
+        if let DataType::Struct(st) = &self.data_type {
+            descs.extend(st.iter().flat_map(|(field_name, field_data_type)| {
+                Self::named(
+                    format!("{}.{}", self.name, field_name),
+                    ColumnId::placeholder(),
+                    field_data_type.clone(),
+                )
+                .flatten()
+            }));
+        }
+
         descs
     }
 
+    // TODO(struct): deprecate and use `named` instead
     pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
-        Self {
-            data_type,
-            column_id: ColumnId::new(column_id),
-            name: name.to_owned(),
-            field_descs: vec![],
-            type_name: "".to_owned(),
-            generated_or_default_column: None,
-            description: None,
-            additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::LATEST,
-            system_column: None,
-        }
+        Self::named(name, ColumnId::new(column_id), data_type)
     }
 
     pub fn new_struct(
         name: &str,
         column_id: i32,
-        type_name: &str,
+        _type_name: &str,
         fields: Vec<ColumnDesc>,
     ) -> Self {
+        // TODO(struct): assign type name to the struct once supported
         let data_type =
             StructType::new(fields.iter().map(|f| (&f.name, f.data_type.clone()))).into();
-        Self {
-            data_type,
-            column_id: ColumnId::new(column_id),
-            name: name.to_owned(),
-            field_descs: fields,
-            type_name: type_name.to_owned(),
-            generated_or_default_column: None,
-            description: None,
-            additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::LATEST,
-            system_column: None,
-        }
+
+        Self::named(name, ColumnId::new(column_id), data_type)
     }
 
     pub fn from_field_with_column_id(field: &Field, id: i32) -> Self {
-        Self {
-            data_type: field.data_type.clone(),
-            column_id: ColumnId::new(id),
-            name: field.name.clone(),
-            field_descs: Vec::new(),  // TODO: deprecate this
-            type_name: String::new(), // TODO: deprecate this
-            description: None,
-            generated_or_default_column: None,
-            additional_column: AdditionalColumn { column_type: None },
-            version: ColumnDescVersion::LATEST,
-            system_column: None,
-        }
+        Self::named(&field.name, ColumnId::new(id), field.data_type.clone())
     }
 
     pub fn from_field_without_column_id(field: &Field) -> Self {
@@ -331,17 +275,11 @@ impl From<PbColumnDesc> for ColumnDesc {
             .unwrap_or(&AdditionalColumn { column_type: None })
             .clone();
         let version = prost.version();
-        let field_descs: Vec<ColumnDesc> = prost
-            .field_descs
-            .into_iter()
-            .map(ColumnDesc::from)
-            .collect();
+
         Self {
             data_type: DataType::from(prost.column_type.as_ref().unwrap()),
             column_id: ColumnId::new(prost.column_id),
             name: prost.name,
-            type_name: prost.type_name,
-            field_descs,
             generated_or_default_column: prost.generated_or_default_column,
             description: prost.description.clone(),
             additional_column,
@@ -359,18 +297,7 @@ impl From<&PbColumnDesc> for ColumnDesc {
 
 impl From<&ColumnDesc> for PbColumnDesc {
     fn from(c: &ColumnDesc) -> Self {
-        Self {
-            column_type: c.data_type.to_protobuf().into(),
-            column_id: c.column_id.into(),
-            name: c.name.clone(),
-            field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
-            type_name: c.type_name.clone(),
-            generated_or_default_column: c.generated_or_default_column.clone(),
-            description: c.description.clone(),
-            additional_column_type: 0, // deprecated
-            additional_column: c.additional_column.clone().into(),
-            version: c.version as i32,
-        }
+        c.to_protobuf()
     }
 }
 

@@ -456,7 +456,6 @@ mod tests {
             name: "rw_key".into(),
             data_type: DataType::Bytea,
             column_id: 2.into(),
-            fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: true,
             is_hidden_addition_col: false,

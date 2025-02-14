@@ -46,6 +46,8 @@ impl ColumnDescTestExt for ColumnDesc {
             .iter()
             .map(|f| f.column_type.as_ref().unwrap().clone())
             .collect_vec();
+
+        #[allow(deprecated)]
         Self {
             column_type: Some(DataType {
                 type_name: TypeName::Struct as i32,
@@ -56,8 +58,8 @@ impl ColumnDescTestExt for ColumnDesc {
             }),
             column_id,
             name: name.to_owned(),
-            type_name: type_name.to_owned(),
-            field_descs: fields,
+            type_name: type_name.to_owned(), // deprecated
+            field_descs: fields,             // deprecated
             generated_or_default_column: None,
             description: None,
             additional_column_type: 0, // deprecated
