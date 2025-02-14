@@ -519,7 +519,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     self_paused = false;
                                 }
 
-                                let mut split_changed = false;
+                                let mut split_changed = None;
                                 if let Some(ref mutation) = barrier.mutation.as_deref() {
                                     match mutation {
                                         Mutation::Pause => {
@@ -551,24 +551,18 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 actor_splits = ?actor_splits,
                                                 "source change split received"
                                             );
-                                            split_changed = self
-                                                .apply_split_change(
-                                                    actor_splits,
-                                                    &mut backfill_stage,
-                                                    true,
-                                                )
-                                                .await?;
+                                            split_changed = actor_splits
+                                                .get(&self.actor_ctx.id)
+                                                .cloned()
+                                                .map(|target_splits| (target_splits, true));
                                         }
                                         Mutation::Update(UpdateMutation {
                                             actor_splits, ..
                                         }) => {
-                                            split_changed = self
-                                                .apply_split_change(
-                                                    actor_splits,
-                                                    &mut backfill_stage,
-                                                    false,
-                                                )
-                                                .await?;
+                                            split_changed = actor_splits
+                                                .get(&self.actor_ctx.id)
+                                                .cloned()
+                                                .map(|target_splits| (target_splits, false));
                                         }
                                         Mutation::Throttle(actor_to_apply) => {
                                             if let Some(new_rate_limit) =
@@ -600,7 +594,12 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         _ => {}
                                     }
                                 }
-                                if split_changed {
+                                async fn rebuild_reader_on_split_changed(
+                                    this: &SourceBackfillExecutorInner<impl StateStore>,
+                                    backfill_stage: &BackfillStage,
+                                    source_desc: &SourceDesc,
+                                ) -> StreamExecutorResult<BoxSourceChunkStream>
+                                {
                                     // rebuild backfill_stream
                                     // Note: we don't put this part in a method, due to some complex lifetime issues.
 
@@ -608,23 +607,19 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         backfill_stage.get_latest_unfinished_splits()?;
                                     tracing::info!(
                                         "actor {:?} apply source split change to {:?}",
-                                        self.actor_ctx.id,
+                                        this.actor_ctx.id,
                                         latest_unfinished_splits
                                     );
 
                                     // Replace the source reader with a new one of the new state.
-                                    let (reader, _backfill_info) = self
+                                    let (reader, _backfill_info) = this
                                         .build_stream_source_reader(
-                                            &source_desc,
+                                            source_desc,
                                             latest_unfinished_splits,
                                         )
                                         .await?;
 
-                                    backfill_stream = select_with_strategy(
-                                        input.by_ref().map(Either::Left),
-                                        reader.map(Either::Right),
-                                        select_strategy,
-                                    );
+                                    Ok(reader)
                                 }
 
                                 self.backfill_state_store
@@ -635,7 +630,9 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                                     .await?;
 
-                                if self.should_report_finished(&backfill_stage.states) {
+                                if split_changed.is_none()
+                                    && self.should_report_finished(&backfill_stage.states)
+                                {
                                     // drop the backfill kafka consumers
                                     backfill_stream = select_with_strategy(
                                         input.by_ref().map(Either::Left),
@@ -662,8 +659,42 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         barrier.epoch,
                                         backfill_stage.total_backfilled_rows(),
                                     );
+
+                                    let barrier_epoch = barrier.epoch;
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
+
+                                    if let Some((target_splits, should_trim_state)) = split_changed
+                                    {
+                                        // do `try_wait_committed_epoch` to ensure that when `apply_split_change`,
+                                        // we can read the latest state written by other source executor
+                                        self.stream_source_core
+                                            .split_state_store
+                                            .state_table
+                                            .try_wait_committed_epoch(barrier_epoch.prev)
+                                            .await?;
+                                        if self
+                                            .apply_split_change(
+                                                target_splits,
+                                                &mut backfill_stage,
+                                                should_trim_state,
+                                            )
+                                            .await?
+                                        {
+                                            let reader = rebuild_reader_on_split_changed(
+                                                &self,
+                                                &backfill_stage,
+                                                &source_desc,
+                                            )
+                                            .await?;
+
+                                            backfill_stream = select_with_strategy(
+                                                input.by_ref().map(Either::Left),
+                                                reader.map(Either::Right),
+                                                select_strategy,
+                                            );
+                                        }
+                                    }
                                 }
                             }
                             Message::Chunk(chunk) => {
@@ -752,6 +783,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             let msg = msg?;
             match msg {
                 Message::Barrier(barrier) => {
+                    let mut split_changed = None;
                     if let Some(ref mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::Pause | Mutation::Resume => {
@@ -762,20 +794,16 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     actor_splits = ?actor_splits,
                                     "source change split received"
                                 );
-                                self.apply_split_change_forward_stage(
-                                    actor_splits,
-                                    &mut states,
-                                    true,
-                                )
-                                .await?;
+                                split_changed = actor_splits
+                                    .get(&self.actor_ctx.id)
+                                    .cloned()
+                                    .map(|target_splits| (target_splits, &mut states, true));
                             }
                             Mutation::Update(UpdateMutation { actor_splits, .. }) => {
-                                self.apply_split_change_forward_stage(
-                                    actor_splits,
-                                    &mut states,
-                                    false,
-                                )
-                                .await?;
+                                split_changed = actor_splits
+                                    .get(&self.actor_ctx.id)
+                                    .cloned()
+                                    .map(|target_splits| (target_splits, &mut states, false));
                             }
                             _ => {}
                         }
@@ -784,7 +812,24 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         .state_store
                         .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                         .await?;
+                    let barrier_epoch = barrier.epoch;
                     yield Message::Barrier(barrier);
+
+                    if let Some((target_splits, state, should_trim_state)) = split_changed {
+                        // do `try_wait_committed_epoch` to ensure that when `apply_split_change`,
+                        // we can read the latest state written by other source executor
+                        self.stream_source_core
+                            .split_state_store
+                            .state_table
+                            .try_wait_committed_epoch(barrier_epoch.prev)
+                            .await?;
+                        self.apply_split_change_forward_stage(
+                            target_splits,
+                            state,
+                            should_trim_state,
+                        )
+                        .await?;
+                    }
                 }
                 Message::Chunk(chunk) => {
                     yield Message::Chunk(chunk);
@@ -839,12 +884,12 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     /// For newly added splits, we do not need to backfill and can directly forward from upstream.
     async fn apply_split_change(
         &mut self,
-        split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
+        target_splits: Vec<SplitImpl>,
         stage: &mut BackfillStage,
         should_trim_state: bool,
     ) -> StreamExecutorResult<bool> {
         self.source_split_change_count.inc();
-        if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
+        {
             if self
                 .update_state_if_changed(target_splits, stage, should_trim_state)
                 .await?
@@ -937,12 +982,12 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     // We just need to update the state store if necessary.
     async fn apply_split_change_forward_stage(
         &mut self,
-        split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
+        target_splits: Vec<SplitImpl>,
         states: &mut BackfillStates,
         should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
         self.source_split_change_count.inc();
-        if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
+        {
             self.update_state_if_changed_forward_stage(target_splits, states, should_trim_state)
                 .await?;
         }

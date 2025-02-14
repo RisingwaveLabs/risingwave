@@ -250,12 +250,12 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
-        split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
+        target_splits: Vec<SplitImpl>,
         should_trim_state: bool,
         source_split_change_count_metrics: &LabelGuardedIntCounter<4>,
     ) -> StreamExecutorResult<()> {
-        source_split_change_count_metrics.inc();
-        if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
+        {
+            source_split_change_count_metrics.inc();
             if self
                 .update_state_if_changed(target_splits, should_trim_state)
                 .await?
@@ -700,6 +700,8 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     let epoch = barrier.epoch;
 
+                    let mut split_change = None;
+
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::Pause => {
@@ -717,25 +719,31 @@ impl<S: StateStore> SourceExecutor<S> {
                                     "source change split received"
                                 );
 
-                                self.apply_split_change(
-                                    &source_desc,
-                                    &mut stream,
-                                    actor_splits,
-                                    true,
-                                    &source_split_change_count,
-                                )
-                                .await?;
+                                split_change = actor_splits.get(&self.actor_ctx.id).cloned().map(
+                                    |target_splits| {
+                                        (
+                                            &source_desc,
+                                            &mut stream,
+                                            target_splits,
+                                            true,
+                                            &source_split_change_count,
+                                        )
+                                    },
+                                );
                             }
 
                             Mutation::Update(UpdateMutation { actor_splits, .. }) => {
-                                self.apply_split_change(
-                                    &source_desc,
-                                    &mut stream,
-                                    actor_splits,
-                                    false,
-                                    &source_split_change_count,
-                                )
-                                .await?;
+                                split_change = actor_splits.get(&self.actor_ctx.id).cloned().map(
+                                    |target_splits| {
+                                        (
+                                            &source_desc,
+                                            &mut stream,
+                                            target_splits,
+                                            false,
+                                            &source_split_change_count,
+                                        )
+                                    },
+                                );
                             }
                             Mutation::Throttle(actor_to_apply) => {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
@@ -768,7 +776,33 @@ impl<S: StateStore> SourceExecutor<S> {
                         task_builder.send(Epoch(epoch.prev)).await?
                     }
 
+                    let barrier_epoch = barrier.epoch;
                     yield Message::Barrier(barrier);
+
+                    if let Some((
+                        source_desc,
+                        stream,
+                        target_splits,
+                        should_trim_state,
+                        source_split_change_count,
+                    )) = split_change
+                    {
+                        let core = self.stream_source_core.as_mut().unwrap();
+                        // do `try_wait_committed_epoch` to ensure that when `apply_split_change`,
+                        // we can read the latest state written by other source executor
+                        core.split_state_store
+                            .state_table
+                            .try_wait_committed_epoch(barrier_epoch.prev)
+                            .await?;
+                        self.apply_split_change(
+                            source_desc,
+                            stream,
+                            target_splits,
+                            should_trim_state,
+                            source_split_change_count,
+                        )
+                        .await?;
+                    }
                 }
                 Either::Left(_) => {
                     // For the source executor, the message we receive from this arm
