@@ -39,7 +39,7 @@ linkme = { workspace = true }
 maplit = "1"
 md5 = "0.7.0"
 memcomparable = "0.2"
-mysql_async = { version = "0.34", default-features = false, features = [
+mysql_async = { version = "0.35", default-features = false, features = [
     "default",
 ] }
 num-integer = "0.1"
