@@ -58,8 +58,6 @@ impl GenericPlanNode for Now {
             } else {
                 "ts"
             }),
-            sub_fields: vec![],
-            type_name: String::default(),
         }])
     }
 

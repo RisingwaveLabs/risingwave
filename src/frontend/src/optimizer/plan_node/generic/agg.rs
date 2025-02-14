@@ -676,8 +676,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     table_builder.add_column(&Field {
                         data_type: DataType::Int64,
                         name: format!("count_for_agg_call_{}", call_index),
-                        sub_fields: vec![],
-                        type_name: String::default(),
                     });
                 }
                 table_builder

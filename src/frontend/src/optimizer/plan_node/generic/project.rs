@@ -82,31 +82,28 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
             .enumerate()
             .map(|(i, expr)| {
                 // Get field info from o2i.
-                let (name, sub_fields, type_name) = match o2i.try_map(i) {
+                let name = match o2i.try_map(i) {
                     Some(input_idx) => {
-                        let mut field = input_schema.fields()[input_idx].clone();
                         if let Some(name) = self.field_names.get(&i) {
-                            field.name.clone_from(name);
+                            name.clone()
+                        } else {
+                            input_schema.fields()[input_idx].name.clone()
                         }
-                        (field.name, field.sub_fields, field.type_name)
                     }
                     None => match expr {
-                        ExprImpl::InputRef(_) | ExprImpl::Literal(_) => (
-                            format!("{:?}", ExprDisplay { expr, input_schema }),
-                            vec![],
-                            String::new(),
-                        ),
+                        ExprImpl::InputRef(_) | ExprImpl::Literal(_) => {
+                            format!("{:?}", ExprDisplay { expr, input_schema })
+                        }
                         _ => {
-                            let name = if let Some(name) = self.field_names.get(&i) {
+                            if let Some(name) = self.field_names.get(&i) {
                                 name.clone()
                             } else {
                                 format!("$expr{}", ctx.next_expr_display_id())
-                            };
-                            (name, vec![], String::new())
+                            }
                         }
                     },
                 };
-                Field::with_struct(expr.return_type(), name, sub_fields, type_name)
+                Field::with_name(expr.return_type(), name)
             })
             .collect();
         Schema { fields }

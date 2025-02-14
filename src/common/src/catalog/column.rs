@@ -295,12 +295,8 @@ impl ColumnDesc {
             data_type: field.data_type.clone(),
             column_id: ColumnId::new(id),
             name: field.name.clone(),
-            field_descs: field
-                .sub_fields
-                .iter()
-                .map(Self::from_field_without_column_id)
-                .collect_vec(),
-            type_name: field.type_name.clone(),
+            field_descs: Vec::new(),  // TODO: deprecate this
+            type_name: String::new(), // TODO: deprecate this
             description: None,
             generated_or_default_column: None,
             additional_column: AdditionalColumn { column_type: None },
