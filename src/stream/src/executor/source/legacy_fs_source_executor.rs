@@ -15,7 +15,7 @@
 #![deprecated = "will be replaced by new fs source (list + fetch)"]
 #![expect(deprecated)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use anyhow::anyhow;
 use either::Either;
@@ -143,9 +143,9 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
         &mut self,
         source_desc: &LegacyFsSourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
-        mapping: &HashMap<ActorId, Vec<SplitImpl>>,
+        target_splits: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
-        if let Some(target_splits) = mapping.get(&self.actor_ctx.id).cloned() {
+        {
             if let Some(target_state) = self.get_diff(target_splits).await? {
                 tracing::info!(
                     actor_id = self.actor_ctx.id,
@@ -407,12 +407,17 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
                             self_paused = false;
                         }
                         let epoch = barrier.epoch;
+                        let mut split_change = None;
 
                         if let Some(ref mutation) = barrier.mutation.as_deref() {
                             match mutation {
                                 Mutation::SourceChangeSplit(actor_splits) => {
-                                    self.apply_split_change(&source_desc, &mut stream, actor_splits)
-                                        .await?
+                                    split_change = actor_splits
+                                        .get(&self.actor_ctx.id)
+                                        .cloned()
+                                        .map(|target_splits| {
+                                            (&source_desc, &mut stream, target_splits)
+                                        });
                                 }
                                 Mutation::Pause => {
                                     command_paused = true;
@@ -423,12 +428,12 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
                                     stream.resume_stream()
                                 }
                                 Mutation::Update(UpdateMutation { actor_splits, .. }) => {
-                                    self.apply_split_change(
-                                        &source_desc,
-                                        &mut stream,
-                                        actor_splits,
-                                    )
-                                    .await?;
+                                    split_change = actor_splits
+                                        .get(&self.actor_ctx.id)
+                                        .cloned()
+                                        .map(|target_splits| {
+                                            (&source_desc, &mut stream, target_splits)
+                                        });
                                 }
                                 Mutation::Throttle(actor_to_apply) => {
                                     if let Some(new_rate_limit) =
@@ -446,6 +451,18 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
                         self.take_snapshot_and_clear_cache(epoch).await?;
 
                         yield msg;
+
+                        if let Some((source_desc, stream, target_splits)) = split_change {
+                            // do `try_wait_committed_epoch` to ensure that when `apply_split_change`,
+                            // we can read the latest state written by other source executor
+                            self.stream_source_core
+                                .split_state_store
+                                .state_table
+                                .try_wait_committed_epoch(epoch.prev)
+                                .await?;
+                            self.apply_split_change(source_desc, stream, target_splits)
+                                .await?;
+                        }
                     }
                     _ => {
                         // For the source executor, the message we receive from this arm should

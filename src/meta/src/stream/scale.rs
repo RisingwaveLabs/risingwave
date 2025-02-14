@@ -2457,7 +2457,7 @@ impl GlobalStreamManager {
         let _guard = self.source_manager.pause_tick().await;
 
         self.barrier_scheduler
-            .run_config_change_command_with_pause(database_id, command)
+            .run_command(database_id, command)
             .await?;
 
         tracing::info!("reschedule done");

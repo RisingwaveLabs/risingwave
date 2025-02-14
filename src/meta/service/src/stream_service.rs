@@ -87,7 +87,7 @@ impl StreamManagerService for StreamServiceImpl {
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
         for database_id in self.metadata_manager.list_active_database_ids().await? {
             self.barrier_scheduler
-                .run_command(database_id, Command::pause(PausedReason::Manual))
+                .run_command(database_id, Command::pause())
                 .await?;
         }
         Ok(Response::new(PauseResponse {}))
@@ -97,7 +97,7 @@ impl StreamManagerService for StreamServiceImpl {
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
         for database_id in self.metadata_manager.list_active_database_ids().await? {
             self.barrier_scheduler
-                .run_command(database_id, Command::resume(PausedReason::Manual))
+                .run_command(database_id, Command::resume())
                 .await?;
         }
         Ok(Response::new(ResumeResponse {}))

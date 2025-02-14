@@ -12,14 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use await_tree::InstrumentAwait;
 use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_storage::dispatch_state_store;
-use risingwave_storage::store::TryWaitEpochOptions;
-use risingwave_stream::error::StreamError;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -41,33 +37,6 @@ impl StreamServiceImpl {
 impl StreamService for StreamServiceImpl {
     type StreamingControlStreamStream =
         impl Stream<Item = std::result::Result<StreamingControlStreamResponse, tonic::Status>>;
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn wait_epoch_commit(
-        &self,
-        request: Request<WaitEpochCommitRequest>,
-    ) -> Result<Response<WaitEpochCommitResponse>, Status> {
-        let request = request.into_inner();
-        let epoch = request.epoch;
-
-        dispatch_state_store!(self.env.state_store(), store, {
-            use risingwave_hummock_sdk::HummockReadEpoch;
-            use risingwave_storage::StateStore;
-
-            store
-                .try_wait_epoch(
-                    HummockReadEpoch::Committed(epoch),
-                    TryWaitEpochOptions {
-                        table_id: request.table_id.into(),
-                    },
-                )
-                .instrument_await(format!("wait_epoch_commit (epoch {})", epoch))
-                .await
-                .map_err(StreamError::from)?;
-        });
-
-        Ok(Response::new(WaitEpochCommitResponse { status: None }))
-    }
 
     async fn streaming_control_stream(
         &self,

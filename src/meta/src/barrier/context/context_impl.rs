@@ -14,14 +14,11 @@
 
 use std::sync::Arc;
 
-use futures::future::try_join_all;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::PbFragmentTypeFlag;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
-use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::barrier::command::CommandContext;
@@ -106,34 +103,6 @@ impl GlobalBarrierWorkerContextImpl {
 }
 
 impl CommandContext {
-    pub async fn wait_epoch_commit(
-        &self,
-        barrier_manager_context: &GlobalBarrierWorkerContextImpl,
-    ) -> MetaResult<()> {
-        let table_id = self.table_ids_to_commit.iter().next().cloned();
-        // try wait epoch on an existing random table id
-        let Some(table_id) = table_id else {
-            // no need to wait epoch when there is no table id
-            return Ok(());
-        };
-        let futures = self.node_map.values().map(|worker_node| async {
-            let client = barrier_manager_context
-                .env
-                .stream_client_pool()
-                .get(worker_node)
-                .await?;
-            let request = WaitEpochCommitRequest {
-                epoch: self.barrier_info.prev_epoch(),
-                table_id: table_id.table_id,
-            };
-            client.wait_epoch_commit(request).await
-        });
-
-        try_join_all(futures).await?;
-
-        Ok(())
-    }
-
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
     pub async fn post_collect(
@@ -148,17 +117,9 @@ impl CommandContext {
 
             Command::Throttle(_) => {}
 
-            Command::Pause(reason) => {
-                if let PausedReason::ConfigChange = reason {
-                    // After the `Pause` barrier is collected and committed, we must ensure that the
-                    // storage version with this epoch is synced to all compute nodes before the
-                    // execution of the next command of `Update`, as some newly created operators
-                    // may immediately initialize their states on that barrier.
-                    self.wait_epoch_commit(barrier_manager_context).await?;
-                }
-            }
+            Command::Pause => {}
 
-            Command::Resume(_) => {}
+            Command::Resume => {}
 
             Command::SourceChangeSplit(split_assignment) => {
                 barrier_manager_context

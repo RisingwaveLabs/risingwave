@@ -17,7 +17,6 @@ use std::mem::take;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::meta::PausedReason;
 
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightSubscriptionInfo};
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
@@ -39,8 +38,8 @@ pub(crate) struct BarrierWorkerState {
 
     pub(super) inflight_subscription_info: InflightSubscriptionInfo,
 
-    /// Whether the cluster is paused and the reason.
-    paused_reason: Option<PausedReason>,
+    /// Whether the cluster is paused.
+    is_paused: bool,
 }
 
 impl BarrierWorkerState {
@@ -50,7 +49,7 @@ impl BarrierWorkerState {
             pending_non_checkpoint_barriers: vec![],
             inflight_graph_info: InflightDatabaseInfo::empty(),
             inflight_subscription_info: InflightSubscriptionInfo::default(),
-            paused_reason: None,
+            is_paused: false,
         }
     }
 
@@ -58,25 +57,29 @@ impl BarrierWorkerState {
         in_flight_prev_epoch: TracedEpoch,
         inflight_graph_info: InflightDatabaseInfo,
         inflight_subscription_info: InflightSubscriptionInfo,
-        paused_reason: Option<PausedReason>,
+        is_paused: bool,
     ) -> Self {
         Self {
             in_flight_prev_epoch,
             pending_non_checkpoint_barriers: vec![],
             inflight_graph_info,
             inflight_subscription_info,
-            paused_reason,
+            is_paused,
         }
     }
 
-    pub fn paused_reason(&self) -> Option<PausedReason> {
-        self.paused_reason
+    pub fn is_paused(&self) -> bool {
+        self.is_paused
     }
 
-    fn set_paused_reason(&mut self, paused_reason: Option<PausedReason>) {
-        if self.paused_reason != paused_reason {
-            tracing::info!(current = ?self.paused_reason, new = ?paused_reason, "update paused state");
-            self.paused_reason = paused_reason;
+    fn set_is_paused(&mut self, is_paused: bool) {
+        if self.is_paused != is_paused {
+            tracing::info!(
+                currently_paused = self.is_paused,
+                newly_paused = is_paused,
+                "update paused state"
+            );
+            self.is_paused = is_paused;
         }
     }
 
@@ -122,7 +125,7 @@ impl BarrierWorkerState {
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
     /// will be removed from the state after the info get resolved.
     ///
-    /// Return (`graph_info`, `subscription_info`, `table_ids_to_commit`, `jobs_to_wait`, `prev_paused_reason`)
+    /// Return (`graph_info`, `subscription_info`, `table_ids_to_commit`, `jobs_to_wait`, `prev_is_paused`)
     pub fn apply_command(
         &mut self,
         command: Option<&Command>,
@@ -131,7 +134,7 @@ impl BarrierWorkerState {
         InflightSubscriptionInfo,
         HashSet<TableId>,
         HashSet<TableId>,
-        Option<PausedReason>,
+        bool,
     ) {
         // update the fragment_infos outside pre_apply
         let fragment_changes = if let Some(Command::CreateStreamingJob {
@@ -173,16 +176,20 @@ impl BarrierWorkerState {
             self.inflight_subscription_info.post_apply(command);
         }
 
-        let prev_paused_reason = self.paused_reason;
-        let curr_paused_reason = Command::next_paused_reason(command, prev_paused_reason);
-        self.set_paused_reason(curr_paused_reason);
+        let prev_is_paused = self.is_paused();
+        let curr_is_paused = match command {
+            Some(Command::Pause) => true,
+            Some(Command::Resume) => false,
+            _ => prev_is_paused,
+        };
+        self.set_is_paused(curr_is_paused);
 
         (
             info,
             subscription_info,
             table_ids_to_commit,
             jobs_to_wait,
-            prev_paused_reason,
+            prev_is_paused,
         )
     }
 }

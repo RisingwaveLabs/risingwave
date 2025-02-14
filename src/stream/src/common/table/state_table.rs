@@ -45,8 +45,9 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::table_watermark::{
     VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
-use risingwave_storage::error::{ErrorKind, StorageError};
+use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::find_columns_by_ids;
@@ -186,6 +187,17 @@ where
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.local_store.init(InitOptions::new(epoch)).await?;
         Ok(())
+    }
+
+    pub async fn try_wait_committed_epoch(&self, prev_epoch: u64) -> StorageResult<()> {
+        self.store
+            .try_wait_epoch(
+                HummockReadEpoch::Committed(prev_epoch),
+                TryWaitEpochOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await
     }
 
     pub fn state_store(&self) -> &S {
