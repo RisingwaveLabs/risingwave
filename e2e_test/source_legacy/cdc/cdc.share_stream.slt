@@ -547,6 +547,16 @@ CREATE TABLE list_with_null_shared (
     PRIMARY KEY (id)
 ) FROM pg_source TABLE 'public.list_with_null';
 
+statement ok
+CREATE TABLE json_table_shared (
+    id INT,
+    c_json JSONB,
+    c_jsonb JSONB,
+    c_json_array JSONB[],
+    c_jsonb_array JSONB[],
+    PRIMARY KEY (id)
+) FROM pg_source TABLE 'public.json_table';
+
 system ok
 psql -c "
 insert into numeric_table values(102, 57896044618658097711785492504343953926634992332820282019728792003956564819967);
@@ -655,6 +665,14 @@ query II
 select * from upper_orders_shared order by id;
 ----
 1 happy
+
+query II
+select * from json_table_shared order by id;
+----
+1  {"id": 1, "name": "alice"} {"id": 1, "name": "alice"} {"{\"id\": 1, \"name\": \"alice\"}"} {"{\"id\": 1, \"name\": \"alice\"}"}
+2  {}                         {}                         {"{}"}                               {"{}"}
+3  {}                         {}                         {}                                   {}
+4  NULL                       NULL                       NULL                                 NULL
 
 statement ok
 CREATE TABLE test_pg_default_value (

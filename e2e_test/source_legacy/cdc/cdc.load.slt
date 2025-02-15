@@ -358,3 +358,23 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023(
  publication.name = 'rw_publication_partition',
  slot.name = 'my_slot_partition_2'
 );
+
+statement ok
+CREATE TABLE json_table (
+    id INT,
+    c_json JSONB,
+    c_jsonb JSONB,
+    c_json_array JSONB[],
+    c_jsonb_array JSONB[],
+    PRIMARY KEY (id)
+)  WITH (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ schema.name = 'public',
+ table.name = 'json_table',
+ slot.name = 'json_table'
+);

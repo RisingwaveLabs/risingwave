@@ -42,3 +42,11 @@ INSERT INTO partitioned_timestamp_table (c_int, c_boolean, c_timestamp) VALUES
 (17, true, '2024-09-07 16:45:00'),
 (18, true, '2025-01-08 18:30:00'),
 (19, true, '2025-07-09 07:10:00');
+
+INSERT INTO
+  json_table
+VALUES
+  (11, '{"id": 1, "name": "alice"}', '{"id": 1, "name": "alice"}', ARRAY['{"id": 1, "name": "alice"}'::json], ARRAY['{"id": 1, "name": "alice"}'::jsonb]),
+  (12, '{}', '{}', ARRAY['{}'::json], ARRAY['{}'::jsonb]),
+  (13, '{}', '{}', array[]::json[], array[]::jsonb[]),
+  (14, NULL, NULL, NULL, NULL);

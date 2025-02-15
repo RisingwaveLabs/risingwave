@@ -80,3 +80,11 @@ query II
 select * from upper_orders order by id;
 ----
 1 happy
+
+query II
+select * from json_table order by id;
+----
+1  {"id": 1, "name": "alice"} {"id": 1, "name": "alice"} {"{\"id\": 1, \"name\": \"alice\"}"} {"{\"id\": 1, \"name\": \"alice\"}"}
+2  {}                         {}                         {"{}"}                               {"{}"}
+3  {}                         {}                         {}                                   {}
+4  NULL                       NULL                       NULL                                 NULL

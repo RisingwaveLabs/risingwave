@@ -14,7 +14,7 @@ services:
       timeout: 5s
       retries: 5
     command:
-      ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=30"]
+      ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=50", "-c", "max_wal_senders=20"]
 
   mysql:
     image: mysql:8.0
