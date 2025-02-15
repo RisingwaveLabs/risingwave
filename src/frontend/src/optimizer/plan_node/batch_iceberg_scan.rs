@@ -17,6 +17,8 @@ use std::rc::Rc;
 
 use iceberg::expr::Predicate as IcebergPredicate;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::IcebergScanNode;
@@ -78,6 +80,26 @@ impl BatchIcebergScan {
             base,
             core,
             iceberg_scan_type,
+            predicate: IcebergPredicate::AlwaysTrue,
+        }
+    }
+
+    pub fn new_count_star_with_batch_iceberg_scan(batch_iceberg_scan: &BatchIcebergScan) -> Self {
+        let mut core = batch_iceberg_scan.core.clone();
+        core.column_catalog = vec![ColumnCatalog::visible(ColumnDesc::named(
+            "count",
+            ColumnId::first_user_column(),
+            DataType::Int64,
+        ))];
+        let base = PlanBase::new_batch_with_core(
+            &core,
+            batch_iceberg_scan.base.distribution().clone(),
+            batch_iceberg_scan.base.order().clone(),
+        );
+        Self {
+            base,
+            core,
+            iceberg_scan_type: IcebergScanType::CountStar,
             predicate: IcebergPredicate::AlwaysTrue,
         }
     }

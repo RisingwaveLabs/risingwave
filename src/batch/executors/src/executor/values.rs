@@ -36,7 +36,6 @@ pub struct ValuesExecutor {
 }
 
 impl ValuesExecutor {
-    #[cfg(test)]
     pub(crate) fn new(
         rows: Vec<Vec<BoxedExpression>>,
         schema: Schema,
