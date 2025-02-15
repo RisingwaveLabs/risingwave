@@ -408,9 +408,11 @@ impl JsonParseOptions {
                     .get("value")
                     .ok_or_else(create_error)?
                     .as_str()
-                    .unwrap()
-                    .as_bytes();
-                let unscaled = BigInt::from_signed_bytes_be(value);
+                    .unwrap();
+                let value = base64::engine::general_purpose::STANDARD
+                    .decode(value)
+                    .map_err(|_| create_error())?;
+                let unscaled = BigInt::from_signed_bytes_be(&value);
                 let decimal = scaled_bigint_to_rust_decimal(unscaled, scale as _)?;
                 ScalarImpl::Decimal(Decimal::Normalized(decimal))
             }
