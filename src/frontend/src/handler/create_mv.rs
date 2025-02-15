@@ -131,7 +131,7 @@ pub fn gen_create_mv_plan_bound(
     plan_root.set_req_dist_as_same_as_req_order();
     if let Some(col_names) = col_names {
         for name in &col_names {
-            check_valid_column_name(name)?;
+            check_valid_column_name(name, &[])?;
         }
         plan_root.set_out_names(col_names)?;
     }

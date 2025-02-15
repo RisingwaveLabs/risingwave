@@ -18,7 +18,7 @@ use std::sync::{Arc, LazyLock};
 use risingwave_connector::parser::additional_columns::gen_default_addition_col_name;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_sqlparser::ast::{ColumnDef, Ident};
+use risingwave_sqlparser::ast::{ColumnDef, ColumnOption, ColumnOptionDef, Ident};
 
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -119,7 +119,10 @@ fn rewrite_table_definition(
                 name: Ident::from(col_name.as_str()),
                 data_type: Some(col_def.data_type().to_ast()),
                 collation: None,
-                options: vec![],
+                options: vec![ColumnOptionDef {
+                    name: None,
+                    option: ColumnOption::DerivedFromAdditionalColumns,
+                }],
             });
         }
     }

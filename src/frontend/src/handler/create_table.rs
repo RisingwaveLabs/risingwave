@@ -185,6 +185,7 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
             ColumnOption::DefaultValue(_) => {}
             ColumnOption::DefaultValueInternal { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
+            ColumnOption::DerivedFromAdditionalColumns => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
     }
@@ -194,10 +195,7 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
 /// This primary key is not combined with table constraints yet.
-pub fn bind_sql_columns(
-    column_defs: &[ColumnDef],
-    is_for_drop_table_connector: bool,
-) -> Result<Vec<ColumnCatalog>> {
+pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>> {
     let mut columns = Vec::with_capacity(column_defs.len());
 
     for column in column_defs {
@@ -209,6 +207,7 @@ pub fn bind_sql_columns(
             name,
             data_type,
             collation,
+            options,
             ..
         } = column;
 
@@ -238,12 +237,7 @@ pub fn bind_sql_columns(
             }
         }
 
-        if !is_for_drop_table_connector {
-            // additional column name may have prefix _rw
-            // When converting dropping the connector from table, the additional columns are converted to normal columns and keep the original name.
-            // Under this case, we loosen the check for _rw prefix.
-            check_valid_column_name(&name.real_value())?;
-        }
+        check_valid_column_name(&name.real_value(), options)?;
 
         let field_descs: Vec<ColumnDesc> = if let AstDataType::Struct(fields) = &data_type {
             fields
@@ -616,9 +610,8 @@ pub(crate) fn gen_create_table_plan(
     mut col_id_gen: ColumnIdGenerator,
     source_watermarks: Vec<SourceWatermark>,
     props: CreateTableProps,
-    is_for_replace_plan: bool,
 ) -> Result<(PlanRef, PbTable)> {
-    let mut columns = bind_sql_columns(&column_defs, is_for_replace_plan)?;
+    let mut columns = bind_sql_columns(&column_defs)?;
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(&*c)?;
     }
@@ -1122,7 +1115,6 @@ pub(super) async fn handle_create_table_plan(
                 col_id_gen,
                 source_watermarks,
                 props,
-                false,
             )?;
 
             ((plan, None, table), TableJobType::General)
@@ -1185,7 +1177,7 @@ pub(super) async fn handle_create_table_plan(
                     }
 
                     let (mut columns, pk_names) =
-                        bind_cdc_table_schema(&column_defs, &constraints, false)?;
+                        bind_cdc_table_schema(&column_defs, &constraints)?;
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
                     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
@@ -1350,9 +1342,8 @@ async fn bind_cdc_table_schema_externally(
 fn bind_cdc_table_schema(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
-    is_for_replace_plan: bool,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    let columns = bind_sql_columns(column_defs, is_for_replace_plan)?;
+    let columns = bind_sql_columns(column_defs)?;
 
     let pk_names = bind_sql_pk_names(column_defs, bind_table_constraints(constraints)?)?;
     Ok((columns, pk_names))
@@ -1943,7 +1934,6 @@ pub async fn generate_stream_graph_for_replace_table(
                 col_id_gen,
                 source_watermarks,
                 props,
-                true,
             )?;
             ((plan, None, table), TableJobType::General)
         }
@@ -1957,7 +1947,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_table.external_table_name.clone(),
             )?;
 
-            let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints, true)?;
+            let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();
@@ -2278,7 +2268,7 @@ mod tests {
                 panic!("test case should be create table")
             };
             let actual: Result<_> = (|| {
-                let mut columns = bind_sql_columns(&column_defs, false)?;
+                let mut columns = bind_sql_columns(&column_defs)?;
                 let mut col_id_gen = ColumnIdGenerator::new_initial();
                 for c in &mut columns {
                     c.column_desc.column_id = col_id_gen.generate(&*c).unwrap();

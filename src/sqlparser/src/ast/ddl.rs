@@ -790,6 +790,9 @@ pub enum ColumnOption {
     DialectSpecific(Vec<Token>),
     /// AS ( <generation_expr> )`
     GeneratedColumns(Expr),
+    /// The column is derived from additional columns.
+    /// The column is defined in INCLUDE clause but we turn it to a normal column in drop table connector process
+    DerivedFromAdditionalColumns,
 }
 
 impl fmt::Display for ColumnOption {
@@ -830,6 +833,10 @@ impl fmt::Display for ColumnOption {
             Check(expr) => write!(f, "CHECK ({})", expr),
             DialectSpecific(val) => write!(f, "{}", display_separated(val, " ")),
             GeneratedColumns(expr) => write!(f, "AS {}", expr),
+            DerivedFromAdditionalColumns => {
+                // write nothing because it cannot be defined in sql
+                Ok(())
+            }
         }
     }
 }

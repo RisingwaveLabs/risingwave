@@ -321,7 +321,7 @@ impl Binder {
                     aliases.push(alias);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
-                    check_valid_column_name(&alias.real_value())?;
+                    check_valid_column_name(&alias.real_value(), &[])?;
 
                     let expr = self.bind_expr(expr)?;
                     select_list.push(expr);

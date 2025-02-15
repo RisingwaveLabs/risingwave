@@ -105,7 +105,7 @@ pub async fn handle_alter_source_column(
             }
 
             // add column name is from user, so we still have check for reserved column name
-            let mut bound_column = bind_sql_columns(&[column_def], false)?.remove(0);
+            let mut bound_column = bind_sql_columns(&[column_def])?.remove(0);
             bound_column.column_desc.column_id = max_column_id(columns).next();
             columns.push(bound_column);
             // No need to update the definition here. It will be done by purification later.

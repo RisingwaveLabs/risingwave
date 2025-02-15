@@ -768,7 +768,7 @@ pub async fn bind_create_source_or_table_with_connector(
 
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
-    let columns_from_sql = bind_sql_columns(sql_columns_defs, false)?;
+    let columns_from_sql = bind_sql_columns(sql_columns_defs)?;
 
     let mut columns = bind_all_columns(
         &format_encode,

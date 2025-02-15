@@ -17,11 +17,11 @@
 //! The main struct is [`root_catalog::Catalog`], which is the root containing other catalog
 //! structs. It is accessed via [`catalog_service::CatalogReader`] and
 //! [`catalog_service::CatalogWriter`], which is held by [`crate::session::FrontendEnv`].
-
 use risingwave_common::catalog::{
     is_row_id_column_name, is_system_schema, ROWID_PREFIX, RW_RESERVED_COLUMN_NAME_PREFIX,
 };
 use risingwave_connector::sink::catalog::SinkCatalog;
+use risingwave_sqlparser::ast::{ColumnOption, ColumnOptionDef};
 use thiserror::Error;
 
 use crate::error::{ErrorCode, Result, RwError};
@@ -61,7 +61,7 @@ pub(crate) type FragmentId = u32;
 pub(crate) type SecretId = risingwave_common::catalog::SecretId;
 
 /// Check if the column name does not conflict with the internally reserved column name.
-pub fn check_valid_column_name(column_name: &str) -> Result<()> {
+pub fn check_valid_column_name(column_name: &str, option_defs: &[ColumnOptionDef]) -> Result<()> {
     if is_row_id_column_name(column_name) {
         return Err(ErrorCode::InternalError(format!(
             "column name prefixed with {:?} are reserved word.",
@@ -70,7 +70,13 @@ pub fn check_valid_column_name(column_name: &str) -> Result<()> {
         .into());
     }
 
-    if column_name.starts_with(RW_RESERVED_COLUMN_NAME_PREFIX) {
+    let is_derived_from_additional_columns = option_defs
+        .iter()
+        .any(|option| matches!(option.option, ColumnOption::DerivedFromAdditionalColumns));
+
+    if !is_derived_from_additional_columns
+        && column_name.starts_with(RW_RESERVED_COLUMN_NAME_PREFIX)
+    {
         return Err(ErrorCode::InternalError(format!(
             "column name prefixed with {:?} are reserved word.",
             RW_RESERVED_COLUMN_NAME_PREFIX
