@@ -15,6 +15,7 @@ RUN apt-get update -yy && \
     openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-17-jdk wget unzip git tmux lld postgresql-client kcat netcat-openbsd mysql-client \
     maven zstd libzstd-dev locales \
     python3.12 python3.12-dev \
+    golang perl \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 ENV PYO3_PYTHON=python3.12
 
