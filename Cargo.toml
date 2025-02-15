@@ -310,6 +310,10 @@ mixed_attributes_style = "allow"
 too_long_first_doc_paragraph = "allow"
 str_to_string = "warn"
 string_to_string = "warn"
+large_futures = "warn"
+large_stack_arrays = "warn"
+large_stack_frames = "warn"
+large_types_passed_by_value = "warn"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
