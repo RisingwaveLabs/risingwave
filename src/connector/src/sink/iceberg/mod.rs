@@ -508,6 +508,18 @@ impl Sink for IcebergSink {
     }
 }
 
+/// None means no project.
+/// Prepare represent the extra partition column idx.
+/// Done represents the project idx vec.
+///
+/// The `ProjectIdxVec` will be late-evaluated. When we encounter the Prepare state first, we will use the data chunk schema
+/// to create the project idx vec.
+enum ProjectIdxVec {
+    None,
+    Prepare(usize),
+    Done(Vec<usize>),
+}
+
 pub struct IcebergSinkWriter {
     writer: IcebergWriterDispatch,
     arrow_schema: SchemaRef,
@@ -515,6 +527,9 @@ pub struct IcebergSinkWriter {
     metrics: IcebergWriterMetrics,
     // State of iceberg table for this writer
     table: Table,
+    // For chunk with extra partition column, we should remove this column before write.
+    // This project index vec is used to avoid create project idx each time.
+    project_idx_vec: ProjectIdxVec,
 }
 
 #[allow(clippy::type_complexity)]
@@ -646,11 +661,7 @@ impl IcebergSinkWriter {
             ),
         );
         let data_file_builder = DataFileWriterBuilder::new(parquet_writer_builder, None);
-        if let Some(_extra_partition_col_idx) = extra_partition_col_idx {
-            Err(SinkError::Iceberg(anyhow!(
-                "Extra partition column is not supported in append-only mode"
-            )))
-        } else if partition_spec.fields().is_empty() {
+        if partition_spec.fields().is_empty() {
             let writer_builder = MonitoredGeneralWriterBuilder::new(
                 data_file_builder,
                 write_qps.clone(),
@@ -678,6 +689,13 @@ impl IcebergSinkWriter {
                     writer_builder,
                 },
                 table,
+                project_idx_vec: {
+                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                    } else {
+                        ProjectIdxVec::None
+                    }
+                },
             })
         } else {
             let partition_builder = MonitoredGeneralWriterBuilder::new(
@@ -712,6 +730,13 @@ impl IcebergSinkWriter {
                     writer_builder: partition_builder,
                 },
                 table,
+                project_idx_vec: {
+                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                    } else {
+                        ProjectIdxVec::None
+                    }
+                },
             })
         }
     }
@@ -825,11 +850,7 @@ impl IcebergSinkWriter {
             equality_delete_builder,
             unique_column_ids,
         );
-        if let Some(_extra_partition_col_idx) = extra_partition_col_idx {
-            Err(SinkError::Iceberg(anyhow!(
-                "Extra partition column is not supported in upsert mode"
-            )))
-        } else if partition_spec.fields().is_empty() {
+        if partition_spec.fields().is_empty() {
             let writer_builder = MonitoredGeneralWriterBuilder::new(
                 delta_builder,
                 write_qps.clone(),
@@ -867,6 +888,13 @@ impl IcebergSinkWriter {
                     writer: inner_writer,
                     writer_builder,
                     arrow_schema_with_op_column: schema_with_extra_op_column,
+                },
+                project_idx_vec: {
+                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                    } else {
+                        ProjectIdxVec::None
+                    }
                 },
             })
         } else {
@@ -912,6 +940,13 @@ impl IcebergSinkWriter {
                     writer: inner_writer,
                     writer_builder: partition_builder,
                     arrow_schema_with_op_column: schema_with_extra_op_column,
+                },
+                project_idx_vec: {
+                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                    } else {
+                        ProjectIdxVec::None
+                    }
                 },
             })
         }
@@ -994,6 +1029,25 @@ impl SinkWriter for IcebergSinkWriter {
 
         // Process the chunk.
         let (mut chunk, ops) = chunk.compact().into_parts();
+        match &self.project_idx_vec {
+            ProjectIdxVec::None => {}
+            ProjectIdxVec::Prepare(idx) => {
+                if *idx >= chunk.columns().len() {
+                    return Err(SinkError::Iceberg(anyhow!(
+                        "invalid extra partition column index {}",
+                        idx
+                    )));
+                }
+                let project_idx_vec = (0..*idx)
+                    .chain(*idx + 1..chunk.columns().len())
+                    .collect_vec();
+                chunk = chunk.project(&project_idx_vec);
+                self.project_idx_vec = ProjectIdxVec::Done(project_idx_vec);
+            }
+            ProjectIdxVec::Done(idx_vec) => {
+                chunk = chunk.project(idx_vec);
+            }
+        }
         if ops.len() == 0 {
             return Ok(());
         }

@@ -1,5 +1,5 @@
 statement ok
-set sink_decouple = false;
+set sink_decouple = true;
 
 statement ok
 set streaming_parallelism=4;
@@ -36,6 +36,7 @@ CREATE SINK s6 AS select * from mv6 WITH (
     s3.region = 'us-east-1',
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
+    commit_checkpoint_interval = 1
 );
 
 statement ok

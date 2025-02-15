@@ -58,11 +58,11 @@
     │   ├── kv_log_store_seq_id: integer
     │   ├── kv_log_store_vnode: smallint
     │   ├── kv_log_store_row_op: smallint
-    │   ├── v1: integer
-    │   ├── v2: double precision
-    │   ├── v3: character varying
-    │   ├── v5: numeric
-    │   ├── t1.v4: bigint
+    │   ├── t1_v1: integer
+    │   ├── t1_v2: double precision
+    │   ├── t1_v3: character varying
+    │   ├── t1_v5: numeric
+    │   ├── t1_v4: bigint
     │   └── _rw_timestamp: timestamp with time zone
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
@@ -111,10 +111,10 @@
     │   ├── kv_log_store_seq_id: integer
     │   ├── kv_log_store_vnode: smallint
     │   ├── kv_log_store_row_op: smallint
-    │   ├── v1: integer
-    │   ├── v2: double precision
-    │   ├── v3: character varying
-    │   ├── v5: numeric
+    │   ├── t1_v1: integer
+    │   ├── t1_v2: double precision
+    │   ├── t1_v3: character varying
+    │   ├── t1_v5: numeric
     │   └── _rw_timestamp: timestamp with time zone
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
@@ -197,7 +197,9 @@
     );
   explain_output: |
     StreamSink { type: append-only, columns: [v1, v2, v3, v4, t1._row_id(hidden)] }
-    └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
+    └─StreamExchange { dist: HashShard($expr1) }
+      └─StreamProject { exprs: [t1.v1, t1.v2, t1.v3, t1.v4, t1._row_id, Row(t1.v1, IcebergTransform('bucket[1]':Varchar, t1.v2), IcebergTransform('truncate[1]':Varchar, t1.v3), null:Time) as $expr1] }
+        └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
 - id: create_mock_iceberg_sink_append_only_with_range_partition
   sql: |
     create table t1 (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
@@ -237,7 +239,9 @@
     );
   explain_output: |
     StreamSink { type: upsert, columns: [v1, v2, v3, v4, t1._row_id(hidden)], downstream_pk: [t1.v1] }
-    └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
+    └─StreamExchange { dist: HashShard($expr1) }
+      └─StreamProject { exprs: [t1.v1, t1.v2, t1.v3, t1.v4, t1._row_id, Row(t1.v1, IcebergTransform('bucket[1]':Varchar, t1.v2), IcebergTransform('truncate[1]':Varchar, t1.v3), null:Time) as $expr1] }
+        └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
 - id: create_mock_iceberg_sink_upsert_with_range_partition
   sql: |
     create table t1 (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
