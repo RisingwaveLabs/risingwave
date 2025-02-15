@@ -153,7 +153,7 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+    async fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
         panic!("should not operate on the panic state store!");
     }
 

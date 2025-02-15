@@ -316,7 +316,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                         let barrier_epoch = barrier.epoch;
                                         yield Message::Barrier(barrier);
                                         write_state_post_write_barrier
-                                            .post_yield_barrier(update_vnode_bitmap.clone());
+                                            .post_yield_barrier(update_vnode_bitmap.clone())
+                                            .await?;
                                         if let Some(vnode_bitmap) = update_vnode_bitmap {
                                             // Apply Vnode Update
                                             read_state.update_vnode_bitmap(vnode_bitmap);
