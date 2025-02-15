@@ -5348,7 +5348,7 @@ dependencies = [
  "tokio",
  "tokio-stream 0.1.16",
  "url",
- "yup-oauth2",
+ "yup-oauth2 8.3.2",
 ]
 
 [[package]]
@@ -5992,6 +5992,24 @@ dependencies = [
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.25.0",
+ "tower-service",
+]
+
+[[package]]
+name = "hyper-rustls"
+version = "0.27.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d191583f3da1305256f22463b9bb0471acad48a4e534a5218b9963e9c1f59b2"
+dependencies = [
+ "futures-util",
+ "http 1.2.0",
+ "hyper 1.4.1",
+ "hyper-util",
+ "rustls 0.23.5",
+ "rustls-native-certs 0.8.0",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls 0.26.0",
  "tower-service",
 ]
 
@@ -11031,7 +11049,7 @@ dependencies = [
  "walkdir",
  "with_options",
  "workspace-hack",
- "yup-oauth2",
+ "yup-oauth2 12.1.0",
 ]
 
 [[package]]
@@ -16465,21 +16483,21 @@ checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yup-oauth2"
-version = "8.3.0"
+version = "8.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "364ca376b5c04d9b2be9693054e3e0d2d146b363819d0f9a10c6ee66e4c8406b"
+checksum = "b61da40aeb0907a65f7fb5c1de83c5a224d6a9ebb83bf918588a2bb744d636b8"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.13.1",
+ "base64 0.21.7",
  "futures",
  "http 0.2.9",
  "hyper 0.14.27",
  "hyper-rustls 0.24.2",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "log",
  "percent-encoding",
- "rustls 0.21.11",
+ "rustls 0.22.4",
  "rustls-pemfile 1.0.4",
  "seahash",
  "serde",
@@ -16487,6 +16505,32 @@ dependencies = [
  "time",
  "tokio",
  "tower-service",
+ "url",
+]
+
+[[package]]
+name = "yup-oauth2"
+version = "12.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4964039ac787bbd306fba65f6a8963b7974ae99515087e506a862674abae6a30"
+dependencies = [
+ "async-trait",
+ "base64 0.22.0",
+ "http 1.2.0",
+ "http-body-util",
+ "hyper 1.4.1",
+ "hyper-rustls 0.27.5",
+ "hyper-util",
+ "log",
+ "percent-encoding",
+ "rustls 0.23.5",
+ "rustls-pemfile 2.2.0",
+ "seahash",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.3",
+ "time",
+ "tokio",
  "url",
 ]
 
