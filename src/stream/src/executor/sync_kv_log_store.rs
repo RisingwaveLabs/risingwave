@@ -99,7 +99,7 @@ use crate::executor::{
 
 type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
 
-struct SyncedKvLogStoreExecutor<S: StateStore> {
+pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
     table_id: TableId,
     metrics: KvLogStoreMetrics,
@@ -114,7 +114,6 @@ struct SyncedKvLogStoreExecutor<S: StateStore> {
 }
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn new(
         actor_context: ActorContextRef,
         table_id: u32,

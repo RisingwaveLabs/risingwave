@@ -342,6 +342,10 @@ pub struct SessionConfig {
     /// Format: iceberg_engine_connection = schema_name.connection_name.
     #[parameter(default = "", check_hook = check_iceberg_engine_connection)]
     iceberg_engine_connection: String,
+
+    /// Whether the streaming join should be unaligned or not.
+    #[parameter(default = false)]
+    streaming_unaligned_join: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {

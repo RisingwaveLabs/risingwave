@@ -400,6 +400,51 @@ pub fn infer_kv_log_store_table_catalog_inner(
     table_catalog_builder.build(dist_key, read_prefix_len_hint)
 }
 
+pub fn infer_synced_kv_log_store_table_catalog_inner(
+    input: &PlanRef,
+    columns: &[Field],
+) -> TableCatalog {
+    let mut table_catalog_builder = TableCatalogBuilder::default();
+
+    let mut value_indices =
+        Vec::with_capacity(KV_LOG_STORE_PREDEFINED_COLUMNS.len() + columns.len());
+
+    for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
+        let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
+        value_indices.push(indice);
+    }
+
+    table_catalog_builder.set_vnode_col_idx(VNODE_COLUMN_INDEX);
+
+    for (i, ordering) in PK_ORDERING.iter().enumerate() {
+        table_catalog_builder.add_order_column(i, *ordering);
+    }
+
+    let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+
+    let payload_indices = {
+        let mut payload_indices = Vec::with_capacity(columns.len());
+        for column in columns {
+            let payload_index = table_catalog_builder.add_column(column);
+            payload_indices.push(payload_index);
+        }
+        payload_indices
+    };
+
+    value_indices.extend(payload_indices);
+    table_catalog_builder.set_value_indices(value_indices);
+
+    // Modify distribution key indices based on the pre-defined columns.
+    let dist_key = input
+        .distribution()
+        .dist_column_indices()
+        .iter()
+        .map(|idx| idx + KV_LOG_STORE_PREDEFINED_COLUMNS.len())
+        .collect_vec();
+
+    table_catalog_builder.build(dist_key, read_prefix_len_hint)
+}
+
 /// Check that all leaf nodes must be stream table scan,
 /// since that plan node maps to `backfill` executor, which supports recovery.
 /// Some other leaf nodes like `StreamValues` do not support recovery, and they

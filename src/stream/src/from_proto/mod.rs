@@ -58,6 +58,8 @@ mod row_merge;
 
 mod approx_percentile;
 
+mod sync_log_store;
+
 // import for submodules
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -99,6 +101,7 @@ use self::source_backfill::*;
 use self::stateless_simple_agg::*;
 use self::stream_cdc_scan::*;
 use self::stream_scan::*;
+use self::sync_log_store::*;
 use self::temporal_join::*;
 use self::top_n::*;
 use self::union::*;
@@ -188,5 +191,6 @@ pub async fn create_executor(
         NodeBody::LocalApproxPercentile => LocalApproxPercentileExecutorBuilder,
         NodeBody::RowMerge => RowMergeExecutorBuilder,
         NodeBody::AsOfJoin => AsOfJoinExecutorBuilder,
+        NodeBody::SyncLogStore => SyncLogStoreExecutorBuilder,
     }
 }

@@ -63,6 +63,7 @@ user streaming_enable_delta_join
 user streaming_max_parallelism
 user streaming_over_window_cache_policy
 user streaming_parallelism
+user streaming_unaligned_join
 user streaming_use_arrangement_backfill
 user streaming_use_shared_source
 user streaming_use_snapshot_backfill
