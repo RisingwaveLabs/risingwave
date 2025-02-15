@@ -292,7 +292,7 @@ impl Sink for RedisSink {
                 .get(REDIS_VALUE_TYPE)
                 .map(|s| s.as_str())
             {
-                Some(REDIS_VALUE_TYPE_STRING) => {
+                Some(REDIS_VALUE_TYPE_STRING) | None => {
                     let value_format =
                         self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
                             SinkError::Config(anyhow!(

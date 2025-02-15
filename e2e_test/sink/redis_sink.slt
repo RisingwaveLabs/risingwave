@@ -26,6 +26,15 @@ FROM
 )FORMAT PLAIN ENCODE TEMPLATE(force_append_only='true', key_format = 'V1:{v1}', value_format = 'V2:{v2},V3:{v3}');
 
 statement ok
+CREATE SINK s63
+FROM
+    mv6 WITH (
+    primary_key = 'v1,v2,v6',
+    connector = 'redis',
+    redis.url= 'redis://redis-server:6379/',
+)FORMAT PLAIN ENCODE TEMPLATE(force_append_only='true', key_format = 'key_is:{v1}_{v2}', redis_value_type ='geospatial', longitude = 'v4', latitude = 'v5', member = 'v6');
+
+statement ok
 INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01+00:00' , false);
 
 statement ok
@@ -36,6 +45,9 @@ DROP SINK s61;
 
 statement ok
 DROP SINK s62;
+
+statement ok
+DROP SINK s63;
 
 statement ok
 DROP MATERIALIZED VIEW mv6;
