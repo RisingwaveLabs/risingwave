@@ -20,30 +20,29 @@ use std::time::Instant;
 use anyhow::anyhow;
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
-use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
-use risingwave_connector::source::{
-    BackfillInfo, BoxSourceChunkStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
-    SplitMetaData,
-};
+use risingwave_connector::source::{BackfillInfo, SplitId, SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
+use tokio::sync::RwLock;
 
 use super::executor_core::StreamSourceCore;
+use super::get_split_offset_col_idx;
 use super::source_backfill_state_table::BackfillStateTableHandler;
-use super::{apply_rate_limit, get_split_offset_col_idx};
-use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
-use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
+use crate::executor::source::source_executor::{StreamReaderBuilder, WAIT_BARRIER_MULTIPLE_TIMES};
+use crate::executor::source::GetLatestSplitInfoFn;
 use crate::executor::UpdateMutation;
 use crate::task::CreateMviewProgressReporter;
+
+type SharedBackfillStage = Arc<RwLock<BackfillStage>>;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub enum BackfillState {
@@ -279,45 +278,21 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
     }
 
-    async fn build_stream_source_reader(
+    fn stream_reader_builder(
         &self,
-        source_desc: &SourceDesc,
-        splits: Vec<SplitImpl>,
-    ) -> StreamExecutorResult<(BoxSourceChunkStream, HashMap<SplitId, BackfillInfo>)> {
-        let column_ids = source_desc
-            .columns
-            .iter()
-            .map(|column_desc| column_desc.column_id)
-            .collect_vec();
-        let source_ctx = SourceContext::new(
-            self.actor_ctx.id,
-            self.stream_source_core.source_id,
-            self.actor_ctx.fragment_id,
-            self.stream_source_core.source_name.clone(),
-            source_desc.metrics.clone(),
-            SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
-                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
-            },
-            source_desc.source.config.clone(),
-            None,
-        );
-
-        // We will check watermark to decide whether we need to backfill.
-        // e.g., when there's a Kafka topic-partition without any data,
-        // we don't need to backfill at all. But if we do not check here,
-        // the executor can only know it's finished when data coming in.
-        // For blocking DDL, this would be annoying.
-
-        let (stream, res) = source_desc
-            .source
-            .build_stream(Some(splits), column_ids, Arc::new(source_ctx), false)
-            .await
-            .map_err(StreamExecutorError::connector_error)?;
-        Ok((
-            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
-            res.backfill_info,
-        ))
+        source_desc: SourceDesc,
+        get_latest_split_info_fn: GetLatestSplitInfoFn,
+    ) -> StreamReaderBuilder {
+        StreamReaderBuilder {
+            source_desc,
+            rate_limit: self.rate_limit_rps,
+            source_id: self.stream_source_core.source_id,
+            source_name: self.stream_source_core.source_name.clone(),
+            actor_ctx: self.actor_ctx.clone(),
+            is_auto_schema_change_enable: false,
+            get_latest_split_info_fn,
+            reader_stream: None,
+        }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -332,6 +307,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .unwrap_or(&[])
             .to_vec();
         let is_pause_on_startup = barrier.is_pause_on_startup();
+        let is_initialize = barrier.is_newly_added(self.actor_ctx.id);
         yield Message::Barrier(barrier);
 
         let mut core = self.stream_source_core;
@@ -361,34 +337,59 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 });
             backfill_states.insert(split_id, backfill_state);
         }
-        let mut backfill_stage = BackfillStage {
+        let backfill_stage = Arc::new(RwLock::new(BackfillStage {
             states: backfill_states,
             splits: owned_splits,
-        };
-        backfill_stage.debug_assert_consistent();
+        }));
+        backfill_stage.read().await.debug_assert_consistent();
 
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = core;
 
-        let (source_chunk_reader, backfill_info) = self
-            .build_stream_source_reader(
-                &source_desc,
-                backfill_stage.get_latest_unfinished_splits()?,
-            )
-            .instrument_await("source_build_reader")
-            .await?;
-        for (split_id, info) in &backfill_info {
-            let state = backfill_stage.states.get_mut(split_id).unwrap();
-            match info {
-                BackfillInfo::NoDataToBackfill => {
-                    state.state = BackfillState::Finished;
-                }
-                BackfillInfo::HasDataToBackfill { latest_offset } => {
-                    // Note: later we will override it with the offset from the source message, and it's possible to become smaller than this value.
-                    state.target_offset = Some(latest_offset.clone());
+        let latest_split_info_weak = Arc::downgrade(&backfill_stage);
+        let get_latest_split_info_fn: GetLatestSplitInfoFn = Arc::new(move || {
+            let weak = latest_split_info_weak.clone();
+            Box::pin(async move {
+                let Some(backfill_stage_ref) = weak.upgrade() else {
+                    return Err(StreamExecutorError::connector_error(anyhow!(
+                        "backfill_stage is already dropped, retry later"
+                    )));
+                };
+                let backfill_stage_guard = backfill_stage_ref.read().await;
+                backfill_stage_guard.get_latest_unfinished_splits()
+            })
+        });
+        let mut stream_reader_builder =
+            self.stream_reader_builder(source_desc.clone(), get_latest_split_info_fn.clone());
+
+        if is_initialize {
+            let mut backfill_stage_guard = backfill_stage.write().await;
+            let backfill_info = stream_reader_builder
+                .fetch_latest_splits(
+                    Some(backfill_stage_guard.get_latest_unfinished_splits()?),
+                    false,
+                )
+                .await?
+                .backfill_info;
+            for (split_id, info) in &backfill_info {
+                let state = backfill_stage_guard.states.get_mut(split_id).unwrap();
+                match info {
+                    BackfillInfo::NoDataToBackfill => {
+                        state.state = BackfillState::Finished;
+                    }
+                    BackfillInfo::HasDataToBackfill { latest_offset } => {
+                        // Note: later we will override it with the offset from the source message, and it's possible to become smaller than this value.
+                        state.target_offset = Some(latest_offset.clone());
+                    }
                 }
             }
         }
+        let retry_reader_stream = stream_reader_builder
+            .into_retry_stream(
+                Some(backfill_stage.read().await.get_latest_unfinished_splits()?),
+                false, // do not use the latest, because we need to backfill from the beginning
+            )
+            .boxed();
         tracing::debug!(?backfill_stage, "source backfill started");
 
         fn select_strategy(_: &mut ()) -> PollNext {
@@ -402,7 +403,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         // - When the upstream Source's becomes less busy, SourceBackfill can begin to catch up.
         let mut backfill_stream = select_with_strategy(
             input.by_ref().map(Either::Left),
-            source_chunk_reader.map(Either::Right),
+            retry_reader_stream.map(Either::Right),
             select_strategy,
         );
 
@@ -487,12 +488,21 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 self.actor_ctx.fragment_id.to_string(),
                             ]);
 
-                            let (reader, _backfill_info) = self
-                                .build_stream_source_reader(
-                                    &source_desc,
-                                    backfill_stage.get_latest_unfinished_splits()?,
+                            let reader = self
+                                .stream_reader_builder(
+                                    source_desc.clone(),
+                                    get_latest_split_info_fn.clone(),
                                 )
-                                .await?;
+                                .into_retry_stream(
+                                    Some(
+                                        backfill_stage
+                                            .read()
+                                            .await
+                                            .get_latest_unfinished_splits()?,
+                                    ),
+                                    false,
+                                )
+                                .boxed();
 
                             backfill_stream = select_with_strategy(
                                 input.by_ref().map(Either::Left),
@@ -554,7 +564,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                             split_changed = self
                                                 .apply_split_change(
                                                     actor_splits,
-                                                    &mut backfill_stage,
+                                                    &backfill_stage,
                                                     true,
                                                 )
                                                 .await?;
@@ -565,7 +575,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                             split_changed = self
                                                 .apply_split_change(
                                                     actor_splits,
-                                                    &mut backfill_stage,
+                                                    &backfill_stage,
                                                     false,
                                                 )
                                                 .await?;
@@ -582,13 +592,21 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 );
                                                 self.rate_limit_rps = *new_rate_limit;
                                                 // rebuild reader
-                                                let (reader, _backfill_info) = self
-                                                    .build_stream_source_reader(
-                                                        &source_desc,
-                                                        backfill_stage
-                                                            .get_latest_unfinished_splits()?,
+                                                let reader = self
+                                                    .stream_reader_builder(
+                                                        source_desc.clone(),
+                                                        get_latest_split_info_fn.clone(),
                                                     )
-                                                    .await?;
+                                                    .into_retry_stream(
+                                                        Some(
+                                                            backfill_stage
+                                                                .read()
+                                                                .await
+                                                                .get_latest_unfinished_splits()?,
+                                                        ),
+                                                        false,
+                                                    )
+                                                    .boxed();
 
                                                 backfill_stream = select_with_strategy(
                                                     input.by_ref().map(Either::Left),
@@ -604,21 +622,23 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     // rebuild backfill_stream
                                     // Note: we don't put this part in a method, due to some complex lifetime issues.
 
-                                    let latest_unfinished_splits =
-                                        backfill_stage.get_latest_unfinished_splits()?;
+                                    let latest_unfinished_splits = backfill_stage
+                                        .read()
+                                        .await
+                                        .get_latest_unfinished_splits()?;
                                     tracing::info!(
                                         "actor {:?} apply source split change to {:?}",
                                         self.actor_ctx.id,
                                         latest_unfinished_splits
                                     );
 
-                                    // Replace the source reader with a new one of the new state.
-                                    let (reader, _backfill_info) = self
-                                        .build_stream_source_reader(
-                                            &source_desc,
-                                            latest_unfinished_splits,
+                                    let reader = self
+                                        .stream_reader_builder(
+                                            source_desc.clone(),
+                                            get_latest_split_info_fn.clone(),
                                         )
-                                        .await?;
+                                        .into_retry_stream(Some(latest_unfinished_splits), false)
+                                        .boxed();
 
                                     backfill_stream = select_with_strategy(
                                         input.by_ref().map(Either::Left),
@@ -628,14 +648,15 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 }
 
                                 self.backfill_state_store
-                                    .set_states(backfill_stage.states.clone())
+                                    .set_states(backfill_stage.read().await.states.clone())
                                     .await?;
                                 self.backfill_state_store
                                     .state_store
                                     .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                                     .await?;
 
-                                if self.should_report_finished(&backfill_stage.states) {
+                                if self.should_report_finished(&backfill_stage.read().await.states)
+                                {
                                     // drop the backfill kafka consumers
                                     backfill_stream = select_with_strategy(
                                         input.by_ref().map(Either::Left),
@@ -645,22 +666,23 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
                                     self.progress.finish(
                                         barrier.epoch,
-                                        backfill_stage.total_backfilled_rows(),
+                                        backfill_stage.read().await.total_backfilled_rows(),
                                     );
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
                                     // After we reported finished, we still don't exit the loop.
                                     // Because we need to handle split migration.
-                                    if STATE_TABLE_INITIALIZED.is_completed()
-                                        && self.backfill_finished(&backfill_stage.states).await?
-                                    {
+                                    if STATE_TABLE_INITIALIZED.is_completed() && {
+                                        let state = &backfill_stage.read().await.states;
+                                        self.backfill_finished(state).await?
+                                    } {
                                         break 'backfill_loop;
                                     }
                                 } else {
                                     self.progress.update_for_source_backfill(
                                         barrier.epoch,
-                                        backfill_stage.total_backfilled_rows(),
+                                        backfill_stage.read().await.total_backfilled_rows(),
                                     );
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
@@ -674,7 +696,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 for (i, (_, row)) in chunk.rows().enumerate() {
                                     let split = row.datum_at(split_idx).unwrap().into_utf8();
                                     let offset = row.datum_at(offset_idx).unwrap().into_utf8();
-                                    let vis = backfill_stage.handle_upstream_row(split, offset);
+                                    let vis = backfill_stage
+                                        .write()
+                                        .await
+                                        .handle_upstream_row(split, offset);
                                     new_vis.set(i, vis);
                                 }
                                 // emit chunk if vis is not empty. i.e., some splits finished backfilling.
@@ -725,7 +750,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         for (i, (_, row)) in chunk.rows().enumerate() {
                             let split_id = row.datum_at(split_idx).unwrap().into_utf8();
                             let offset = row.datum_at(offset_idx).unwrap().into_utf8();
-                            let vis = backfill_stage.handle_backfill_row(split_id, offset);
+                            let vis = backfill_stage
+                                .write()
+                                .await
+                                .handle_backfill_row(split_id, offset);
                             new_vis.set(i, vis);
                         }
 
@@ -742,7 +770,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
 
         std::mem::drop(backfill_stream);
-        let mut states = backfill_stage.states;
+        let mut states = backfill_stage.read().await.states.clone();
+
+        // backfill_stage is done, we just need persist the states but not use the lock.
+        drop(backfill_stage);
+
         // Make sure `Finished` state is persisted.
         self.backfill_state_store.set_states(states.clone()).await?;
 
@@ -840,7 +872,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     async fn apply_split_change(
         &mut self,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
-        stage: &mut BackfillStage,
+        stage: &SharedBackfillStage,
         should_trim_state: bool,
     ) -> StreamExecutorResult<bool> {
         self.source_split_change_count.inc();
@@ -861,7 +893,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     async fn update_state_if_changed(
         &mut self,
         target_splits: Vec<SplitImpl>,
-        stage: &mut BackfillStage,
+        stage: &SharedBackfillStage,
         should_trim_state: bool,
     ) -> StreamExecutorResult<bool> {
         let mut target_state: BackfillStates = HashMap::with_capacity(target_splits.len());
@@ -869,7 +901,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         let mut split_changed = false;
         // Take out old states (immutable, only used to build target_state and check for added/dropped splits).
         // Will be set to target_state in the end.
-        let old_states = std::mem::take(&mut stage.states);
+        let old_states = std::mem::take(&mut stage.write().await.states);
         // Iterate over the target (assigned) splits
         // - check if any new splits are added
         // - build target_state
@@ -913,8 +945,9 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             }
         }
 
+        let mut stage_write_guard = stage.write().await;
         if split_changed {
-            let dropped_splits = stage
+            let dropped_splits = stage_write_guard
                 .states
                 .extract_if(|split_id, _| !target_state.contains_key(split_id))
                 .map(|(split_id, _)| split_id);
@@ -927,9 +960,9 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         } else {
             debug_assert_eq!(old_states, target_state);
         }
-        stage.states = target_state;
-        stage.splits = target_splits;
-        stage.debug_assert_consistent();
+        stage_write_guard.states = target_state;
+        stage_write_guard.splits = target_splits;
+        stage_write_guard.debug_assert_consistent();
         Ok(split_changed)
     }
 

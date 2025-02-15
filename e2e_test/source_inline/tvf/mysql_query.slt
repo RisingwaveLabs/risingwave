@@ -70,7 +70,7 @@ create source mysql_cdc_source with (
   database.name = 'tvf',
 );
 
-query
+query I retry 3 backoff 5s
 select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
 ----
 1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
@@ -163,7 +163,7 @@ create table test (
 
 sleep 5s
 
-query I
+query I retry 3 backoff 5s
 select * from test order by id;
 ----
 1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL

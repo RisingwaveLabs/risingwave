@@ -127,6 +127,8 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
         let target_state: Vec<SplitImpl> = self
             .stream_source_core
             .latest_split_info
+            .read()
+            .await
             .values()
             .cloned()
             .collect();
@@ -224,7 +226,7 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error);
         stream.replace_data_stream(reader);
 
-        self.stream_source_core.latest_split_info = target_state
+        *self.stream_source_core.latest_split_info.write().await = target_state
             .into_iter()
             .map(|split| (split.id(), split))
             .collect();
@@ -355,7 +357,9 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
         }
 
         // init in-memory split states with persisted state if any
-        self.stream_source_core.init_split_state(boot_state.clone());
+        self.stream_source_core
+            .init_split_state(boot_state.clone())
+            .await;
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
 
@@ -473,17 +477,18 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
                     }
                     // update split offset
                     if let Some(mapping) = split_offset_mapping {
+                        let mut latest_split_info_guard =
+                            self.stream_source_core.latest_split_info.write().await;
                         let state: Vec<(SplitId, SplitImpl)> = mapping
                             .iter()
                             .flat_map(|(id, offset)| {
-                                self.stream_source_core.latest_split_info.get_mut(id).map(
-                                    |origin_split| {
-                                        origin_split.update_in_place(offset.clone())?;
-                                        Ok::<_, ConnectorError>((id.clone(), origin_split.clone()))
-                                    },
-                                )
+                                latest_split_info_guard.get_mut(id).map(|origin_split| {
+                                    origin_split.update_in_place(offset.clone())?;
+                                    Ok::<_, ConnectorError>((id.clone(), origin_split.clone()))
+                                })
                             })
                             .try_collect()?;
+                        drop(latest_split_info_guard);
 
                         self.stream_source_core
                             .updated_splits_in_epoch

@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_storage::StateStore;
+use tokio::sync::RwLock;
 
 use super::SourceStateTableHandler;
 
@@ -35,7 +37,7 @@ pub struct StreamSourceCore<S: StateStore> {
 
     /// Split info for stream source. A source executor might read data from several splits of
     /// external connector.
-    pub(crate) latest_split_info: HashMap<SplitId, SplitImpl>,
+    pub(crate) latest_split_info: Arc<RwLock<HashMap<SplitId, SplitImpl>>>,
 
     /// Stores information of the splits.
     pub(crate) split_state_store: SourceStateTableHandler<S>,
@@ -64,16 +66,16 @@ where
             source_name,
             column_ids,
             source_desc_builder: Some(source_desc_builder),
-            latest_split_info: HashMap::new(),
+            latest_split_info: Arc::new(RwLock::new(HashMap::new())),
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
         }
     }
 
-    pub fn init_split_state(&mut self, splits: Vec<SplitImpl>) {
-        self.latest_split_info = splits
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
+    pub async fn init_split_state(&mut self, splits: Vec<SplitImpl>) {
+        let mut latest_split_info_guard = self.latest_split_info.write().await;
+        for split in splits {
+            latest_split_info_guard.insert(split.id(), split);
+        }
     }
 }

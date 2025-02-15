@@ -18,7 +18,7 @@ WITH (
 );
 
 # Note that StreamSourceScan is in the StreamDynamicFilter fragment, which has 3 upstream fragments.
-query T
+query T retry 3 backoff 5s
 explain create materialized view mv1 as select v1 from kafkasource where v1 between now() and now() + interval '1 day' * 365 * 2000;
 ----
 StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
@@ -41,7 +41,7 @@ StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_co
 statement ok
 create materialized view mv1 as select v1 from kafkasource where v1 between now() and now() + interval '1 day' * 365 * 2000;
 
-query I
+query I retry 3 backoff 5s
 select array_length(upstream_fragment_ids) from rw_fragments where array_contains(flags, Array['SOURCE_SCAN']);
 ----
 3
@@ -58,7 +58,7 @@ EOF
 sleep 3s
 
 # Below lower bound and above upper bound are not shown
-query I
+query I retry 3 backoff 5s
 select * from mv1 order by v1;
 ----
 3031-01-01 19:00:00+00:00
