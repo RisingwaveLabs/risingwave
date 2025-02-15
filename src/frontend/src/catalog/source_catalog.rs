@@ -36,6 +36,8 @@ use crate::user::UserId;
 pub struct SourceCatalog {
     pub id: SourceId,
     pub name: String,
+    pub schema_id: SchemaId,
+    pub database_id: DatabaseId,
     pub columns: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
     pub append_only: bool,
@@ -72,12 +74,12 @@ impl SourceCatalog {
             .context("expecting exactly one statement in definition")?)
     }
 
-    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbSource {
+    pub fn to_prost(&self) -> PbSource {
         let (with_properties, secret_refs) = self.with_properties.clone().into_parts();
         PbSource {
             id: self.id,
-            schema_id,
-            database_id,
+            schema_id: self.schema_id,
+            database_id: self.database_id,
             name: self.name.clone(),
             row_id_index: self.row_id_index.map(|idx| idx as _),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect(),
@@ -157,6 +159,8 @@ impl From<&PbSource> for SourceCatalog {
     fn from(prost: &PbSource) -> Self {
         let id = prost.id;
         let name = prost.name.clone();
+        let database_id = prost.database_id;
+        let schema_id = prost.schema_id;
         let prost_columns = prost.columns.clone();
         let pk_col_ids = prost
             .pk_column_ids
@@ -184,6 +188,8 @@ impl From<&PbSource> for SourceCatalog {
         Self {
             id,
             name,
+            schema_id,
+            database_id,
             columns,
             pk_col_ids,
             append_only,

@@ -393,7 +393,7 @@ impl Binder {
                     CteInner::ChangeLog(from_table_name) => {
                         self.push_context();
                         let from_table_relation =
-                            self.bind_relation_by_name(from_table_name.clone(), None, None)?;
+                            self.bind_relation_by_name(from_table_name.clone(), None, None, true)?;
                         self.pop_context()?;
                         self.context.cte_to_relation.insert(
                             table_name,

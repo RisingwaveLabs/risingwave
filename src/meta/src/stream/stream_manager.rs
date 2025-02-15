@@ -58,11 +58,6 @@ pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
     pub dispatchers: HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
 
-    /// Upstream root fragments' actor ids grouped by table id.
-    ///
-    /// Refer to the doc on [`MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
-    pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
-
     /// Internal tables in the streaming job.
     pub internal_tables: BTreeMap<u32, Table>,
 
@@ -341,7 +336,6 @@ impl GlobalStreamManager {
         CreateStreamingJobContext {
             streaming_job,
             dispatchers,
-            upstream_root_actors,
             definition,
             create_type,
             job_type,
@@ -400,7 +394,6 @@ impl GlobalStreamManager {
 
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,
-            upstream_root_actors,
             dispatchers,
             init_split_assignment,
             definition: definition.clone(),

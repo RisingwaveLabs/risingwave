@@ -803,6 +803,16 @@ impl SessionImpl {
         self.auth_context.read().database.clone()
     }
 
+    pub fn database_id(&self) -> DatabaseId {
+        let db_name = self.database();
+        self.env
+            .catalog_reader()
+            .read_guard()
+            .get_database_by_name(&db_name)
+            .map(|db| db.id())
+            .expect("session database not found")
+    }
+
     pub fn user_name(&self) -> String {
         self.auth_context.read().user_name.clone()
     }

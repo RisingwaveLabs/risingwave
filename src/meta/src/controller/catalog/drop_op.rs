@@ -34,13 +34,17 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(object_type.as_str(), object_id))?;
         assert_eq!(obj.obj_type, object_type);
-        // TODO: refactor ReleaseContext when the cross-database query is supported.
         let database_id = if object_type == ObjectType::Database {
             object_id
         } else {
             obj.database_id
                 .ok_or_else(|| anyhow!("dropped object should have database_id"))?
         };
+
+        // Check the cross-db dependency info to see if the subscription can be dropped.
+        if obj.obj_type == ObjectType::Subscription {
+            validate_subscription_deletion(&txn, object_id).await?;
+        }
 
         let mut removed_objects = match drop_mode {
             DropMode::Cascade => get_referring_objects_cascade(object_id, &txn).await?,
@@ -218,16 +222,16 @@ impl CatalogController {
             .map(|obj| (obj.oid, obj))
             .collect();
 
-        // TODO: Remove this assertion when the cross-database query is supported.
-        removed_objects.values().for_each(|obj| {
+        // TODO: Support drop cascade for cross-database query.
+        for obj in removed_objects.values() {
             if let Some(obj_database_id) = obj.database_id {
-                assert_eq!(
-                    database_id, obj_database_id,
-                    "dropped objects not in the same database: {:?}",
-                    obj
-                );
+                if obj_database_id != database_id {
+                    return Err(MetaError::permission_denied(format!(
+                        "Referenced by other objects in database {obj_database_id}, please drop them manually"
+                    )));
+                }
             }
-        });
+        }
 
         let (removed_source_fragments, removed_actors, removed_fragments) =
             get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;

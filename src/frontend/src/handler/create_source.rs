@@ -81,7 +81,7 @@ use thiserror_ext::AsReport;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::{CatalogError, DatabaseId, SchemaId};
+use crate::catalog::CatalogError;
 use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
@@ -736,7 +736,7 @@ pub async fn bind_create_source_or_table_with_connector(
     create_source_type: CreateSourceType,
     source_rate_limit: Option<u32>,
     sql_column_strategy: SqlColumnStrategy,
-) -> Result<(SourceCatalog, DatabaseId, SchemaId)> {
+) -> Result<SourceCatalog> {
     let session = &handler_args.session;
     let db_name: &str = &session.database();
     let (schema_name, source_name) = Binder::resolve_schema_qualified_name(db_name, full_name)?;
@@ -905,6 +905,8 @@ pub async fn bind_create_source_or_table_with_connector(
     let source = SourceCatalog {
         id: TableId::placeholder().table_id,
         name: source_name,
+        schema_id,
+        database_id,
         columns,
         pk_col_ids,
         append_only: row_id_index.is_some(),
@@ -923,7 +925,7 @@ pub async fn bind_create_source_or_table_with_connector(
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
     };
-    Ok((source, database_id, schema_id))
+    Ok(source)
 }
 
 pub async fn handle_create_source(
@@ -960,7 +962,7 @@ pub async fn handle_create_source(
     .await?;
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
-    let (source_catalog, database_id, schema_id) = bind_create_source_or_table_with_connector(
+    let source_catalog = bind_create_source_or_table_with_connector(
         handler_args.clone(),
         stmt.source_name,
         format_encode,
@@ -988,7 +990,7 @@ pub async fn handle_create_source(
         return Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE));
     }
 
-    let source = source_catalog.to_prost(schema_id, database_id);
+    let source = source_catalog.to_prost();
 
     let catalog_writer = session.catalog_writer()?;
 

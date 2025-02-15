@@ -677,15 +677,12 @@ impl Catalog {
 
     // Used by test_utils only.
     pub fn alter_table_name_by_id(&mut self, table_id: &TableId, table_name: &str) {
-        let (mut database_id, mut schema_id) = (0, 0);
         let mut found = false;
         for database in self.database_by_name.values() {
             if !found {
                 for schema in database.iter_schemas() {
                     if schema.iter_user_table().any(|t| t.id() == *table_id) {
                         found = true;
-                        database_id = database.id();
-                        schema_id = schema.id();
                         break;
                     }
                 }
@@ -693,10 +690,7 @@ impl Catalog {
         }
 
         if found {
-            let mut table = self
-                .get_any_table_by_id(table_id)
-                .unwrap()
-                .to_prost(schema_id, database_id);
+            let mut table = self.get_any_table_by_id(table_id).unwrap().to_prost();
             table.name = table_name.to_owned();
             self.update_table(&table);
         }

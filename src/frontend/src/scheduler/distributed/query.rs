@@ -543,6 +543,8 @@ pub(crate) mod tests {
 
         let table_catalog: TableCatalog = TableCatalog {
             id: table_id,
+            schema_id: 0,
+            database_id: 0,
             associated_source_id: None,
             name: "test".to_owned(),
             dependent_relations: vec![],

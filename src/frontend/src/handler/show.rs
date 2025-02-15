@@ -48,7 +48,7 @@ pub fn get_columns_from_table(
     table_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
     let mut binder = Binder::new_for_system(session);
-    let relation = binder.bind_relation_by_name(table_name.clone(), None, None)?;
+    let relation = binder.bind_relation_by_name(table_name.clone(), None, None, false)?;
     let column_catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
         Relation::BaseTable(t) => t.table_catalog.columns.clone(),
@@ -94,7 +94,7 @@ pub fn get_indexes_from_table(
     table_name: ObjectName,
 ) -> Result<Vec<Arc<IndexCatalog>>> {
     let mut binder = Binder::new_for_system(session);
-    let relation = binder.bind_relation_by_name(table_name.clone(), None, None)?;
+    let relation = binder.bind_relation_by_name(table_name.clone(), None, None, false)?;
     let indexes = match relation {
         Relation::BaseTable(t) => t.table_indexes,
         _ => {

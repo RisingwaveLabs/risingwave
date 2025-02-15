@@ -1603,23 +1603,31 @@ impl DdlController {
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
 
-        let (upstream_root_fragments, existing_actor_location) = self
-            .metadata_manager
-            .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
-            .await?;
-
-        let upstream_root_actors: HashMap<_, _> = upstream_root_fragments
-            .iter()
-            .map(|(&table_id, fragment)| {
-                (
-                    table_id,
-                    fragment.actors.iter().map(|a| a.actor_id).collect_vec(),
-                )
-            })
-            .collect();
-
         let (snapshot_backfill_info, cross_db_snapshot_backfill_info) =
             fragment_graph.collect_snapshot_backfill_info()?;
+
+        // check if log store exists for all cross-db upstreams
+        self.metadata_manager
+            .catalog_controller
+            .validate_cross_db_snapshot_backfill(&cross_db_snapshot_backfill_info)
+            .await?;
+
+        let upstream_table_ids = fragment_graph
+            .dependent_table_ids()
+            .iter()
+            .filter(|id| {
+                !cross_db_snapshot_backfill_info
+                    .upstream_mv_table_id_to_backfill_epoch
+                    .contains_key(id)
+            })
+            .cloned()
+            .collect();
+
+        let (upstream_root_fragments, existing_actor_location) = self
+            .metadata_manager
+            .get_upstream_root_fragments(&upstream_table_ids)
+            .await?;
+
         if snapshot_backfill_info.is_some() {
             if stream_job.create_type() == CreateType::Background {
                 return Err(anyhow!("snapshot_backfill must be used as Foreground mode").into());
@@ -1757,7 +1765,6 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
-            upstream_root_actors,
             internal_tables,
             building_locations,
             existing_locations,

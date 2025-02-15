@@ -351,23 +351,10 @@ impl StreamTableScan {
             None
         };
 
-        let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
-            table_id: self.core.table_desc.table_id.table_id,
-            stream_scan_type: self.stream_scan_type as i32,
-            // The column indices need to be forwarded to the downstream
-            output_indices,
-            upstream_column_ids,
-            // The table desc used by backfill executor
-            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
-            state_table: Some(catalog),
-            arrangement_table,
-            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
-            ..Default::default()
-        }));
-
-        Ok(PbStreamNode {
-            fields: self.schema().to_prost(),
-            input: vec![
+        let input = if self.stream_scan_type == StreamScanType::CrossDbSnapshotBackfill {
+            vec![]
+        } else {
+            vec![
                 // Upstream updates
                 // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 PbStreamNode {
@@ -387,7 +374,26 @@ impl StreamTableScan {
                     input: vec![],
                     append_only: true,
                 },
-            ],
+            ]
+        };
+
+        let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
+            table_id: self.core.table_desc.table_id.table_id,
+            stream_scan_type: self.stream_scan_type as i32,
+            // The column indices need to be forwarded to the downstream
+            output_indices,
+            upstream_column_ids,
+            // The table desc used by backfill executor
+            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
+            state_table: Some(catalog),
+            arrangement_table,
+            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
+            ..Default::default()
+        }));
+
+        Ok(PbStreamNode {
+            fields: self.schema().to_prost(),
+            input,
             node_body: Some(node_body),
             stream_key,
             operator_id: self.base.id().0 as u64,

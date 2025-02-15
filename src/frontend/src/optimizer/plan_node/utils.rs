@@ -173,6 +173,8 @@ impl TableCatalogBuilder {
 
         TableCatalog {
             id: TableId::placeholder(),
+            schema_id: 0,
+            database_id: 0,
             associated_source_id: None,
             name: String::new(),
             dependent_relations: vec![],

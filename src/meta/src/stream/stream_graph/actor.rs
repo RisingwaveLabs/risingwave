@@ -173,6 +173,12 @@ impl FragmentActorBuilder {
             // "Leaf" node `StreamScan`.
             NodeBody::StreamScan(stream_scan) => {
                 let input = stream_node.get_input();
+                if stream_scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill {
+                    // CrossDbSnapshotBackfill is a special case, which doesn't have any upstream actor
+                    // and always reads from log store.
+                    assert!(input.is_empty());
+                    return Ok(stream_node.clone());
+                }
                 assert_eq!(input.len(), 2);
 
                 let merge_node = &input[0];

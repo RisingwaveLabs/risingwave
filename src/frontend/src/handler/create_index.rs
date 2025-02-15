@@ -30,6 +30,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::handler::HandlerArgs;
@@ -190,9 +191,14 @@ pub(crate) fn gen_create_index_plan(
         .into());
     }
 
+    let (index_database_id, index_schema_id) =
+        session.get_database_and_schema_id_for_create(Some(schema_name))?;
+
     // Manually assemble the materialization plan for the index MV.
     let materialize = assemble_materialize(
         table_name,
+        index_database_id,
+        index_schema_id,
         table.clone(),
         context,
         index_table_name.clone(),
@@ -208,11 +214,8 @@ pub(crate) fn gen_create_index_plan(
         table.cardinality,
     )?;
 
-    let (index_database_id, index_schema_id) =
-        session.get_database_and_schema_id_for_create(Some(schema_name))?;
-
     let index_table = materialize.table();
-    let mut index_table_prost = index_table.to_prost(index_schema_id, index_database_id);
+    let mut index_table_prost = index_table.to_prost();
     {
         // Inherit table properties
         index_table_prost.retention_seconds = table.retention_seconds;
@@ -317,6 +320,8 @@ fn build_index_item(
 /// `distributed_by_columns_len` to represent distributed by columns
 fn assemble_materialize(
     table_name: String,
+    database_id: DatabaseId,
+    schema_id: SchemaId,
     table_catalog: Arc<TableCatalog>,
     context: OptimizerContextRef,
     index_name: String,
@@ -405,7 +410,13 @@ fn assemble_materialize(
         project_required_cols,
         out_names,
     )
-    .gen_index_plan(index_name, definition, retention_seconds)
+    .gen_index_plan(
+        index_name,
+        database_id,
+        schema_id,
+        definition,
+        retention_seconds,
+    )
 }
 
 pub async fn handle_create_index(

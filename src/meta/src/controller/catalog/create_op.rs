@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::*;
+use crate::barrier::SnapshotBackfillInfo;
 
 impl CatalogController {
     pub(crate) async fn create_object(
@@ -402,5 +403,44 @@ impl CatalogController {
             .notify_frontend_relation_info(NotificationOperation::Add, PbObjectInfo::View(pb_view))
             .await;
         Ok(version)
+    }
+
+    pub async fn validate_cross_db_snapshot_backfill(
+        &self,
+        cross_db_snapshot_backfill_info: &SnapshotBackfillInfo,
+    ) -> MetaResult<()> {
+        if cross_db_snapshot_backfill_info
+            .upstream_mv_table_id_to_backfill_epoch
+            .is_empty()
+        {
+            return Ok(());
+        }
+
+        let inner = self.inner.read().await;
+        let table_ids = cross_db_snapshot_backfill_info
+            .upstream_mv_table_id_to_backfill_epoch
+            .keys()
+            .map(|t| t.table_id as ObjectId)
+            .collect_vec();
+        let cnt = Subscription::find()
+            .select_only()
+            .column(subscription::Column::DependentTableId)
+            .distinct()
+            .filter(subscription::Column::DependentTableId.is_in(table_ids))
+            .count(&inner.db)
+            .await? as usize;
+
+        if cnt
+            < cross_db_snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .keys()
+                .count()
+        {
+            return Err(MetaError::permission_denied(
+                "Some upstream tables are not subscribed".to_owned(),
+            ));
+        }
+
+        Ok(())
     }
 }

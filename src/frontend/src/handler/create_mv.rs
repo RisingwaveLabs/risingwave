@@ -16,18 +16,15 @@ use std::collections::HashSet;
 
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
 use risingwave_pb::catalog::PbTable;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
-use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::catalog::check_valid_column_name;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::Explain;
@@ -54,13 +51,12 @@ pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
 /// should guarantee that the column names number are consistent with the query.
 pub(super) fn get_column_names(
     bound: &BoundQuery,
-    session: &SessionImpl,
     columns: Vec<Ident>,
 ) -> Result<Option<Vec<String>>> {
     let col_names = parse_column_names(&columns);
     if let BoundSetExpr::Select(select) = &bound.body {
         // `InputRef`'s alias will be implicitly assigned in `bind_project`.
-        // If user provide columns name (col_names.is_some()), we don't need alias.
+        // If user provides columns name (col_names.is_some()), we don't need alias.
         // For other expressions (col_names.is_none()), we require the user to explicitly assign an
         // alias.
         if col_names.is_none() {
@@ -72,11 +68,6 @@ pub(super) fn get_column_names(
                 .into());
                 }
             }
-        }
-        if let Some(relation) = &select.from {
-            let mut check_items = Vec::new();
-            resolve_relation_privileges(relation, AclMode::Select, &mut check_items);
-            session.check_privileges(&check_items)?;
         }
     }
 
@@ -116,11 +107,9 @@ pub fn gen_create_mv_plan_bound(
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let definition = context.normalized_sql().to_owned();
+    session.check_privileges_for_query(&query)?;
 
-    let check_items = resolve_query_privileges(&query);
-    session.check_privileges(&check_items)?;
-
-    let col_names = get_column_names(&query, session, columns)?;
+    let col_names = get_column_names(&query, columns)?;
 
     let emit_on_window_close = emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {
@@ -135,9 +124,14 @@ pub fn gen_create_mv_plan_bound(
         }
         plan_root.set_out_names(col_names)?;
     }
-    let materialize =
-        plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
-    let mut table = materialize.table().to_prost(schema_id, database_id);
+    let materialize = plan_root.gen_materialize_plan(
+        database_id,
+        schema_id,
+        table_name,
+        definition,
+        emit_on_window_close,
+    )?;
+    let mut table = materialize.table().to_prost();
 
     let plan: PlanRef = materialize.into();
 

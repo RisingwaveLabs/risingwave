@@ -1475,6 +1475,67 @@ pub async fn rename_relation_refer(
     Ok(to_update_relations)
 }
 
+/// Validate that subscription can be safely deleted, meeting any of the following conditions:
+/// 1. The upstream table is not referred to by any cross-db mv.
+/// 2. After deleting the subscription, the upstream table still has at least one subscription.
+pub async fn validate_subscription_deletion<C>(txn: &C, subscription_id: ObjectId) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let upstream_table_id: ObjectId = Subscription::find_by_id(subscription_id)
+        .select_only()
+        .column(subscription::Column::DependentTableId)
+        .into_tuple()
+        .one(txn)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
+
+    let cnt = Subscription::find()
+        .filter(subscription::Column::DependentTableId.eq(upstream_table_id))
+        .count(txn)
+        .await?;
+    if cnt > 1 {
+        // Ensure that at least one subscription is remained for the upstream table
+        // once the subscription is dropped.
+        return Ok(());
+    }
+
+    // Ensure that the upstream table is not referred by any cross-db mv.
+    let obj_alias = Alias::new("o1");
+    let used_by_alias = Alias::new("o2");
+    let count = ObjectDependency::find()
+        .join_as(
+            JoinType::InnerJoin,
+            object_dependency::Relation::Object2.def(),
+            obj_alias.clone(),
+        )
+        .join_as(
+            JoinType::InnerJoin,
+            object_dependency::Relation::Object1.def(),
+            used_by_alias.clone(),
+        )
+        .filter(
+            object_dependency::Column::Oid
+                .eq(upstream_table_id)
+                .and(object_dependency::Column::UsedBy.ne(subscription_id))
+                .and(
+                    Expr::col((obj_alias, object::Column::DatabaseId))
+                        .ne(Expr::col((used_by_alias, object::Column::DatabaseId))),
+                ),
+        )
+        .count(txn)
+        .await?;
+
+    if count != 0 {
+        return Err(MetaError::permission_denied(format!(
+            "Referenced by {} cross-db objects.",
+            count
+        )));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

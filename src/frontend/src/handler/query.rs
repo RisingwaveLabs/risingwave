@@ -33,7 +33,6 @@ use crate::binder::{Binder, BoundCreateView, BoundStatement};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::flush::do_flush;
-use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
@@ -207,9 +206,7 @@ fn gen_bound(
 
     let mut binder = Binder::new_with_param_types(session, specific_param_types);
     let bound = binder.bind(stmt)?;
-
-    let check_items = resolve_privileges(&bound);
-    session.check_privileges(&check_items)?;
+    session.check_privileges_for_stmt(&bound)?;
 
     Ok(BoundResult {
         stmt_type,

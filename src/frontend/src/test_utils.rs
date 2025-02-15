@@ -622,7 +622,7 @@ impl CatalogWriter for MockCatalogWriter {
                         if let Some(table) =
                             schema.get_created_table_by_id(&TableId::from(table_id))
                         {
-                            let mut pb_table = table.to_prost(schema.id(), database.id());
+                            let mut pb_table = table.to_prost();
                             pb_table.owner = owner_id;
                             self.catalog.write().update_table(&pb_table);
                             return Ok(());
@@ -643,13 +643,12 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         match object {
             alter_set_schema_request::Object::TableId(table_id) => {
-                let &schema_id = self.table_id_to_schema_id.read().get(&table_id).unwrap();
-                let database_id = self.get_database_id_by_schema(schema_id);
-                let pb_table = {
+                let mut pb_table = {
                     let reader = self.catalog.read();
                     let table = reader.get_any_table_by_id(&table_id.into())?.to_owned();
-                    table.to_prost(new_schema_id, database_id)
+                    table.to_prost()
                 };
+                pb_table.schema_id = new_schema_id;
                 self.catalog.write().update_table(&pb_table);
                 self.table_id_to_schema_id
                     .write()

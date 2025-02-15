@@ -33,6 +33,7 @@ use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
+use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::Result;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -75,6 +76,8 @@ impl StreamMaterialize {
     pub fn create(
         input: PlanRef,
         name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         user_distributed_by: RequiredDist,
         user_order_by: Order,
         user_cols: FixedBitSet,
@@ -101,6 +104,8 @@ impl StreamMaterialize {
         let table = Self::derive_table_catalog(
             input.clone(),
             name,
+            database_id,
+            schema_id,
             user_order_by,
             columns,
             definition,
@@ -129,6 +134,8 @@ impl StreamMaterialize {
     pub fn create_for_table(
         input: PlanRef,
         name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         user_distributed_by: RequiredDist,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
@@ -147,6 +154,8 @@ impl StreamMaterialize {
         let table = Self::derive_table_catalog(
             input.clone(),
             name,
+            database_id,
+            schema_id,
             user_order_by,
             columns,
             definition,
@@ -230,6 +239,8 @@ impl StreamMaterialize {
     fn derive_table_catalog(
         rewritten_input: PlanRef,
         name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
@@ -269,6 +280,8 @@ impl StreamMaterialize {
         let read_prefix_len_hint = table_pk.len();
         Ok(TableCatalog {
             id: TableId::placeholder(),
+            schema_id,
+            database_id,
             associated_source_id: None,
             name,
             dependent_relations: vec![],

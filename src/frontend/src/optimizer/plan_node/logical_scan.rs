@@ -20,6 +20,7 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
@@ -519,11 +520,20 @@ impl ToBatch for LogicalScan {
 impl ToStream for LogicalScan {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.predicate().always_true() {
-            Ok(StreamTableScan::new_with_stream_scan_type(
-                self.core.clone(),
-                ctx.stream_scan_type(),
-            )
-            .into())
+            // Force rewrite scan type to cross-db scan
+            if self.core.table_catalog.database_id != self.base.ctx().session_ctx().database_id() {
+                Ok(StreamTableScan::new_with_stream_scan_type(
+                    self.core.clone(),
+                    StreamScanType::CrossDbSnapshotBackfill,
+                )
+                .into())
+            } else {
+                Ok(StreamTableScan::new_with_stream_scan_type(
+                    self.core.clone(),
+                    ctx.stream_scan_type(),
+                )
+                .into())
+            }
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);

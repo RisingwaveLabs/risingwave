@@ -54,7 +54,6 @@ use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
-use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::util::{
     check_connector_match_connection_type, ensure_connection_type_allowed, SourceSchemaCompatExt,
 };
@@ -161,15 +160,13 @@ pub async fn gen_sink_plan(
             bound,
         )
     };
-
-    let check_items = resolve_query_privileges(&bound);
-    session.check_privileges(&check_items)?;
+    session.check_privileges_for_query(&bound)?;
 
     let col_names = if sink_into_table_name.is_some() {
         parse_column_names(&stmt.columns)
     } else {
         // If column names not specified, use the name in the bound query, which is equal with the plan root's original field name.
-        get_column_names(&bound, session, stmt.columns)?
+        get_column_names(&bound, stmt.columns)?
     };
 
     if sink_into_table_name.is_some() {

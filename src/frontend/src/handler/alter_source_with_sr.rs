@@ -35,7 +35,6 @@ use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::create_source::{bind_columns_from_source, CreateSourceType};
 use crate::session::SessionImpl;
@@ -96,11 +95,11 @@ fn columns_minus(columns_a: &[ColumnCatalog], columns_b: &[ColumnCatalog]) -> Ve
         .collect()
 }
 
-/// Fetch the source catalog and the `database/schema_id` of the source.
+/// Fetch the source catalog.
 pub fn fetch_source_catalog_with_db_schema_id(
     session: &SessionImpl,
     name: &ObjectName,
-) -> Result<(Arc<SourceCatalog>, DatabaseId, SchemaId)> {
+) -> Result<Arc<SourceCatalog>> {
     let db_name = &session.database();
     let (schema_name, real_source_name) =
         Binder::resolve_schema_qualified_name(db_name, name.clone())?;
@@ -112,12 +111,10 @@ pub fn fetch_source_catalog_with_db_schema_id(
     let reader = session.env().catalog_reader().read_guard();
     let (source, schema_name) =
         reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
-    let db = reader.get_database_by_name(db_name)?;
-    let schema = db.get_schema_by_name(schema_name).unwrap();
 
     session.check_privilege_for_drop_alter(schema_name, &**source)?;
 
-    Ok((Arc::clone(source), db.id(), schema.id()))
+    Ok(Arc::clone(source))
 }
 
 /// Check if the original source is created with `FORMAT .. ENCODE ..` clause,
@@ -210,7 +207,7 @@ pub async fn handler_refresh_schema(
     handler_args: HandlerArgs,
     name: ObjectName,
 ) -> Result<RwPgResponse> {
-    let (source, _, _) = fetch_source_catalog_with_db_schema_id(&handler_args.session, &name)?;
+    let source = fetch_source_catalog_with_db_schema_id(&handler_args.session, &name)?;
     let format_encode = get_format_encode_from_source(&source)?;
     handle_alter_source_with_sr(handler_args, name, format_encode).await
 }
@@ -221,7 +218,7 @@ pub async fn handle_alter_source_with_sr(
     format_encode: FormatEncodeOptions,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let (source, database_id, schema_id) = fetch_source_catalog_with_db_schema_id(&session, &name)?;
+    let source = fetch_source_catalog_with_db_schema_id(&session, &name)?;
     let mut source = source.as_ref().clone();
     let old_columns = source.columns.clone();
 
@@ -281,7 +278,7 @@ pub async fn handle_alter_source_with_sr(
     // update version
     source.version += 1;
 
-    let pb_source = source.to_prost(schema_id, database_id);
+    let pb_source = source.to_prost();
     let catalog_writer = session.catalog_writer()?;
     if source.info.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, source.clone())?;

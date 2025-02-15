@@ -224,6 +224,52 @@ impl Binder {
         Ok((schema_name, name))
     }
 
+    /// check whether the name is a cross-database reference
+    pub fn validate_cross_db_reference(
+        db_name: &str,
+        name: &ObjectName,
+    ) -> std::result::Result<(), ResolveQualifiedNameError> {
+        let formatted_name = name.to_string();
+        let identifiers = &name.0;
+        if identifiers.len() > 3 {
+            return Err(ResolveQualifiedNameError::new(
+                formatted_name,
+                ResolveQualifiedNameErrorKind::QualifiedNameTooLong,
+            ));
+        }
+
+        if identifiers.len() == 3 && identifiers[0].real_value() != db_name {
+            return Err(ResolveQualifiedNameError::new(
+                formatted_name,
+                ResolveQualifiedNameErrorKind::NotCurrentDatabase,
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// return (`database_name`, `schema_name`, `name`)
+    pub fn resolve_db_schema_qualified_name(
+        name: ObjectName,
+    ) -> std::result::Result<(Option<String>, Option<String>, String), ResolveQualifiedNameError>
+    {
+        let formatted_name = name.to_string();
+        let mut identifiers = name.0;
+
+        if identifiers.len() > 3 {
+            return Err(ResolveQualifiedNameError::new(
+                formatted_name,
+                ResolveQualifiedNameErrorKind::QualifiedNameTooLong,
+            ));
+        }
+
+        let name = identifiers.pop().unwrap().real_value();
+        let schema_name = identifiers.pop().map(|ident| ident.real_value());
+        let database_name = identifiers.pop().map(|ident| ident.real_value());
+
+        Ok((database_name, schema_name, name))
+    }
+
     /// return first name in identifiers, must have only one name.
     fn resolve_single_name(mut identifiers: Vec<Ident>, ident_desc: &str) -> Result<String> {
         if identifiers.len() > 1 {
@@ -351,8 +397,15 @@ impl Binder {
         name: ObjectName,
         alias: Option<TableAlias>,
         as_of: Option<AsOf>,
+        allow_cross_db: bool,
     ) -> Result<Relation> {
-        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        let (db_name, schema_name, table_name) = if allow_cross_db {
+            Self::resolve_db_schema_qualified_name(name)?
+        } else {
+            let (schema_name, table_name) =
+                Self::resolve_schema_qualified_name(&self.db_name, name)?;
+            (None, schema_name, table_name)
+        };
 
         if schema_name.is_none()
             // the `table_name` here is the name of the currently binding cte.
@@ -422,7 +475,13 @@ impl Binder {
                 },
             }
         } else {
-            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, as_of)
+            self.bind_relation_by_name_inner(
+                db_name.as_deref(),
+                schema_name.as_deref(),
+                &table_name,
+                alias,
+                as_of,
+            )
         }
     }
 
@@ -442,7 +501,7 @@ impl Binder {
         }?;
 
         Ok((
-            self.bind_relation_by_name(table_name.clone(), None, None)?,
+            self.bind_relation_by_name(table_name.clone(), None, None, true)?,
             table_name,
         ))
     }
@@ -489,13 +548,13 @@ impl Binder {
         let schema = args.get(1).map(|arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(schema.as_deref(), &table_name, alias, None)
+        self.bind_relation_by_name_inner(None, schema.as_deref(), &table_name, alias, None)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
             TableFactor::Table { name, alias, as_of } => {
-                self.bind_relation_by_name(name, alias, as_of)
+                self.bind_relation_by_name(name, alias, as_of, true)
             }
             TableFactor::TableFunction {
                 name,

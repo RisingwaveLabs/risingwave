@@ -39,7 +39,6 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
         node: &Self::Node,
         state_store: impl StateStore,
     ) -> StreamResult<Executor> {
-        let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
         // For reporting the progress.
         let progress = params
             .local_barrier_manager
@@ -53,14 +52,17 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
 
         let exec = match node.stream_scan_type() {
             StreamScanType::Chain | StreamScanType::UpstreamOnly => {
+                let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
                 let upstream_only = matches!(node.stream_scan_type(), StreamScanType::UpstreamOnly);
                 ChainExecutor::new(snapshot, upstream, progress, upstream_only).boxed()
             }
             StreamScanType::Rearrange => {
+                let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
                 RearrangedChainExecutor::new(snapshot, upstream, progress).boxed()
             }
 
             StreamScanType::Backfill => {
+                let [upstream, _]: [_; 2] = params.input.try_into().unwrap();
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
 
                 let column_ids = node
@@ -96,6 +98,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 .boxed()
             }
             StreamScanType::ArrangementBackfill => {
+                let [upstream, _]: [_; 2] = params.input.try_into().unwrap();
                 let column_ids = node
                     .upstream_column_ids
                     .iter()
@@ -146,6 +149,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             }
             StreamScanType::CrossDbSnapshotBackfill => {
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
+                assert!(params.input.is_empty());
 
                 let output_indices = node
                     .output_indices

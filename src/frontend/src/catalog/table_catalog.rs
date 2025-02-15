@@ -79,6 +79,10 @@ use crate::user::UserId;
 pub struct TableCatalog {
     pub id: TableId,
 
+    pub schema_id: SchemaId,
+
+    pub database_id: DatabaseId,
+
     pub associated_source_id: Option<TableId>, // TODO: use SourceId
 
     pub name: String,
@@ -475,11 +479,7 @@ impl TableCatalog {
     }
 
     pub fn to_internal_table_prost(&self) -> PbTable {
-        use risingwave_common::catalog::{DatabaseId, SchemaId};
-        self.to_prost(
-            SchemaId::placeholder().schema_id,
-            DatabaseId::placeholder().database_id,
-        )
+        self.to_prost()
     }
 
     /// Returns the SQL definition when the table was created.
@@ -535,11 +535,11 @@ impl TableCatalog {
         self.vnode_count.value()
     }
 
-    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbTable {
+    pub fn to_prost(&self) -> PbTable {
         PbTable {
             id: self.id.table_id,
-            schema_id,
-            database_id,
+            schema_id: self.schema_id,
+            database_id: self.database_id,
             name: self.name.clone(),
             // ignore `_rw_timestamp` when serializing
             columns: self
@@ -745,6 +745,8 @@ impl From<PbTable> for TableCatalog {
 
         Self {
             id: id.into(),
+            schema_id: tb.schema_id,
+            database_id: tb.database_id,
             associated_source_id: associated_source_id.map(Into::into),
             name,
             pk,
@@ -813,7 +815,6 @@ impl OwnedByUserCatalog for TableCatalog {
 
 #[cfg(test)]
 mod tests {
-
     use risingwave_common::catalog::{row_id_column_desc, ColumnDesc, ColumnId};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
@@ -898,6 +899,8 @@ mod tests {
             table,
             TableCatalog {
                 id: TableId::new(0),
+                schema_id: 0,
+                database_id: 0,
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_owned(),
                 table_type: TableType::Table,
@@ -964,6 +967,6 @@ mod tests {
                 clean_watermark_index_in_pk: None,
             }
         );
-        assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
+        assert_eq!(table, TableCatalog::from(table.to_prost()));
     }
 }

@@ -44,16 +44,13 @@ pub async fn handle_alter_source_column(
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let (db_id, schema_id, mut catalog) = {
+    let mut catalog = {
         let reader = session.env().catalog_reader().read_guard();
         let (source, schema_name) =
             reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
-        let db = reader.get_database_by_name(db_name)?;
-        let schema = db.get_schema_by_name(schema_name).unwrap();
-
         session.check_privilege_for_drop_alter(schema_name, &**source)?;
 
-        (db.id(), schema.id(), (**source).clone())
+        (**source).clone()
     };
 
     if catalog.associated_table_id.is_some() {
@@ -133,12 +130,10 @@ pub async fn handle_alter_source_column(
             catalog.columns.len(),
         );
         catalog_writer
-            .replace_source(catalog.to_prost(schema_id, db_id), graph, col_index_mapping)
+            .replace_source(catalog.to_prost(), graph, col_index_mapping)
             .await?
     } else {
-        catalog_writer
-            .alter_source(catalog.to_prost(schema_id, db_id))
-            .await?
+        catalog_writer.alter_source(catalog.to_prost()).await?
     };
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))
