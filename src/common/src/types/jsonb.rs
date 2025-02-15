@@ -593,6 +593,21 @@ impl<'a> FromSql<'a> for JsonbVal {
         mut raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
         Ok(match *ty {
+            // Here we allow mapping JSON of pg to JSONB of rw. But please note the JSONB and JSON have different behaviors in postgres.
+            // An example of different semantics for duplicated keys in an object:
+            // test=# select jsonb_each('{"foo": 1, "bar": 2, "foo": 3}');
+            //  jsonb_each
+            //  ------------
+            //   (bar,2)
+            //   (foo,3)
+            //  (2 rows)
+            // test=# select json_each('{"foo": 1, "bar": 2, "foo": 3}');
+            //   json_each
+            //  -----------
+            //   (foo,1)
+            //   (bar,2)
+            //   (foo,3)
+            //  (3 rows)
             Type::JSON => JsonbVal::from(Value::from_text(raw)?),
             Type::JSONB => {
                 if raw.is_empty() || raw.get_u8() != 1 {
