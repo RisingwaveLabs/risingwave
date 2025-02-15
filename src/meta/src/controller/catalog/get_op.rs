@@ -71,6 +71,20 @@ impl CatalogController {
         Ok(table_obj.map(|(table, obj)| ObjectModel(table, obj.unwrap()).into()))
     }
 
+    pub async fn get_table_associated_source_id(
+        &self,
+        table_id: TableId,
+    ) -> MetaResult<Option<SourceId>> {
+        let inner = self.inner.read().await;
+        Table::find_by_id(table_id)
+            .select_only()
+            .select_column(table::Column::OptionalAssociatedSourceId)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))
+    }
+
     pub async fn get_table_by_ids(&self, table_ids: Vec<TableId>) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
         let table_objs = Table::find()

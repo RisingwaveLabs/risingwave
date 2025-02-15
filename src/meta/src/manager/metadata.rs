@@ -465,6 +465,15 @@ impl MetadataManager {
         Ok(table_ids.into_iter().map(|id| id as u32).collect())
     }
 
+    pub async fn get_table_associated_source_id(
+        &self,
+        table_id: u32,
+    ) -> MetaResult<Option<SourceId>> {
+        self.catalog_controller
+            .get_table_associated_source_id(table_id as _)
+            .await
+    }
+
     pub async fn get_table_catalog_by_ids(&self, ids: Vec<u32>) -> MetaResult<Vec<PbTable>> {
         self.catalog_controller
             .get_table_by_ids(ids.into_iter().map(|id| id as _).collect())

@@ -620,6 +620,21 @@ impl Catalog {
         ))
     }
 
+    pub fn get_source_by_id<'a>(
+        &self,
+        db_name: &'a str,
+        schema_path: SchemaPath<'a>,
+        source_id: &SourceId,
+    ) -> CatalogResult<(&Arc<SourceCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_source_by_id(source_id))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("source", source_id.to_string()))
+    }
+
     /// Used to get `TableCatalog` for Materialized Views, Tables and Indexes.
     /// Retrieves all tables, created or creating.
     pub fn get_any_table_by_name<'a>(

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use sea_orm::DatabaseTransaction;
+
 use super::*;
 
 impl CatalogController {
@@ -781,5 +783,64 @@ impl CatalogController {
             .await;
 
         Ok(version)
+    }
+
+    // drop table associated source is a special case of drop relation, which just remove the source object and associated state table, keeping the streaming job and fragments.
+    pub async fn drop_table_associated_source(
+        txn: &DatabaseTransaction,
+        drop_table_connector_ctx: &DropTableConnectorContext,
+    ) -> MetaResult<(Vec<PbUserInfo>, Vec<PartialObject>)> {
+        let to_drop_source_objects: Vec<PartialObject> = Object::find()
+            .filter(object::Column::Oid.is_in(vec![drop_table_connector_ctx.to_remove_source_id]))
+            .into_partial_model()
+            .all(txn)
+            .await?;
+        let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
+            .select_only()
+            .columns([
+                object::Column::Oid,
+                object::Column::ObjType,
+                object::Column::SchemaId,
+                object::Column::DatabaseId,
+            ])
+            .filter(
+                object::Column::Oid.is_in(vec![drop_table_connector_ctx.to_remove_state_table_id]),
+            )
+            .into_partial_model()
+            .all(txn)
+            .await?;
+        let to_drop_objects = to_drop_source_objects
+            .into_iter()
+            .chain(to_drop_internal_table_objs.into_iter())
+            .collect_vec();
+        // Find affect users with privileges on all this objects.
+        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .filter(user_privilege::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
+            .into_tuple()
+            .all(txn)
+            .await?;
+
+        tracing::debug!(
+            "drop_table_associated_source: to_drop_objects: {:?}",
+            to_drop_objects
+        );
+
+        // delete all in to_drop_objects.
+        let res = Object::delete_many()
+            .filter(object::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
+            .exec(txn)
+            .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found(
+                ObjectType::Source.as_str(),
+                drop_table_connector_ctx.to_remove_source_id,
+            ));
+        }
+        let user_infos = list_user_info_by_ids(to_update_user_ids, txn).await?;
+
+        Ok((user_infos, to_drop_objects))
     }
 }

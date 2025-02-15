@@ -109,7 +109,15 @@ pub struct CatalogController {
     pub(crate) inner: RwLock<CatalogControllerInner>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
+pub struct DropTableConnectorContext {
+    // we only apply one drop connector action for one table each time, so no need to vector here
+    pub(crate) to_change_streaming_job_id: ObjectId,
+    pub(crate) to_remove_state_table_id: TableId,
+    pub(crate) to_remove_source_id: SourceId,
+}
+
+#[derive(Clone, Default, Debug)]
 pub struct ReleaseContext {
     pub(crate) database_id: DatabaseId,
     pub(crate) removed_streaming_job_ids: Vec<ObjectId>,

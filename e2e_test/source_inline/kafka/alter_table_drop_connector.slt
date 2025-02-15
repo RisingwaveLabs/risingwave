@@ -1,0 +1,138 @@
+control substitution on
+
+system ok
+rpk topic create test_alter_table_drop_connector -p 1
+
+system ok
+cat <<EOF | rpk topic produce 'test_alter_table_drop_connector' -f "%k^%v\n"
+{"ID": 1}^{"ID": 1, "firstName": "John", "lastName": "Doe", "age": 18, "height": 5.10, "weight": 150}
+{"ID": 2}^{"ID": 2, "firstName": "Sarah", "lastName": "Smith", "age": 19, "height": 5.5, "weight": 120}
+{"ID": 3}^{"ID": 3, "firstName": "Ben", "lastName": "Johnson", "age": 21, "height": 6.0, "weight": 175}
+{"ID": 4}^{"ID": 4, "firstName": "Emma", "lastName": "Brown", "age": 20, "height": 5.3, "weight": 130}
+{"ID": 5}^{"ID": 5, "firstName": "Michael", "lastName": "Williams", "age": 22, "height": 6.2, "weight": 190}
+EOF
+
+statement ok
+CREATE TABLE plain_students (
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL,
+)
+INCLUDE KEY
+INCLUDE PARTITION
+INCLUDE TIMESTAMP
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_alter_table_drop_connector')
+FORMAT PLAIN ENCODE JSON;
+
+statement ok
+flush;
+
+sleep 1s
+
+query I
+SELECT count(*) FROM plain_students;
+----
+5
+
+statement ok
+CREATE TABLE t_no_connector (a int, b varchar);
+
+statement error Protocol error: Table t_no_connector is not associated with a connector
+ALTER TABLE t_no_connector DROP CONNECTOR;
+
+statement ok
+ALTER TABLE plain_students DROP CONNECTOR;
+
+query TT
+show create table plain_students;
+----
+public.plain_students CREATE TABLE plain_students ("ID" INT, "firstName" CHARACTER VARYING, "lastName" CHARACTER VARYING, age INT, height REAL, weight REAL, _rw_kafka_timestamp TIMESTAMP WITH TIME ZONE, _rw_kafka_partition CHARACTER VARYING, _rw_kafka_key BYTEA)
+
+system ok
+cat <<EOF | rpk topic produce 'test_alter_table_drop_connector' -f "%k^%v\n"
+{"ID": 6}^{"ID": 6, "firstName": "Leah", "lastName": "Davis", "age": 18, "height": 5.7, "weight": 140}
+{"ID": 7}^{"ID": 7, "firstName": "Connor", "lastName": "Wilson", "age": 19, "height": 5.9, "weight": 160}
+{"ID": 8}^{"ID": 8, "firstName": "Ava", "lastName": "Garcia", "age": 21, "height": 5.2, "weight": 115}
+EOF
+
+sleep 1s
+
+# the streaming job does not intake new data
+query I
+SELECT count(*) FROM plain_students;
+----
+5
+
+# ===== test with schema registry =====
+
+system ok
+rpk topic delete 'avro_drop_table_connector_test' || true; \
+(rpk sr subject delete 'avro_drop_table_connector_test-value' && rpk sr subject delete 'avro_drop_table_connector_test-value' --permanent) || true;
+
+system ok
+rpk topic create 'avro_drop_table_connector_test'
+
+system ok
+sr_register avro_drop_table_connector_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}]}'
+
+system ok
+echo '{"foo":"ABC", "bar":1}' | rpk topic produce --schema-id=topic avro_drop_table_connector_test
+
+statement ok
+create table avro_drop_table_connector_test_table
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_drop_table_connector_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+sleep 1s
+
+query ??
+select foo, bar from avro_drop_table_connector_test_table
+----
+ABC	1
+
+statement ok
+alter table avro_drop_table_connector_test_table drop connector;
+
+query TT
+show create table avro_drop_table_connector_test_table;
+----
+public.avro_drop_table_connector_test_table CREATE TABLE avro_drop_table_connector_test_table (bar INT, foo CHARACTER VARYING)
+
+query ??
+select foo, bar from avro_drop_table_connector_test_table
+----
+ABC	1
+
+# produce another message
+system ok
+echo '{"foo":"DEF", "bar":2}' | rpk topic produce --schema-id=topic avro_drop_table_connector_test
+
+sleep 1s
+
+# the new message is not ingested
+query ??
+select foo, bar from avro_drop_table_connector_test_table
+----
+ABC	1
+
+# ===== clean up =====
+
+statement ok
+DROP TABLE plain_students;
+
+statement ok
+drop table avro_drop_table_connector_test_table;
+
+system ok
+rpk topic delete 'avro_drop_table_connector_test' || true; \
+(rpk sr subject delete 'avro_drop_table_connector_test-value' && rpk sr subject delete 'avro_drop_table_connector_test-value' --permanent) || true;

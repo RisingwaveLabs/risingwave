@@ -98,21 +98,23 @@ impl DdlServiceImpl {
             .as_ref()
             .map(ColIndexMapping::from_protobuf);
 
+        let replace_streaming_job: StreamingJob = match replace_job.unwrap() {
+            replace_job_plan::ReplaceJob::ReplaceTable(ReplaceTable {
+                table,
+                source,
+                job_type,
+            }) => StreamingJob::Table(
+                source,
+                table.unwrap(),
+                TableJobType::try_from(job_type).unwrap(),
+            ),
+            replace_job_plan::ReplaceJob::ReplaceSource(ReplaceSource { source }) => {
+                StreamingJob::Source(source.unwrap())
+            }
+        };
+
         ReplaceStreamJobInfo {
-            streaming_job: match replace_job.unwrap() {
-                replace_job_plan::ReplaceJob::ReplaceTable(ReplaceTable {
-                    table,
-                    source,
-                    job_type,
-                }) => StreamingJob::Table(
-                    source,
-                    table.unwrap(),
-                    TableJobType::try_from(job_type).unwrap(),
-                ),
-                replace_job_plan::ReplaceJob::ReplaceSource(ReplaceSource { source }) => {
-                    StreamingJob::Source(source.unwrap())
-                }
-            },
+            streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
             col_index_mapping,
         }

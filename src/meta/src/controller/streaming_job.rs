@@ -53,6 +53,7 @@ use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor, PbStreamNode,
 };
+use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -62,7 +63,7 @@ use sea_orm::{
 };
 
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
-use crate::controller::catalog::CatalogController;
+use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     build_object_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
@@ -756,7 +757,6 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
-
         Ok(())
     }
 
@@ -991,7 +991,7 @@ impl CatalogController {
             }) => {
                 let incoming_sink_id = job_id;
 
-                let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(
+                let (relations, fragment_mapping, _) = Self::finish_replace_streaming_job_inner(
                     tmp_id as ObjectId,
                     merge_updates,
                     None,
@@ -1002,6 +1002,7 @@ impl CatalogController {
                     },
                     &txn,
                     streaming_job,
+                    None, // will not drop table connector when creating a streaming job
                 )
                 .await?;
 
@@ -1048,19 +1049,22 @@ impl CatalogController {
         merge_updates: HashMap<crate::model::FragmentId, Vec<MergeUpdate>>,
         col_index_mapping: Option<ColIndexMapping>,
         sink_into_table_context: SinkIntoTableContext,
+        drop_table_connector_ctx: Option<&DropTableConnectorContext>,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let (objects, fragment_mapping) = Self::finish_replace_streaming_job_inner(
-            tmp_id,
-            merge_updates,
-            col_index_mapping,
-            sink_into_table_context,
-            &txn,
-            streaming_job,
-        )
-        .await?;
+        let (objects, fragment_mapping, notification_objs) =
+            Self::finish_replace_streaming_job_inner(
+                tmp_id,
+                merge_updates,
+                col_index_mapping,
+                sink_into_table_context,
+                &txn,
+                streaming_job,
+                drop_table_connector_ctx,
+            )
+            .await?;
 
         txn.commit().await?;
 
@@ -1071,12 +1075,22 @@ impl CatalogController {
         //     .await;
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
             )
             .await;
+
+        if let Some((user_infos, to_drop_objects)) = notification_objs {
+            self.notify_users_update(user_infos).await;
+            version = self
+                .notify_frontend(
+                    NotificationOperation::Delete,
+                    build_object_group_for_delete(to_drop_objects),
+                )
+                .await;
+        }
 
         Ok(version)
     }
@@ -1092,7 +1106,12 @@ impl CatalogController {
         }: SinkIntoTableContext,
         txn: &DatabaseTransaction,
         streaming_job: StreamingJob,
-    ) -> MetaResult<(Vec<PbObject>, Vec<PbFragmentWorkerSlotMapping>)> {
+        drop_table_connector_ctx: Option<&DropTableConnectorContext>,
+    ) -> MetaResult<(
+        Vec<PbObject>,
+        Vec<PbFragmentWorkerSlotMapping>,
+        Option<(Vec<PbUserInfo>, Vec<PartialObject>)>,
+    )> {
         let original_job_id = streaming_job.id() as ObjectId;
         let job_type = streaming_job.job_type();
 
@@ -1125,6 +1144,12 @@ impl CatalogController {
                 if let Some(sink_id) = creating_sink_id {
                     debug_assert!(!incoming_sinks.contains(&{ sink_id }));
                     incoming_sinks.push(sink_id as _);
+                }
+                if let Some(drop_table_connector_ctx) = drop_table_connector_ctx
+                    && drop_table_connector_ctx.to_change_streaming_job_id == original_job_id
+                {
+                    // drop table connector, the rest logic is in `drop_table_associated_source`
+                    table.optional_associated_source_id = Set(None);
                 }
 
                 if let Some(sink_id) = dropping_sink_id {
@@ -1336,7 +1361,13 @@ impl CatalogController {
 
         let fragment_mapping: Vec<_> = get_fragment_mappings(txn, original_job_id as _).await?;
 
-        Ok((objects, fragment_mapping))
+        let mut notification_objs: Option<(Vec<PbUserInfo>, Vec<PartialObject>)> = None;
+        if let Some(drop_table_connector_ctx) = drop_table_connector_ctx {
+            notification_objs =
+                Some(Self::drop_table_associated_source(txn, drop_table_connector_ctx).await?);
+        }
+
+        Ok((objects, fragment_mapping, notification_objs))
     }
 
     /// Abort the replacing streaming job by deleting the temporary job object.

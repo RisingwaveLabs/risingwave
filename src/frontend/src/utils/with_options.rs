@@ -42,8 +42,7 @@ use crate::session::SessionImpl;
 use crate::telemetry::report_event;
 use crate::Binder;
 
-mod options {
-
+pub mod options {
     pub const RETENTION_SECONDS: &str = "retention_seconds";
 }
 

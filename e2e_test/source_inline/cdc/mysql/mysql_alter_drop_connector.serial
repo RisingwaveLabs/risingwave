@@ -1,0 +1,68 @@
+control substitution on
+
+system ok
+mysql -e "
+    SET GLOBAL time_zone = '+01:00';
+"
+
+system ok
+mysql -e "
+    DROP DATABASE IF EXISTS testdb1; CREATE DATABASE testdb1;
+    USE testdb1;
+    CREATE TABLE tt1 (v1 int primary key, v2 varchar(255));
+    INSERT INTO tt1 VALUES (1, '2023-10-23 10:00:00'), (2, '2023-10-23 11:00:00');
+"
+
+system ok
+mysql -e "
+    DROP USER IF EXISTS 'non-shared-cdc'@'%';
+    CREATE USER 'non-shared-cdc'@'%' IDENTIFIED BY '123456';
+    GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'non-shared-cdc'@'%';
+    #
+    DROP USER IF EXISTS 'shared-cdc'@'%';
+    CREATE USER 'shared-cdc'@'%' IDENTIFIED BY 'abcdef';
+    GRANT SELECT, RELOAD, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'shared-cdc'@'%';
+    #
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+CREATE TABLE table_t (
+    v1 int primary key, v2 varchar
+) with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = 'shared-cdc',
+  password = 'abcdef',
+  database.name = 'testdb1',
+  table.name = 'tt1',
+);
+
+sleep 1s
+
+query I
+select count(*) from table_t;
+----
+2
+
+statement ok
+alter table table_t drop connector;
+
+query TT
+show create table table_t;
+----
+public.table_t CREATE TABLE table_t (v1 INT, v2 CHARACTER VARYING)
+
+system ok
+mysql -e "
+    INSERT INTO tt1 VALUES (3, '2023-10-23 10:00:00'), (4, '2023-10-23 11:00:00');
+"
+
+sleep 1s
+
+query I
+select count(*) from table_t;
+----
+2
+
+statement ok
+drop table table_t;

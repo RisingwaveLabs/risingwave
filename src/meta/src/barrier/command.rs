@@ -113,6 +113,8 @@ pub struct ReplaceStreamJobPlan {
     pub streaming_job: StreamingJob,
     /// The temporary dummy job fragments id of new table fragment
     pub tmp_id: u32,
+    /// The state table ids to be dropped.
+    pub to_drop_state_table_ids: Vec<TableId>,
 }
 
 impl ReplaceStreamJobPlan {
