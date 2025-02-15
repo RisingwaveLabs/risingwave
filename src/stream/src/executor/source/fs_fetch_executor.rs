@@ -87,9 +87,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         rate_limit_rps: Option<u32>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
-        'vnodes: for vnode in state_store_handler.state_table.vnodes().iter_vnodes() {
-            let table_iter = state_store_handler
-                .state_table
+        let state_table = state_store_handler.state_table();
+        'vnodes: for vnode in state_table.vnodes().iter_vnodes() {
+            let table_iter = state_table
                 .iter_with_vnode(
                     vnode,
                     &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
@@ -273,8 +273,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     }
 
                                     let post_commit = state_store_handler
-                                        .state_table
-                                        .commit(barrier.epoch)
+                                        .commit_may_update_vnode_bitmap(barrier.epoch)
                                         .await?;
 
                                     let update_vnode_bitmap =
@@ -359,7 +358,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             .collect()
                                     };
                                     state_store_handler.set_states(file_assignment).await?;
-                                    state_store_handler.state_table.try_flush().await?;
+                                    state_store_handler.try_flush().await?;
                                 }
                                 Message::Watermark(_) => unreachable!(),
                             }

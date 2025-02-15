@@ -29,7 +29,7 @@ use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
 pub struct BackfillStateTableHandler<S: StateStore> {
-    pub state_store: StateTable<S>,
+    state_store: StateTable<S>,
 }
 
 impl<S: StateStore> BackfillStateTableHandler<S> {
@@ -56,7 +56,7 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
     }
 
     /// XXX: we might get stale data for other actors' writes, but it's fine?
-    pub async fn scan(&self) -> StreamExecutorResult<Vec<BackfillStateWithProgress>> {
+    pub async fn scan_may_stale(&self) -> StreamExecutorResult<Vec<BackfillStateWithProgress>> {
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
 
         let state_table_iter = self
@@ -127,11 +127,39 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
         Ok(())
     }
 
-    pub async fn try_recover_from_state_store(
-        &mut self,
+    pub(super) fn state_store(&self) -> &StateTable<S> {
+        &self.state_store
+    }
+
+    pub(super) async fn commit(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.state_store
+            .commit_assert_no_update_vnode_bitmap(epoch)
+            .await?;
+        Ok(())
+    }
+
+    pub(super) async fn new_committed_reader(
+        &self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<BackfillStateTableCommittedReader<'_, S>> {
+        self.state_store
+            .try_wait_committed_epoch(epoch.prev)
+            .await?;
+        Ok(BackfillStateTableCommittedReader { handle: self })
+    }
+}
+
+pub(super) struct BackfillStateTableCommittedReader<'a, S: StateStore> {
+    handle: &'a BackfillStateTableHandler<S>,
+}
+
+impl<S: StateStore> BackfillStateTableCommittedReader<'_, S> {
+    pub(super) async fn try_recover_from_state_store(
+        &self,
         split_id: &SplitId,
     ) -> StreamExecutorResult<Option<BackfillStateWithProgress>> {
         Ok(self
+            .handle
             .get(split_id)
             .await?
             .map(|row| match row.datum_at(1) {

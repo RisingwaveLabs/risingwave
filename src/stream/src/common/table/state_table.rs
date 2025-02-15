@@ -193,7 +193,7 @@ where
         Ok(())
     }
 
-    async fn try_wait_committed_epoch(&self, prev_epoch: u64) -> StorageResult<()> {
+    pub async fn try_wait_committed_epoch(&self, prev_epoch: u64) -> StorageResult<()> {
         self.store
             .try_wait_epoch(
                 HummockReadEpoch::Committed(prev_epoch),

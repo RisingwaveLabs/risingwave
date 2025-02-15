@@ -15,7 +15,7 @@
 #![deprecated = "will be replaced by new fs source (list + fetch)"]
 #![expect(deprecated)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use anyhow::anyhow;
 use either::Either;
@@ -139,14 +139,15 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
         Ok(())
     }
 
-    async fn apply_split_change<const BIASED: bool>(
+    async fn apply_split_change_after_yield_barrier<const BIASED: bool>(
         &mut self,
+        barrier_epoch: EpochPair,
         source_desc: &LegacyFsSourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
-        mapping: &HashMap<ActorId, Vec<SplitImpl>>,
+        target_splits: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
-        if let Some(target_splits) = mapping.get(&self.actor_ctx.id).cloned() {
-            if let Some(target_state) = self.get_diff(target_splits).await? {
+        {
+            if let Some(target_state) = self.get_diff(barrier_epoch, target_splits).await? {
                 tracing::info!(
                     actor_id = self.actor_ctx.id,
                     state = ?target_state,
@@ -163,7 +164,11 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
 
     // Note: get_diff will modify the state_cache
     // rhs can not be None because we do not support split number reduction
-    async fn get_diff(&mut self, rhs: Vec<SplitImpl>) -> StreamExecutorResult<ConnectorState> {
+    async fn get_diff(
+        &mut self,
+        epoch: EpochPair,
+        rhs: Vec<SplitImpl>,
+    ) -> StreamExecutorResult<ConnectorState> {
         let core = &mut self.stream_source_core;
         let all_completed: HashSet<SplitId> = core.split_state_store.get_all_completed().await?;
 
@@ -171,6 +176,7 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
 
         let mut target_state: Vec<SplitImpl> = Vec::new();
         let mut no_change_flag = true;
+        let committed_reader = core.split_state_store.new_committed_reader(epoch).await?;
         for sc in rhs {
             if let Some(s) = core.updated_splits_in_epoch.get(&sc.id()) {
                 let fs = s
@@ -186,10 +192,8 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
             } else {
                 no_change_flag = false;
                 // write new assigned split to state cache. snapshot is base on cache.
-                let state = if let Some(recover_state) = core
-                    .split_state_store
-                    .try_recover_from_state_store(&sc)
-                    .await?
+                let state = if let Some(recover_state) =
+                    committed_reader.try_recover_from_state_store(&sc).await?
                 {
                     recover_state
                 } else {
@@ -271,10 +275,7 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
             core.split_state_store.set_all_complete(completed).await?
         }
         // commit anyway, even if no message saved
-        core.split_state_store
-            .state_table
-            .commit_assert_no_update_vnode_bitmap(epoch)
-            .await?;
+        core.split_state_store.commit(epoch).await?;
 
         core.updated_splits_in_epoch.clear();
         Ok(())
@@ -283,7 +284,7 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
 
-        core.split_state_store.state_table.try_flush().await?;
+        core.split_state_store.try_flush().await?;
 
         Ok(())
     }
@@ -342,15 +343,19 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
             .filter(|split| !all_completed.contains(&split.id()))
             .collect_vec();
 
-        // restore the newest split info
-        for ele in &mut boot_state {
-            if let Some(recover_state) = self
+        {
+            let committed_reader = self
                 .stream_source_core
                 .split_state_store
-                .try_recover_from_state_store(ele)
-                .await?
-            {
-                *ele = recover_state;
+                .new_committed_reader(first_epoch)
+                .await?;
+            // restore the newest split info
+            for ele in &mut boot_state {
+                if let Some(recover_state) =
+                    committed_reader.try_recover_from_state_store(ele).await?
+                {
+                    *ele = recover_state;
+                }
             }
         }
 
@@ -407,12 +412,17 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
                             self_paused = false;
                         }
                         let epoch = barrier.epoch;
+                        let mut split_change = None;
 
                         if let Some(ref mutation) = barrier.mutation.as_deref() {
                             match mutation {
                                 Mutation::SourceChangeSplit(actor_splits) => {
-                                    self.apply_split_change(&source_desc, &mut stream, actor_splits)
-                                        .await?
+                                    split_change = actor_splits
+                                        .get(&self.actor_ctx.id)
+                                        .cloned()
+                                        .map(|target_splits| {
+                                            (&source_desc, &mut stream, target_splits)
+                                        });
                                 }
                                 Mutation::Pause => {
                                     command_paused = true;
@@ -423,12 +433,12 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
                                     stream.resume_stream()
                                 }
                                 Mutation::Update(UpdateMutation { actor_splits, .. }) => {
-                                    self.apply_split_change(
-                                        &source_desc,
-                                        &mut stream,
-                                        actor_splits,
-                                    )
-                                    .await?;
+                                    split_change = actor_splits
+                                        .get(&self.actor_ctx.id)
+                                        .cloned()
+                                        .map(|target_splits| {
+                                            (&source_desc, &mut stream, target_splits)
+                                        });
                                 }
                                 Mutation::Throttle(actor_to_apply) => {
                                     if let Some(new_rate_limit) =
@@ -446,6 +456,16 @@ impl<S: StateStore> LegacyFsSourceExecutor<S> {
                         self.take_snapshot_and_clear_cache(epoch).await?;
 
                         yield msg;
+
+                        if let Some((source_desc, stream, target_splits)) = split_change {
+                            self.apply_split_change_after_yield_barrier(
+                                epoch,
+                                source_desc,
+                                stream,
+                                target_splits,
+                            )
+                            .await?;
+                        }
                     }
                     _ => {
                         // For the source executor, the message we receive from this arm should

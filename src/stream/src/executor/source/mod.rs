@@ -43,7 +43,7 @@ mod fs_fetch_executor;
 pub use fs_fetch_executor::*;
 
 mod source_backfill_state_table;
-pub use source_backfill_state_table::BackfillStateTableHandler;
+pub(crate) use source_backfill_state_table::BackfillStateTableHandler;
 
 pub mod state_table_handler;
 use futures_async_stream::try_stream;

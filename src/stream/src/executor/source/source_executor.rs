@@ -110,8 +110,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let (wait_checkpoint_tx, wait_checkpoint_rx) = mpsc::unbounded_channel();
         let wait_checkpoint_worker = WaitCheckpointWorker {
             wait_checkpoint_rx,
-            state_store: core.split_state_store.state_table.state_store().clone(),
-            table_id: core.split_state_store.state_table.table_id().into(),
+            state_store: core.split_state_store.state_table().state_store().clone(),
+            table_id: core.split_state_store.state_table().table_id().into(),
         };
         tokio::spawn(wait_checkpoint_worker.run());
         Ok(Some(WaitCheckpointTaskBuilder {
@@ -246,18 +246,19 @@ impl<S: StateStore> SourceExecutor<S> {
     ///
     ///    For source split change, split will not be migrated and we can trim states
     ///    for deleted splits.
-    async fn apply_split_change<const BIASED: bool>(
+    async fn apply_split_change_after_yield_barrier<const BIASED: bool>(
         &mut self,
+        barrier_epoch: EpochPair,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
-        split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
+        target_splits: Vec<SplitImpl>,
         should_trim_state: bool,
         source_split_change_count_metrics: &LabelGuardedIntCounter<4>,
     ) -> StreamExecutorResult<()> {
-        source_split_change_count_metrics.inc();
-        if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
+        {
+            source_split_change_count_metrics.inc();
             if self
-                .update_state_if_changed(target_splits, should_trim_state)
+                .update_state_if_changed(barrier_epoch, target_splits, should_trim_state)
                 .await?
             {
                 self.rebuild_stream_reader(source_desc, stream).await?;
@@ -270,6 +271,7 @@ impl<S: StateStore> SourceExecutor<S> {
     /// Returns `true` if split changed. Otherwise `false`.
     async fn update_state_if_changed(
         &mut self,
+        barrier_epoch: EpochPair,
         target_splits: Vec<SplitImpl>,
         should_trim_state: bool,
     ) -> StreamExecutorResult<bool> {
@@ -285,6 +287,11 @@ impl<S: StateStore> SourceExecutor<S> {
 
         let mut split_changed = false;
 
+        let committed_reader = core
+            .split_state_store
+            .new_committed_reader(barrier_epoch)
+            .await?;
+
         // Checks added splits
         for (split_id, split) in target_splits {
             if let Some(s) = core.latest_split_info.get(&split_id) {
@@ -295,8 +302,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 split_changed = true;
                 // write new assigned split to state cache. snapshot is base on cache.
 
-                let initial_state = if let Some(recover_state) = core
-                    .split_state_store
+                let initial_state = if let Some(recover_state) = committed_reader
                     .try_recover_from_state_store(&split)
                     .await?
                 {
@@ -415,10 +421,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         // commit anyway, even if no message saved
-        core.split_state_store
-            .state_table
-            .commit_assert_no_update_vnode_bitmap(epoch)
-            .await?;
+        core.split_state_store.commit(epoch).await?;
 
         let updated_splits = core.updated_splits_in_epoch.clone();
 
@@ -430,7 +433,7 @@ impl<S: StateStore> SourceExecutor<S> {
     /// try mem table spill
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
-        core.split_state_store.state_table.try_flush().await?;
+        core.split_state_store.try_flush().await?;
 
         Ok(())
     }
@@ -485,20 +488,24 @@ impl<S: StateStore> SourceExecutor<S> {
         // initial_dispatch_num is 0 means the source executor doesn't have downstream jobs
         // and is newly created
         let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
-        for ele in &mut boot_state {
-            if let Some(recover_state) = core
+        {
+            let committed_reader = core
                 .split_state_store
-                .try_recover_from_state_store(ele)
-                .await?
-            {
-                *ele = recover_state;
-                // if state store is non-empty, we consider it's initialized.
-                is_uninitialized = false;
-            } else {
-                // This is a new split, not in state table.
-                // make sure it is written to state table later.
-                // Then even it receives no messages, we can observe it in state table.
-                core.updated_splits_in_epoch.insert(ele.id(), ele.clone());
+                .new_committed_reader(first_epoch)
+                .await?;
+            for ele in &mut boot_state {
+                if let Some(recover_state) =
+                    committed_reader.try_recover_from_state_store(ele).await?
+                {
+                    *ele = recover_state;
+                    // if state store is non-empty, we consider it's initialized.
+                    is_uninitialized = false;
+                } else {
+                    // This is a new split, not in state table.
+                    // make sure it is written to state table later.
+                    // Then even it receives no messages, we can observe it in state table.
+                    core.updated_splits_in_epoch.insert(ele.id(), ele.clone());
+                }
             }
         }
 
@@ -700,6 +707,8 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     let epoch = barrier.epoch;
 
+                    let mut split_change = None;
+
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::Pause => {
@@ -717,25 +726,31 @@ impl<S: StateStore> SourceExecutor<S> {
                                     "source change split received"
                                 );
 
-                                self.apply_split_change(
-                                    &source_desc,
-                                    &mut stream,
-                                    actor_splits,
-                                    true,
-                                    &source_split_change_count,
-                                )
-                                .await?;
+                                split_change = actor_splits.get(&self.actor_ctx.id).cloned().map(
+                                    |target_splits| {
+                                        (
+                                            &source_desc,
+                                            &mut stream,
+                                            target_splits,
+                                            true,
+                                            &source_split_change_count,
+                                        )
+                                    },
+                                );
                             }
 
                             Mutation::Update(UpdateMutation { actor_splits, .. }) => {
-                                self.apply_split_change(
-                                    &source_desc,
-                                    &mut stream,
-                                    actor_splits,
-                                    false,
-                                    &source_split_change_count,
-                                )
-                                .await?;
+                                split_change = actor_splits.get(&self.actor_ctx.id).cloned().map(
+                                    |target_splits| {
+                                        (
+                                            &source_desc,
+                                            &mut stream,
+                                            target_splits,
+                                            false,
+                                            &source_split_change_count,
+                                        )
+                                    },
+                                );
                             }
                             Mutation::Throttle(actor_to_apply) => {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
@@ -768,7 +783,27 @@ impl<S: StateStore> SourceExecutor<S> {
                         task_builder.send(Epoch(epoch.prev)).await?
                     }
 
+                    let barrier_epoch = barrier.epoch;
                     yield Message::Barrier(barrier);
+
+                    if let Some((
+                        source_desc,
+                        stream,
+                        target_splits,
+                        should_trim_state,
+                        source_split_change_count,
+                    )) = split_change
+                    {
+                        self.apply_split_change_after_yield_barrier(
+                            barrier_epoch,
+                            source_desc,
+                            stream,
+                            target_splits,
+                            should_trim_state,
+                            source_split_change_count,
+                        )
+                        .await?;
+                    }
                 }
                 Either::Left(_) => {
                     // For the source executor, the message we receive from this arm
@@ -1047,7 +1082,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnId, Field, TableId};
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
@@ -1204,8 +1239,9 @@ mod tests {
         );
         let mut handler = executor.boxed().execute();
 
+        let mut epoch = test_epoch(1);
         let init_barrier =
-            Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
+            Barrier::new_test_barrier(epoch).with_mutation(Mutation::Add(AddMutation {
                 adds: HashMap::new(),
                 added_actors: HashSet::new(),
                 splits: hashmap! {
@@ -1253,24 +1289,31 @@ mod tests {
             }),
         ];
 
-        let change_split_mutation = Barrier::new_test_barrier(test_epoch(2)).with_mutation(
-            Mutation::SourceChangeSplit(hashmap! {
+        epoch.inc_epoch();
+        let change_split_mutation =
+            Barrier::new_test_barrier(epoch).with_mutation(Mutation::SourceChangeSplit(hashmap! {
                 ActorId::default() => new_assignment.clone()
-            }),
-        );
+            }));
 
         barrier_tx.send(change_split_mutation).unwrap();
 
         let _ = ready_chunks.next().await.unwrap(); // barrier
+
+        epoch.inc_epoch();
+        let barrier = Barrier::new_test_barrier(epoch);
+        barrier_tx.send(barrier).unwrap();
+
+        ready_chunks.next().await.unwrap(); // barrier
 
         let mut source_state_handler = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             mem_state_store.clone(),
         )
         .await;
+
         // there must exist state for new add partition
         source_state_handler
-            .init_epoch(EpochPair::new_test_epoch(test_epoch(2)))
+            .init_epoch(EpochPair::new_test_epoch(epoch))
             .await
             .unwrap();
         source_state_handler
@@ -1283,10 +1326,12 @@ mod tests {
 
         let _ = ready_chunks.next().await.unwrap();
 
-        let barrier = Barrier::new_test_barrier(test_epoch(3)).with_mutation(Mutation::Pause);
+        epoch.inc_epoch();
+        let barrier = Barrier::new_test_barrier(epoch).with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();
 
-        let barrier = Barrier::new_test_barrier(test_epoch(4)).with_mutation(Mutation::Resume);
+        epoch.inc_epoch();
+        let barrier = Barrier::new_test_barrier(epoch).with_mutation(Mutation::Resume);
         barrier_tx.send(barrier).unwrap();
 
         // receive all
@@ -1295,13 +1340,19 @@ mod tests {
         let prev_assignment = new_assignment;
         let new_assignment = vec![prev_assignment[2].clone()];
 
-        let drop_split_mutation = Barrier::new_test_barrier(test_epoch(5)).with_mutation(
-            Mutation::SourceChangeSplit(hashmap! {
+        epoch.inc_epoch();
+        let drop_split_mutation =
+            Barrier::new_test_barrier(epoch).with_mutation(Mutation::SourceChangeSplit(hashmap! {
                 ActorId::default() => new_assignment.clone()
-            }),
-        );
+            }));
 
         barrier_tx.send(drop_split_mutation).unwrap();
+
+        ready_chunks.next().await.unwrap(); // barrier
+
+        epoch.inc_epoch();
+        let barrier = Barrier::new_test_barrier(epoch);
+        barrier_tx.send(barrier).unwrap();
 
         ready_chunks.next().await.unwrap(); // barrier
 
@@ -1311,24 +1362,26 @@ mod tests {
         )
         .await;
 
-        source_state_handler
-            .init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)))
+        let new_epoch = EpochPair::new_test_epoch(epoch);
+        source_state_handler.init_epoch(new_epoch).await.unwrap();
+
+        let committed_reader = source_state_handler
+            .new_committed_reader(new_epoch)
             .await
             .unwrap();
-
-        assert!(source_state_handler
+        assert!(committed_reader
             .try_recover_from_state_store(&prev_assignment[0])
             .await
             .unwrap()
             .is_none());
 
-        assert!(source_state_handler
+        assert!(committed_reader
             .try_recover_from_state_store(&prev_assignment[1])
             .await
             .unwrap()
             .is_none());
 
-        assert!(source_state_handler
+        assert!(committed_reader
             .try_recover_from_state_store(&prev_assignment[2])
             .await
             .unwrap()
