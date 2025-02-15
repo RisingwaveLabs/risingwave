@@ -269,16 +269,18 @@ impl CommandContext {
                     stream_job_fragments,
                     dispatchers,
                     init_split_assignment,
+                    streaming_job,
                     ..
                 } = info;
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
-                    .post_collect_job_fragments(
+                    .post_collect_job_fragments_inner(
                         stream_job_fragments.stream_job_id().table_id as _,
                         stream_job_fragments.actor_ids(),
                         dispatchers,
                         init_split_assignment,
+                        streaming_job.is_materialized_view(),
                     )
                     .await?;
 
