@@ -34,6 +34,7 @@ const MILLENNIUM: &str = "millennium";
 
 #[function("date_trunc(varchar, timestamp) -> timestamp")]
 pub fn date_trunc_timestamp(field: &str, ts: Timestamp) -> Result<Timestamp> {
+    // NOTE(st1page): please also modify the `MonotonicityAnalyzer::date_unit_larger_than_day` in frontend if this changes
     Ok(match field.to_ascii_lowercase().as_str() {
         MICROSECONDS => ts.truncate_micros(),
         MILLISECONDS => ts.truncate_millis(),
