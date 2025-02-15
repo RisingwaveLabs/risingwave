@@ -22,7 +22,7 @@ use bytes::Bytes;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::MAX_SPILL_TIMES;
+use risingwave_common::util::epoch::{MAX_EPOCH, MAX_SPILL_TIMES};
 use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
@@ -106,7 +106,6 @@ impl LocalHummockFlushedSnapshotReader {
         hummock_version_reader: &HummockVersionReader,
         read_version: &HummockReadVersionRef,
         table_key: TableKey<Bytes>,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Option<StateStoreKeyedRow>> {
         let table_key_range = (
@@ -114,26 +113,29 @@ impl LocalHummockFlushedSnapshotReader {
             Bound::Included(table_key.clone()),
         );
 
-        let (table_key_range, read_snapshot) =
-            read_filter_for_version(epoch, read_options.table_id, table_key_range, read_version)?;
+        let (table_key_range, read_snapshot) = read_filter_for_version(
+            MAX_EPOCH,
+            read_options.table_id,
+            table_key_range,
+            read_version,
+        )?;
 
         if is_empty_key_range(&table_key_range) {
             return Ok(None);
         }
 
         hummock_version_reader
-            .get(table_key, epoch, read_options, read_snapshot)
+            .get(table_key, MAX_EPOCH, read_options, read_snapshot)
             .await
     }
 
     async fn iter_flushed(
         &self,
         table_key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
         let (table_key_range, read_snapshot) = read_filter_for_version(
-            epoch,
+            MAX_EPOCH,
             read_options.table_id,
             table_key_range,
             &self.read_version,
@@ -142,18 +144,17 @@ impl LocalHummockFlushedSnapshotReader {
         let table_key_range = table_key_range;
 
         self.hummock_version_reader
-            .iter(table_key_range, epoch, read_options, read_snapshot)
+            .iter(table_key_range, MAX_EPOCH, read_options, read_snapshot)
             .await
     }
 
     async fn rev_iter_flushed(
         &self,
         table_key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageRevIterator> {
         let (table_key_range, read_snapshot) = read_filter_for_version(
-            epoch,
+            MAX_EPOCH,
             read_options.table_id,
             table_key_range,
             &self.read_version,
@@ -162,7 +163,13 @@ impl LocalHummockFlushedSnapshotReader {
         let table_key_range = table_key_range;
 
         self.hummock_version_reader
-            .rev_iter(table_key_range, epoch, read_options, read_snapshot, None)
+            .rev_iter(
+                table_key_range,
+                MAX_EPOCH,
+                read_options,
+                read_snapshot,
+                None,
+            )
             .await
     }
 }
@@ -247,7 +254,6 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
     fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
         assert_eq!(self.table_id, read_options.table_id);
@@ -255,7 +261,6 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
             &self.hummock_version_reader,
             &self.read_version,
             key,
-            epoch,
             read_options,
         )
     }
@@ -263,20 +268,18 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
     fn iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
-        self.iter_flushed(key_range, epoch, read_options)
+        self.iter_flushed(key_range, read_options)
             .instrument(tracing::trace_span!("hummock_iter"))
     }
 
     fn rev_iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
-        self.rev_iter_flushed(key_range, epoch, read_options)
+        self.rev_iter_flushed(key_range, read_options)
             .instrument(tracing::trace_span!("hummock_rev_iter"))
     }
 }
@@ -297,7 +300,6 @@ impl LocalStateStore for LocalHummockStorage {
                 &self.hummock_version_reader,
                 &self.read_version,
                 key,
-                self.epoch(),
                 read_options,
             )
             .await
@@ -395,7 +397,6 @@ impl LocalStateStore for LocalHummockStorage {
                             &key,
                             &value,
                             sanity_check_reader,
-                            self.epoch(),
                             self.table_id,
                             self.table_option,
                             &self.op_consistency_level,
@@ -413,7 +414,6 @@ impl LocalStateStore for LocalHummockStorage {
                             &key,
                             &old_value,
                             sanity_check_reader,
-                            self.epoch(),
                             self.table_id,
                             self.table_option,
                             &self.op_consistency_level,
@@ -432,7 +432,6 @@ impl LocalStateStore for LocalHummockStorage {
                             &old_value,
                             &new_value,
                             sanity_check_reader,
-                            self.epoch(),
                             self.table_id,
                             self.table_option,
                             &self.op_consistency_level,

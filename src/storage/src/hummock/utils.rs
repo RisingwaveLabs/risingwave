@@ -383,7 +383,6 @@ pub(crate) async fn do_insert_sanity_check(
     key: &TableKey<Bytes>,
     value: &Bytes,
     inner: &impl StateStoreRead,
-    epoch: u64,
     table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
@@ -397,7 +396,7 @@ pub(crate) async fn do_insert_sanity_check(
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
-    let stored_value = inner.get(key.clone(), epoch, read_options).await?;
+    let stored_value = inner.get(key.clone(), read_options).await?;
 
     if let Some(stored_value) = stored_value {
         return Err(Box::new(MemTableError::InconsistentOperation {
@@ -415,7 +414,6 @@ pub(crate) async fn do_delete_sanity_check(
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     inner: &impl StateStoreRead,
-    epoch: u64,
     table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
@@ -433,7 +431,7 @@ pub(crate) async fn do_delete_sanity_check(
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
-    match inner.get(key.clone(), epoch, read_options).await? {
+    match inner.get(key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
@@ -461,7 +459,6 @@ pub(crate) async fn do_update_sanity_check(
     old_value: &Bytes,
     new_value: &Bytes,
     inner: &impl StateStoreRead,
-    epoch: u64,
     table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
@@ -480,7 +477,7 @@ pub(crate) async fn do_update_sanity_check(
         ..Default::default()
     };
 
-    match inner.get(key.clone(), epoch, read_options).await? {
+    match inner.get(key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),

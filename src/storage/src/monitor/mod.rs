@@ -37,7 +37,7 @@ pub use risingwave_object_store::object::object_metrics::{
 
 // include only when hummock trace enabled
 #[cfg(all(not(madsim), feature = "hm-trace"))]
-mod traced_store;
+pub(crate) mod traced_store;
 
 pub trait HummockTraceFutureExt: Sized + Future {
     type TraceOutput;

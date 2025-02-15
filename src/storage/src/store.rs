@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
@@ -267,7 +266,6 @@ pub trait StateStoreRead: StaticSendSync {
     fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>>;
 
@@ -277,10 +275,9 @@ pub trait StateStoreRead: StaticSendSync {
     fn get(
         &self,
         key: TableKey<Bytes>,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Option<Bytes>> {
-        self.get_keyed_row(key, epoch, read_options)
+        self.get_keyed_row(key, read_options)
             .map_ok(|v| v.map(|(_, v)| v))
     }
 
@@ -292,55 +289,14 @@ pub trait StateStoreRead: StaticSendSync {
     fn iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Self::Iter>;
 
     fn rev_iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl StorageFuture<'_, Self::RevIter>;
-}
-
-pub trait StateStoreReadExt: StaticSendSync {
-    /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
-    /// `full_key_range` used for iter.
-    /// The result is based on a snapshot corresponding to the given `epoch`.
-    ///
-    ///
-    /// By default, this simply calls `StateStore::iter` to fetch elements.
-    fn scan(
-        &self,
-        key_range: TableKeyRange,
-        epoch: u64,
-        limit: Option<usize>,
-        read_options: ReadOptions,
-    ) -> impl StorageFuture<'_, Vec<StateStoreKeyedRow>>;
-}
-
-impl<S: StateStoreRead> StateStoreReadExt for S {
-    async fn scan(
-        &self,
-        key_range: TableKeyRange,
-        epoch: u64,
-        limit: Option<usize>,
-        mut read_options: ReadOptions,
-    ) -> StorageResult<Vec<StateStoreKeyedRow>> {
-        if limit.is_some() {
-            read_options.prefetch_options.prefetch = false;
-        }
-        const MAX_INITIAL_CAP: usize = 1024;
-        let limit = limit.unwrap_or(usize::MAX);
-        let mut ret = Vec::with_capacity(min(limit, MAX_INITIAL_CAP));
-        let mut iter = self.iter(key_range, epoch, read_options).await?;
-        while let Some((key, value)) = iter.try_next().await? {
-            ret.push((key.copy_into(), Bytes::copy_from_slice(value)))
-        }
-        Ok(ret)
-    }
 }
 
 #[derive(Clone)]
@@ -371,8 +327,14 @@ impl From<TryWaitEpochOptions> for TracedTryWaitEpochOptions {
     }
 }
 
-pub trait StateStore: StateStoreRead + StateStoreReadLog + StaticSendSync + Clone {
+#[derive(Clone, Copy)]
+pub struct NewReadSnapshotOptions {
+    pub table_id: TableId,
+}
+
+pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
     type Local: LocalStateStore;
+    type ReadSnapshot: StateStoreRead + Clone;
 
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
     /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
@@ -388,6 +350,12 @@ pub trait StateStore: StateStoreRead + StateStoreReadLog + StaticSendSync + Clon
     }
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_;
+
+    fn new_read_snapshot(
+        &self,
+        epoch: HummockReadEpoch,
+        options: NewReadSnapshotOptions,
+    ) -> impl StorageFuture<'_, Self::ReadSnapshot>;
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data

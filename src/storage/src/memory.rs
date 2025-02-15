@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
-use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, LazyLock};
@@ -25,6 +24,7 @@ use parking_lot::RwLock;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{
     prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange, UserKey,
 };
@@ -622,20 +622,54 @@ impl<R: RangeKv> RangeKvStateStore<R> {
     }
 }
 
-impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
+#[derive(Clone)]
+pub struct RangeKvStateStoreReadSnapshot<R: RangeKv> {
+    inner: RangeKvStateStore<R>,
+    epoch: u64,
+    table_id: TableId,
+}
+
+impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
     type Iter = RangeKvStateStoreIter<R>;
     type RevIter = RangeKvStateStoreRevIter<R>;
 
-    #[allow(clippy::unused_async)]
     async fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
+        _read_options: ReadOptions,
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
+        self.inner
+            .get_keyed_row_impl(key, self.epoch, self.table_id)
+    }
+
+    async fn iter(
+        &self,
+        key_range: TableKeyRange,
+        _read_options: ReadOptions,
+    ) -> StorageResult<Self::Iter> {
+        self.inner.iter_impl(key_range, self.epoch, self.table_id)
+    }
+
+    async fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        _read_options: ReadOptions,
+    ) -> StorageResult<Self::RevIter> {
+        self.inner
+            .rev_iter_impl(key_range, self.epoch, self.table_id)
+    }
+}
+
+impl<R: RangeKv> RangeKvStateStore<R> {
+    fn get_keyed_row_impl(
+        &self,
+        key: TableKey<Bytes>,
         epoch: u64,
-        read_options: ReadOptions,
+        table_id: TableId,
     ) -> StorageResult<Option<StateStoreKeyedRow>> {
         let range_bounds = (Bound::Included(key.clone()), Bound::Included(key));
         // We do not really care about vnodes here, so we just use the default value.
-        let res = self.scan(range_bounds, epoch, read_options.table_id, Some(1))?;
+        let res = self.scan(range_bounds, epoch, table_id, Some(1))?;
 
         Ok(match res.as_slice() {
             [] => None,
@@ -647,17 +681,16 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
         })
     }
 
-    #[allow(clippy::unused_async)]
-    async fn iter(
+    fn iter_impl(
         &self,
         key_range: TableKeyRange,
         epoch: u64,
-        read_options: ReadOptions,
-    ) -> StorageResult<Self::Iter> {
+        table_id: TableId,
+    ) -> StorageResult<RangeKvStateStoreIter<R>> {
         Ok(RangeKvStateStoreIter::new(
             batched_iter::Iter::new(
                 self.inner.clone(),
-                to_full_key_range(read_options.table_id, key_range),
+                to_full_key_range(table_id, key_range),
                 false,
             ),
             epoch,
@@ -665,17 +698,16 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
         ))
     }
 
-    #[allow(clippy::unused_async)]
-    async fn rev_iter(
+    fn rev_iter_impl(
         &self,
         key_range: TableKeyRange,
         epoch: u64,
-        read_options: ReadOptions,
-    ) -> StorageResult<Self::RevIter> {
+        table_id: TableId,
+    ) -> StorageResult<RangeKvStateStoreRevIter<R>> {
         Ok(RangeKvStateStoreRevIter::new(
             batched_iter::Iter::new(
                 self.inner.clone(),
-                to_full_key_range(read_options.table_id, key_range),
+                to_full_key_range(table_id, key_range),
                 true,
             ),
             epoch,
@@ -735,6 +767,18 @@ impl<R: RangeKv> StateStoreReadLog for RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> RangeKvStateStore<R> {
+    fn new_read_snapshot_impl(
+        &self,
+        epoch: u64,
+        table_id: TableId,
+    ) -> RangeKvStateStoreReadSnapshot<R> {
+        RangeKvStateStoreReadSnapshot {
+            inner: self.clone(),
+            epoch,
+            table_id,
+        }
+    }
+
     pub(crate) fn ingest_batch(
         &self,
         mut kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
@@ -778,8 +822,8 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     type Local = RangeKvLocalStateStore<R>;
+    type ReadSnapshot = RangeKvStateStoreReadSnapshot<R>;
 
-    #[allow(clippy::unused_async)]
     async fn try_wait_epoch(
         &self,
         _epoch: HummockReadEpoch,
@@ -791,6 +835,14 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
 
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
         RangeKvLocalStateStore::new(self.clone(), option)
+    }
+
+    async fn new_read_snapshot(
+        &self,
+        epoch: HummockReadEpoch,
+        options: NewReadSnapshotOptions,
+    ) -> StorageResult<Self::ReadSnapshot> {
+        Ok(self.new_read_snapshot_impl(epoch.get_epoch(), options.table_id))
     }
 }
 
@@ -821,7 +873,7 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
 }
 
 impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
-    type FlushedSnapshotReader = RangeKvStateStore<R>;
+    type FlushedSnapshotReader = RangeKvStateStoreReadSnapshot<R>;
 
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
@@ -829,10 +881,13 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     async fn get(
         &self,
         key: TableKey<Bytes>,
-        read_options: ReadOptions,
+        _read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         match self.mem_table.buffer.get(&key) {
-            None => self.inner.get(key, self.epoch(), read_options).await,
+            None => self
+                .inner
+                .get_keyed_row_impl(key, self.epoch(), self.table_id)
+                .map(|option| option.map(|(_, value)| value)),
             Some(op) => match op {
                 KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
                 KeyOp::Delete(_) => Ok(None),
@@ -840,46 +895,38 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
         }
     }
 
-    #[allow(clippy::manual_async_fn)]
-    fn iter(
+    async fn iter(
         &self,
         key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
-        async move {
-            let iter = self
-                .inner
-                .iter(key_range.clone(), self.epoch(), read_options)
-                .await?;
-            Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
-                self.mem_table.iter(key_range),
-                iter.into_stream(to_owned_item),
-                self.table_id,
-                self.epoch(),
-                false,
-            ))))
-        }
+        _read_options: ReadOptions,
+    ) -> StorageResult<Self::Iter<'_>> {
+        let iter = self
+            .inner
+            .iter_impl(key_range.clone(), self.epoch(), self.table_id)?;
+        Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
+            self.mem_table.iter(key_range),
+            iter.into_stream(to_owned_item),
+            self.table_id,
+            self.epoch(),
+            false,
+        ))))
     }
 
-    #[allow(clippy::manual_async_fn)]
-    fn rev_iter(
+    async fn rev_iter(
         &self,
         key_range: TableKeyRange,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
-        async move {
-            let iter = self
-                .inner
-                .rev_iter(key_range.clone(), self.epoch(), read_options)
-                .await?;
-            Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
-                self.mem_table.rev_iter(key_range),
-                iter.into_stream(to_owned_item),
-                self.table_id,
-                self.epoch(),
-                true,
-            ))))
-        }
+        _read_options: ReadOptions,
+    ) -> StorageResult<Self::RevIter<'_>> {
+        let iter = self
+            .inner
+            .rev_iter_impl(key_range.clone(), self.epoch(), self.table_id)?;
+        Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
+            self.mem_table.rev_iter(key_range),
+            iter.into_stream(to_owned_item),
+            self.table_id,
+            self.epoch(),
+            true,
+        ))))
     }
 
     fn insert(
@@ -902,18 +949,22 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     async fn flush(&mut self) -> StorageResult<usize> {
         let buffer = self.mem_table.drain().into_parts();
         let mut kv_pairs = Vec::with_capacity(buffer.len());
+        let sanity_check_read_snapshot = if sanity_check_enabled() {
+            Some(self.inner.new_read_snapshot_impl(MAX_EPOCH, self.table_id))
+        } else {
+            None
+        };
         for (key, key_op) in buffer {
             match key_op {
                 // Currently, some executors do not strictly comply with these semantics. As
                 // a workaround you may call disable the check by initializing the
                 // state store with `op_consistency_level=Inconsistent`.
                 KeyOp::Insert(value) => {
-                    if sanity_check_enabled() {
+                    if let Some(sanity_check_read_snapshot) = &sanity_check_read_snapshot {
                         do_insert_sanity_check(
                             &key,
                             &value,
-                            &self.inner,
-                            self.epoch(),
+                            sanity_check_read_snapshot,
                             self.table_id,
                             self.table_option,
                             &self.op_consistency_level,
@@ -923,12 +974,11 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
                     kv_pairs.push((key, StorageValue::new_put(value)));
                 }
                 KeyOp::Delete(old_value) => {
-                    if sanity_check_enabled() {
+                    if let Some(sanity_check_read_snapshot) = &sanity_check_read_snapshot {
                         do_delete_sanity_check(
                             &key,
                             &old_value,
-                            &self.inner,
-                            self.epoch(),
+                            sanity_check_read_snapshot,
                             self.table_id,
                             self.table_option,
                             &self.op_consistency_level,
@@ -938,13 +988,12 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
                     kv_pairs.push((key, StorageValue::new_delete()));
                 }
                 KeyOp::Update((old_value, new_value)) => {
-                    if sanity_check_enabled() {
+                    if let Some(sanity_check_read_snapshot) = &sanity_check_read_snapshot {
                         do_update_sanity_check(
                             &key,
                             &old_value,
                             &new_value,
-                            &self.inner,
-                            self.epoch(),
+                            sanity_check_read_snapshot,
                             self.table_id,
                             self.table_option,
                             &self.op_consistency_level,
@@ -973,7 +1022,6 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
         self.mem_table.is_dirty()
     }
 
-    #[allow(clippy::unused_async)]
     async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
         assert!(
             self.epoch.replace(options.epoch.curr).is_none(),
@@ -1062,7 +1110,7 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     }
 
     fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
-        self.inner.clone()
+        self.inner.new_read_snapshot_impl(MAX_EPOCH, self.table_id)
     }
 }
 
@@ -1094,7 +1142,6 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
 }
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
-    #[allow(clippy::unused_async)]
     async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
         self.next_inner()?;
         Ok(self
@@ -1152,7 +1199,6 @@ impl<R: RangeKv> RangeKvStateStoreRevIter<R> {
 }
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreRevIter<R> {
-    #[allow(clippy::unused_async)]
     async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
         self.next_inner()?;
         Ok(self
@@ -1300,6 +1346,7 @@ mod tests {
     use crate::hummock::iterator::test_utils::{
         iterator_test_table_key_of, iterator_test_value_of,
     };
+    use crate::hummock::test_utils::StateStoreReadTestExt;
     use crate::memory::sled::SledStateStore;
 
     #[tokio::test]
