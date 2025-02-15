@@ -25,7 +25,7 @@ use risingwave_pb::task_service::{
     permits, GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
 };
 use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
-use risingwave_stream::executor::DispatcherMessage;
+use risingwave_stream::executor::DispatcherMessageBatch;
 use risingwave_stream::task::LocalStreamManager;
 use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
@@ -178,7 +178,7 @@ impl ExchangeServiceImpl {
                         message: Some(proto),
                         permits: Some(PbPermits { value: permits }),
                     };
-                    let bytes = DispatcherMessage::get_encoded_len(&response);
+                    let bytes = DispatcherMessageBatch::get_encoded_len(&response);
 
                     yield response;
 

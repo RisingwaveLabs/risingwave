@@ -37,13 +37,12 @@ use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
-use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     BarrierMutation, CombinedMutation, Dispatchers, DropSubscriptionsMutation, PauseMutation,
-    PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessage, PbUpdateMutation,
-    PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
-    ThrottleMutation,
+    PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessageBatch,
+    PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation,
+    SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -170,10 +169,11 @@ use self::barrier_align::AlignedMessageStream;
 
 pub type MessageStreamItemInner<M> = StreamExecutorResult<MessageInner<M>>;
 pub type MessageStreamItem = MessageStreamItemInner<BarrierMutationType>;
-pub type DispatcherMessageStreamItem = MessageStreamItemInner<()>;
+pub type DispatcherMessageStreamItem = StreamExecutorResult<DispatcherMessage>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
+use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 
 pub trait MessageStreamInner<M> = Stream<Item = MessageStreamItemInner<M>> + Send;
@@ -1052,6 +1052,28 @@ impl<M> MessageInner<M> {
 pub type Message = MessageInner<BarrierMutationType>;
 pub type DispatcherMessage = MessageInner<()>;
 
+/// `MessageBatchInner` is used exclusively by `Dispatcher` and the `Merger`/`Receiver` for exchanging messages between them.
+/// It shares the same message type as the fundamental `MessageInner`, but batches multiple barriers into a single message.
+#[derive(Debug, EnumAsInner, PartialEq, Clone)]
+pub enum MessageBatchInner<M> {
+    Chunk(StreamChunk),
+    BarrierBatch(Vec<BarrierInner<M>>),
+    Watermark(Watermark),
+}
+pub type MessageBatch = MessageBatchInner<BarrierMutationType>;
+pub type DispatcherBarriers = Vec<DispatcherBarrier>;
+pub type DispatcherMessageBatch = MessageBatchInner<()>;
+
+impl From<DispatcherMessage> for DispatcherMessageBatch {
+    fn from(m: DispatcherMessage) -> Self {
+        match m {
+            DispatcherMessage::Chunk(c) => Self::Chunk(c),
+            DispatcherMessage::Barrier(b) => Self::BarrierBatch(vec![b]),
+            DispatcherMessage::Watermark(w) => Self::Watermark(w),
+        }
+    }
+}
+
 impl From<StreamChunk> for Message {
     fn from(chunk: StreamChunk) -> Self {
         Message::Chunk(chunk)
@@ -1087,37 +1109,48 @@ impl Message {
     }
 }
 
-impl DispatcherMessage {
-    pub fn to_protobuf(&self) -> PbStreamMessage {
+impl DispatcherMessageBatch {
+    pub fn to_protobuf(&self) -> PbStreamMessageBatch {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
                 let prost_stream_chunk = stream_chunk.to_protobuf();
-                StreamMessage::StreamChunk(prost_stream_chunk)
+                StreamMessageBatch::StreamChunk(prost_stream_chunk)
             }
-            Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
-            Self::Watermark(watermark) => StreamMessage::Watermark(watermark.to_protobuf()),
+            Self::BarrierBatch(barrier_batch) => StreamMessageBatch::BarrierBatch(BarrierBatch {
+                barriers: barrier_batch.iter().map(|b| b.to_protobuf()).collect(),
+            }),
+            Self::Watermark(watermark) => StreamMessageBatch::Watermark(watermark.to_protobuf()),
         };
-        PbStreamMessage {
-            stream_message: Some(prost),
+        PbStreamMessageBatch {
+            stream_message_batch: Some(prost),
         }
     }
 
-    pub fn from_protobuf(prost: &PbStreamMessage) -> StreamExecutorResult<Self> {
-        let res = match prost.get_stream_message()? {
-            StreamMessage::StreamChunk(chunk) => Self::Chunk(StreamChunk::from_protobuf(chunk)?),
-            StreamMessage::Barrier(barrier) => Self::Barrier(
-                DispatcherBarrier::from_protobuf_inner(barrier, |mutation| {
-                    if mutation.is_some() {
-                        if cfg!(debug_assertions) {
-                            panic!("should not receive message of barrier with mutation");
-                        } else {
-                            warn!(?barrier, "receive message of barrier with mutation");
-                        }
-                    }
-                    Ok(())
-                })?,
-            ),
-            StreamMessage::Watermark(watermark) => {
+    pub fn from_protobuf(prost: &PbStreamMessageBatch) -> StreamExecutorResult<Self> {
+        let res = match prost.get_stream_message_batch()? {
+            StreamMessageBatch::StreamChunk(chunk) => {
+                Self::Chunk(StreamChunk::from_protobuf(chunk)?)
+            }
+            StreamMessageBatch::BarrierBatch(barrier_batch) => {
+                let barriers = barrier_batch
+                    .barriers
+                    .iter()
+                    .map(|barrier| {
+                        DispatcherBarrier::from_protobuf_inner(barrier, |mutation| {
+                            if mutation.is_some() {
+                                if cfg!(debug_assertions) {
+                                    panic!("should not receive message of barrier with mutation");
+                                } else {
+                                    warn!(?barrier, "receive message of barrier with mutation");
+                                }
+                            }
+                            Ok(())
+                        })
+                    })
+                    .try_collect()?;
+                Self::BarrierBatch(barriers)
+            }
+            StreamMessageBatch::Watermark(watermark) => {
                 Self::Watermark(Watermark::from_protobuf(watermark)?)
             }
         };

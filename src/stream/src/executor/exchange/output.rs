@@ -22,7 +22,7 @@ use risingwave_common::util::addr::is_local_address;
 use super::error::ExchangeChannelClosed;
 use super::permit::Sender;
 use crate::error::StreamResult;
-use crate::executor::DispatcherMessage as Message;
+use crate::executor::DispatcherMessageBatch as Message;
 use crate::task::{ActorId, SharedContext};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.

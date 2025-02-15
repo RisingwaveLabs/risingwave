@@ -138,7 +138,7 @@ message GetStreamRequest {
 }
 
 message GetStreamResponse {
-  stream_plan.StreamMessage message = 1;
+  stream_plan.StreamMessageBatch message = 1;
   // The number of permits acquired for this message, which should be sent back to the upstream with `add_permits`.
   // In theory, this can also be derived from the message itself by the receiver. Here we send it explicitly to
   // avoid any sense of inconsistency for the derivation logic, so the receiver can simply send it back verbatim.

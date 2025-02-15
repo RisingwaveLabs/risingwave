@@ -175,6 +175,17 @@ message StreamMessage {
   }
 }
 
+message StreamMessageBatch {
+  message BarrierBatch {
+    repeated Barrier barriers = 1;
+  }
+  oneof stream_message_batch {
+    data.StreamChunk stream_chunk = 1;
+    BarrierBatch barrier_batch = 2;
+    Watermark watermark = 3;
+  }
+}
+
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
   repeated uint32 original_indices = 1;

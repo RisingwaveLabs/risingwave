@@ -160,6 +160,7 @@ stream_exchange_connection_pool_size = 1
 stream_enable_auto_schema_change = true
 stream_enable_shared_source = true
 stream_switch_jdbc_pg_to_native = false
+stream_max_barrier_batch_size = 1024
 stream_hash_join_entry_state_max_rows = 30000
 
 [storage]

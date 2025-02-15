@@ -325,22 +325,22 @@ mod tests {
         }
 
         // 3. Send a chunk.
-        send!([old], Message::Chunk(StreamChunk::default()));
+        send!([old], Message::Chunk(StreamChunk::default()).into());
         recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk.
         assert_recv_pending!();
 
-        send!([new], Message::Barrier(b1.clone().into_dispatcher()));
+        send!([new], Message::Barrier(b1.clone().into_dispatcher()).into());
         assert_recv_pending!(); // We should not receive the barrier, as new is not the upstream.
 
-        send!([old], Message::Barrier(b1.clone().into_dispatcher()));
+        send!([old], Message::Barrier(b1.clone().into_dispatcher()).into());
         recv!().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
 
         // 5. Send a chunk to the removed upstream.
-        send_error!([old], Message::Chunk(StreamChunk::default()));
+        send_error!([old], Message::Chunk(StreamChunk::default()).into());
         assert_recv_pending!();
 
         // 6. Send a chunk to the added upstream.
-        send!([new], Message::Chunk(StreamChunk::default()));
+        send!([new], Message::Chunk(StreamChunk::default()).into());
         recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk.
         assert_recv_pending!();
     }
