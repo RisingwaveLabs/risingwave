@@ -8,7 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [features]
-default = ["rw-static-link"]
+default = ["rw-static-link", "all-udf"]
 rw-static-link = ["workspace-config/rw-static-link"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
 openssl-vendored = ["workspace-config/openssl-vendored"]
