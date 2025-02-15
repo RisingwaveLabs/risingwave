@@ -218,7 +218,7 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Time => Err(SinkError::Starrocks(
                 "TIME is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
-            risingwave_common::types::DataType::Timestamp => {
+            risingwave_common::types::DataType::Timestamp | risingwave_common::types::DataType::TimestampNanosecond => {
                 Ok(starrocks_data_type.contains("datetime"))
             }
             risingwave_common::types::DataType::Timestamptz => Err(SinkError::Starrocks(

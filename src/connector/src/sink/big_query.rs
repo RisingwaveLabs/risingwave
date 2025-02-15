@@ -325,6 +325,7 @@ impl BigQuerySink {
             DataType::Varchar => Ok("STRING".to_owned()),
             DataType::Time => Ok("TIME".to_owned()),
             DataType::Timestamp => Ok("DATETIME".to_owned()),
+            DataType::TimestampNanosecond => Ok("DATETIME".to_owned()),
             DataType::Timestamptz => Ok("TIMESTAMP".to_owned()),
             DataType::Interval => Ok("INTERVAL".to_owned()),
             DataType::Struct(structs) => {
@@ -369,6 +370,7 @@ impl BigQuerySink {
             DataType::Varchar => TableFieldSchema::string(&rw_field.name),
             DataType::Time => TableFieldSchema::time(&rw_field.name),
             DataType::Timestamp => TableFieldSchema::date_time(&rw_field.name),
+            DataType::TimestampNanosecond => TableFieldSchema::date_time(&rw_field.name),
             DataType::Timestamptz => TableFieldSchema::timestamp(&rw_field.name),
             DataType::Interval => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
@@ -894,6 +896,9 @@ fn build_protobuf_field(
         DataType::Varchar => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Time => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Timestamp => field.r#type = Some(field_descriptor_proto::Type::String.into()),
+        DataType::TimestampNanosecond => {
+            field.r#type = Some(field_descriptor_proto::Type::String.into())
+        }
         DataType::Timestamptz => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Interval => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Struct(s) => {

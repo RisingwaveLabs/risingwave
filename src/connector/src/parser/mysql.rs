@@ -154,6 +154,15 @@ pub fn mysql_datum_to_rw_datum(
                 Timestamp
             )
         }
+        DataType::TimestampNanosecond => {
+            handle_data_type!(
+                mysql_row,
+                mysql_datum_index,
+                column_name,
+                chrono::NaiveDateTime,
+                Timestamp
+            )
+        }
         DataType::Timestamptz => {
             match mysql_row.take_opt::<Option<chrono::NaiveDateTime>, _>(mysql_datum_index) {
                 None => bail!(

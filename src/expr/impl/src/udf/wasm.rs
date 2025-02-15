@@ -264,6 +264,7 @@ fn datatype_name(ty: &DataType) -> String {
         DataType::Date => "date32".to_owned(),
         DataType::Time => "time64".to_owned(),
         DataType::Timestamp => "timestamp".to_owned(),
+        DataType::TimestampNanosecond => "timestamp_ns".to_owned(),
         DataType::Timestamptz => "timestamptz".to_owned(),
         DataType::Interval => "interval".to_owned(),
         DataType::Decimal => "decimal".to_owned(),

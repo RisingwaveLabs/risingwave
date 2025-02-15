@@ -2,7 +2,7 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t1(v1 int, v2 timestamp);
+create table t1(v1 int, v2 timestamp_ns);
 
 statement ok
 insert into t1 values(1,'2013-01-01 01:01:01.123456789'),(2,'2012-01-01 01:01:01.123456'),(3,'0000-01-01 01:01:01.123456789'),(4,'2213-01-01 01:01:01.123456789'),(5,null),(6,'2013-01-01 01:01:01.123456789');
@@ -62,7 +62,7 @@ select * from t1 where v2 >= '2012-01-01 01:01:01.123456';
 6  2013-01-01 01:01:01.123456789
 
 query T rowsort
-select v1, cast(v2 as date) as date_v2, cast(v2 as timestamp with time zone) as timestamptz_v2 from t1;
+select v1, cast(v2 as date) as date_v2, cast(v2 as timestamptz) as timestamptz_v2 from t1;
 ----
 1  2013-01-01     2013-01-01 01:01:01.123456+00:00
 2  2012-01-01     2012-01-01 01:01:01.123456+00:00
@@ -102,7 +102,7 @@ select v1, to_char(v2, 'YYYY-MM-DD HH24:MI:SS.NS') as formatted_v2 from t1;
 6  2013-01-01 01:01:01.123456789
 
 query T rowsort
-select generate_series('2013-01-01 01:01:01.123456789'::timestamp,'2013-01-01 01:01:05.123456790'::timestamp, '1 s');
+select generate_series('2013-01-01 01:01:01.123456789'::timestamp_ns,'2013-01-01 01:01:05.123456790'::timestamp_ns, '1 s');
 ----
 2013-01-01 01:01:01.123456789
 2013-01-01 01:01:02.123456789
@@ -194,7 +194,7 @@ select v1, extract(nanosecond from v2) from t1;
 6  1123456789
 
 query T rowsort
-select make_timestamp(2013, 01, 01, 01, 01, 1.123456789);
+select make_timestamp_ns(2013, 01, 01, 01, 01, 1.123456789);
 ----
 2013-01-01 01:01:01.123456789
 

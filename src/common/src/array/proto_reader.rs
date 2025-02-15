@@ -36,6 +36,9 @@ impl ArrayImpl {
             PbArrayType::Date => read_primitive_array::<Date>(array, cardinality)?,
             PbArrayType::Time => read_primitive_array::<Time>(array, cardinality)?,
             PbArrayType::Timestamp => read_primitive_array::<Timestamp>(array, cardinality)?,
+            PbArrayType::TimestampNanosecond => {
+                read_primitive_array::<TimestampNanosecond>(array, cardinality)?
+            }
             PbArrayType::Timestamptz => read_primitive_array::<Timestamptz>(array, cardinality)?,
             PbArrayType::Interval => read_primitive_array::<Interval>(array, cardinality)?,
             PbArrayType::Jsonb => JsonbArray::from_protobuf(array)?,

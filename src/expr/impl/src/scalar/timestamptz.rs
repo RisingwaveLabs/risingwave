@@ -17,7 +17,8 @@ use std::fmt::Write;
 use chrono::LocalResult;
 use num_traits::CheckedNeg;
 use risingwave_common::types::{
-    write_date_time_tz, CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64,
+    write_date_time_tz, CheckedAdd, Interval, IntoOrdered, Timestamp, TimestampNanosecond,
+    Timestamptz, F64,
 };
 use risingwave_expr::{function, ExprError, Result};
 use thiserror_ext::AsReport;
@@ -47,6 +48,14 @@ pub fn timestamptz_at_time_zone(input: Timestamptz, time_zone: &str) -> Result<T
     let instant_local = input.to_datetime_in_zone(time_zone);
     let naive = instant_local.naive_local();
     Ok(Timestamp(naive))
+}
+
+#[function("at_time_zone(timestamp_ns, varchar) -> timestamptz")]
+pub fn timestamp_ns_at_time_zone(
+    input: TimestampNanosecond,
+    time_zone: &str,
+) -> Result<Timestamptz> {
+    timestamp_at_time_zone(input.into(), time_zone)
 }
 
 #[function("at_time_zone(timestamp, varchar) -> timestamptz")]

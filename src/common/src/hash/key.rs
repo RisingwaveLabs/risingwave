@@ -36,7 +36,7 @@ use static_assertions::const_assert_eq;
 use crate::array::{ListValue, MapValue, StructValue};
 use crate::types::{
     DataType, Date, Decimal, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef, ScalarRefImpl, Serial,
-    Time, Timestamp, Timestamptz, F32, F64,
+    Time, Timestamp, TimestampNanosecond, Timestamptz, F32, F64,
 };
 use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
 use crate::util::sort_util::OrderType;
@@ -581,6 +581,25 @@ impl HashKeyDe for Timestamp {
         let secs = buf.get_i64_ne();
         let nsecs = buf.get_u32_ne();
         Timestamp::with_secs_nsecs(secs, nsecs).unwrap()
+    }
+}
+
+impl HashKeySer<'_> for TimestampNanosecond {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        buf.put_i64_ne(self.0.and_utc().timestamp());
+        buf.put_u32_ne(self.0.and_utc().timestamp_subsec_nanos());
+    }
+
+    fn exact_size() -> Option<usize> {
+        Some(12)
+    }
+}
+
+impl HashKeyDe for TimestampNanosecond {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let secs = buf.get_i64_ne();
+        let nsecs = buf.get_u32_ne();
+        TimestampNanosecond::with_secs_nsecs(secs, nsecs).unwrap()
     }
 }
 

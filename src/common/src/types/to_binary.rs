@@ -17,8 +17,8 @@ use postgres_types::{ToSql, Type};
 use rw_iter_util::ZipEqFast;
 
 use super::{
-    DataType, Date, Decimal, Interval, ScalarRefImpl, Serial, Time, Timestamp, Timestamptz, F32,
-    F64,
+    DataType, Date, Decimal, Interval, ScalarRefImpl, Serial, Time, Timestamp, TimestampNanosecond,
+    Timestamptz, F32, F64,
 };
 use crate::array::{ListRef, StructRef};
 use crate::error::NotImplemented;
@@ -74,6 +74,7 @@ implement_using_to_sql! {
     { Time, Time, |x: &Time| x.0 },
     { Date, Date, |x: &Date| x.0 },
     { Timestamp, Timestamp, |x: &Timestamp| x.0 },
+    { TimestampNanosecond, TimestampNanosecond, |x: &TimestampNanosecond| x.0 },
     { Decimal, Decimal, |x| x },
     { Interval, Interval, |x| x },
     { Serial, Serial, |x: &Serial| x.0 },
@@ -156,6 +157,7 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Interval(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Date(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Timestamp(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::TimestampNanosecond(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Timestamptz(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),

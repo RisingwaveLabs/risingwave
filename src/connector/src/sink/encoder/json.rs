@@ -394,6 +394,7 @@ pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
         DataType::Varchar => "string",
         DataType::Time => "int64",
         DataType::Timestamp => "int64",
+        DataType::TimestampNanosecond => "int64",
         DataType::Timestamptz => "string",
         DataType::Interval => "string",
         DataType::Struct(_) => "struct",

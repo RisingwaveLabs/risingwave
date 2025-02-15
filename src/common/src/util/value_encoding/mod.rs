@@ -220,6 +220,11 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
             v.0.and_utc().timestamp_subsec_nanos(),
             buf,
         ),
+        ScalarRefImpl::TimestampNanosecond(v) => serialize_timestamp(
+            v.0.and_utc().timestamp(),
+            v.0.and_utc().timestamp_subsec_nanos(),
+            buf,
+        ),
         ScalarRefImpl::Timestamptz(v) => buf.put_i64_le(v.timestamp_micros()),
         ScalarRefImpl::Time(v) => {
             serialize_time(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
@@ -247,6 +252,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Interval(_) => estimate_serialize_interval_size(),
         ScalarRefImpl::Date(_) => estimate_serialize_date_size(),
         ScalarRefImpl::Timestamp(_) => estimate_serialize_timestamp_size(),
+        ScalarRefImpl::TimestampNanosecond(_) => estimate_serialize_timestamp_size(),
         ScalarRefImpl::Timestamptz(_) => 8,
         ScalarRefImpl::Time(_) => estimate_serialize_time_size(),
         // not exact as we use internal encoding size to estimate the json string size
@@ -346,6 +352,9 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Interval => ScalarImpl::Interval(deserialize_interval(data)?),
         DataType::Time => ScalarImpl::Time(deserialize_time(data)?),
         DataType::Timestamp => ScalarImpl::Timestamp(deserialize_timestamp(data)?),
+        DataType::TimestampNanosecond => {
+            ScalarImpl::TimestampNanosecond(deserialize_timestamp_nanosecond(data)?)
+        }
         DataType::Timestamptz => {
             ScalarImpl::Timestamptz(Timestamptz::from_micros(data.get_i64_le()))
         }
@@ -431,6 +440,13 @@ fn deserialize_timestamp(data: &mut impl Buf) -> Result<Timestamp> {
     let secs = data.get_i64_le();
     let nsecs = data.get_u32_le();
     Timestamp::with_secs_nsecs(secs, nsecs)
+        .map_err(|_e| ValueEncodingError::InvalidTimestampEncoding(secs, nsecs))
+}
+
+fn deserialize_timestamp_nanosecond(data: &mut impl Buf) -> Result<TimestampNanosecond> {
+    let secs = data.get_i64_le();
+    let nsecs = data.get_u32_le();
+    TimestampNanosecond::with_secs_nsecs(secs, nsecs)
         .map_err(|_e| ValueEncodingError::InvalidTimestampEncoding(secs, nsecs))
 }
 

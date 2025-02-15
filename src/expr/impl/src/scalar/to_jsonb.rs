@@ -17,7 +17,8 @@ use std::fmt::Debug;
 use jsonbb::Builder;
 use risingwave_common::types::{
     DataType, Date, Decimal, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, MapRef,
-    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText, F32, F64,
+    ScalarRefImpl, Serial, StructRef, Time, Timestamp, TimestampNanosecond, Timestamptz, ToText,
+    F32, F64,
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
@@ -66,6 +67,7 @@ impl ToJsonb for ScalarRefImpl<'_> {
             Date(v) => v.add_to(ty, builder),
             Time(v) => v.add_to(ty, builder),
             Timestamp(v) => v.add_to(ty, builder),
+            TimestampNanosecond(v) => v.add_to(ty, builder),
             Jsonb(v) => v.add_to(ty, builder),
             Serial(v) => v.add_to(ty, builder),
             Bytea(v) => v.add_to(ty, builder),
@@ -188,6 +190,13 @@ impl ToJsonb for Interval {
 }
 
 impl ToJsonb for Timestamp {
+    fn add_to(self, _: &DataType, builder: &mut Builder) -> Result<()> {
+        builder.display(format_args!("{}T{}", self.0.date(), self.0.time()));
+        Ok(())
+    }
+}
+
+impl ToJsonb for TimestampNanosecond {
     fn add_to(self, _: &DataType, builder: &mut Builder) -> Result<()> {
         builder.display(format_args!("{}T{}", self.0.date(), self.0.time()));
         Ok(())

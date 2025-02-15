@@ -298,7 +298,8 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
         risingwave_common::types::DataType::Date => ("int32", "org.apache.kafka.connect.data.Date"),
         // may lose precision when Time/Timestamp has a fractional second precision value that is greater than 3. But for TimestampHandlingMode:Milli, it is sufficient.
         risingwave_common::types::DataType::Time => ("int64", "org.apache.kafka.connect.data.Time"),
-        risingwave_common::types::DataType::Timestamp => {
+        risingwave_common::types::DataType::Timestamp
+        | risingwave_common::types::DataType::TimestampNanosecond => {
             ("int64", "org.apache.kafka.connect.data.Timestamp")
         }
 

@@ -19,7 +19,7 @@ use bytes::Bytes;
 
 use super::{
     DataType, Date, Decimal, Fields, Int256, Interval, JsonbRef, JsonbVal, Serial, StructType,
-    Time, Timestamp, Timestamptz, F32, F64,
+    Time, Timestamp, TimestampNanosecond, Timestamptz, F32, F64,
 };
 
 /// A trait for all physical types that can be associated with a [`DataType`].
@@ -103,6 +103,7 @@ impl_with_data_type!(String, DataType::Varchar);
 impl_with_data_type!(Date, DataType::Date);
 impl_with_data_type!(Time, DataType::Time);
 impl_with_data_type!(Timestamp, DataType::Timestamp);
+impl_with_data_type!(TimestampNanosecond, DataType::TimestampNanosecond);
 impl_with_data_type!(Timestamptz, DataType::Timestamptz);
 impl_with_data_type!(Interval, DataType::Interval);
 impl_with_data_type!(Vec<u8>, DataType::Bytea);

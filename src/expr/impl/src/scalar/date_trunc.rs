@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Interval, Timestamp, Timestamptz};
+use risingwave_common::types::{Interval, Timestamp, TimestampNanosecond, Timestamptz};
 use risingwave_expr::{function, ExprError, Result};
 
 use super::timestamptz::timestamp_at_time_zone;
@@ -20,6 +20,7 @@ use super::timestamptz::timestamp_at_time_zone;
 // TODO(xiangjinwu): parse into an enum
 const MICROSECONDS: &str = "microseconds";
 const MILLISECONDS: &str = "milliseconds";
+const NANOSECONDS: &str = "nanoseconds";
 const SECOND: &str = "second";
 const MINUTE: &str = "minute";
 const HOUR: &str = "hour";
@@ -31,6 +32,30 @@ const YEAR: &str = "year";
 const DECADE: &str = "decade";
 const CENTURY: &str = "century";
 const MILLENNIUM: &str = "millennium";
+
+#[function("date_trunc(varchar, timestamp_ns) -> timestamp_ns")]
+pub fn date_trunc_timestamp_ns(
+    field: &str,
+    ts: TimestampNanosecond,
+) -> Result<TimestampNanosecond> {
+    Ok(match field.to_ascii_lowercase().as_str() {
+        NANOSECONDS => ts,
+        MICROSECONDS => ts.truncate_micros(),
+        MILLISECONDS => ts.truncate_millis(),
+        SECOND => ts.truncate_second(),
+        MINUTE => ts.truncate_minute(),
+        HOUR => ts.truncate_hour(),
+        DAY => ts.truncate_day(),
+        WEEK => ts.truncate_week(),
+        MONTH => ts.truncate_month(),
+        QUARTER => ts.truncate_quarter(),
+        YEAR => ts.truncate_year(),
+        DECADE => ts.truncate_decade(),
+        CENTURY => ts.truncate_century(),
+        MILLENNIUM => ts.truncate_millennium(),
+        _ => return Err(invalid_field_error(field)),
+    })
+}
 
 #[function("date_trunc(varchar, timestamp) -> timestamp")]
 pub fn date_trunc_timestamp(field: &str, ts: Timestamp) -> Result<Timestamp> {

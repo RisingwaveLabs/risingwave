@@ -40,8 +40,8 @@ const UNIX_EPOCH_DAYS: i32 = 719_163;
 const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-macro_rules! impl_chrono_wrapper {
-    ($variant_name:ident, $chrono:ty, $pg_type:ident) => {
+macro_rules! impl_chrono_wrapper_without_pgsql_type {
+    ($variant_name:ident, $chrono:ty) => {
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[repr(transparent)]
         pub struct $variant_name(pub $chrono);
@@ -67,6 +67,12 @@ macro_rules! impl_chrono_wrapper {
         }
 
         impl ZeroHeapSize for $variant_name {}
+    };
+}
+
+macro_rules! impl_chrono_wrapper {
+    ($variant_name:ident, $chrono:ty, $pg_type:ident) => {
+        impl_chrono_wrapper_without_pgsql_type!($variant_name, $chrono);
 
         impl ToSql for $variant_name {
             accepts!($pg_type);
@@ -100,6 +106,7 @@ macro_rules! impl_chrono_wrapper {
         }
     };
 }
+impl_chrono_wrapper_without_pgsql_type!(TimestampNanosecond, NaiveDateTime);
 
 impl_chrono_wrapper!(Date, NaiveDate, DATE);
 impl_chrono_wrapper!(Timestamp, NaiveDateTime, TIMESTAMP);
@@ -171,15 +178,59 @@ impl FromStr for Timestamp {
         let dt = s
             .parse::<jiff::civil::DateTime>()
             .map_err(|_| ErrorKind::ParseTimestamp)?;
-        Ok(
+        let subsec_nanosecond = dt.subsec_nanosecond();
+        if subsec_nanosecond % 1_000 != 0 {
+            return Err(ErrorKind::ParseTimestamp.into());
+        }
+        Ok(Self::new(
             Date::from_ymd_uncheck(dt.year() as i32, dt.month() as u32, dt.day() as u32)
-                .and_hms_nano_uncheck(
-                    dt.hour() as u32,
-                    dt.minute() as u32,
-                    dt.second() as u32,
-                    dt.subsec_nanosecond() as u32,
+                .0
+                .and_time(
+                    Time::from_hms_micro_uncheck(
+                        dt.hour() as u32,
+                        dt.minute() as u32,
+                        dt.second() as u32,
+                        subsec_nanosecond as u32 / 1_000,
+                    )
+                    .0,
                 ),
-        )
+        ))
+    }
+}
+
+/// Parse a timestampns from varchar.
+///
+/// # Example
+/// ```
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::TimestampNanosecond;
+///
+/// TimestampNanosecond::from_str("1999-01-08 04:02").unwrap();
+/// TimestampNanosecond::from_str("1999-01-08 04:05:06").unwrap();
+/// TimestampNanosecond::from_str("1999-01-08T04:05:06").unwrap();
+/// TimestampNanosecond::from_str("1999-01-08T04:05:06.123456789").unwrap();
+/// ```
+impl FromStr for TimestampNanosecond {
+    type Err = InvalidParamsError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let dt = s
+            .parse::<jiff::civil::DateTime>()
+            .map_err(|_| ErrorKind::ParseTimestampNanosecond)?;
+        Ok(Self::new(
+            Date::from_ymd_uncheck(dt.year() as i32, dt.month() as u32, dt.day() as u32)
+                .0
+                .and_time(
+                    Time::from_hms_nano_uncheck(
+                        dt.hour() as u32,
+                        dt.minute() as u32,
+                        dt.second() as u32,
+                        dt.subsec_nanosecond() as u32,
+                    )
+                    .0,
+                ),
+        ))
     }
 }
 
@@ -201,6 +252,22 @@ impl From<Timestamp> for Date {
     }
 }
 
+/// # Example
+/// ```
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::{Date, TimestampNanosecond};
+///
+/// let ts = TimestampNanosecond::from_str("1999-01-08 04:02").unwrap();
+/// let date = Date::from(ts);
+/// assert_eq!(date, Date::from_str("1999-01-08").unwrap());
+/// ```
+impl From<TimestampNanosecond> for Date {
+    fn from(ts: TimestampNanosecond) -> Self {
+        Date::new(ts.0.date())
+    }
+}
+
 /// In `PostgreSQL`, casting from timestamp to time discards the date part.
 ///
 /// # Example
@@ -215,6 +282,22 @@ impl From<Timestamp> for Date {
 /// ```
 impl From<Timestamp> for Time {
     fn from(ts: Timestamp) -> Self {
+        Time::new(ts.0.time())
+    }
+}
+
+/// # Example
+/// ```
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::{Time, TimestampNanosecond};
+///
+/// let ts = TimestampNanosecond::from_str("1999-01-08 04:02").unwrap();
+/// let time = Time::from(ts);
+/// assert_eq!(time, Time::from_str("04:02").unwrap());
+/// ```
+impl From<TimestampNanosecond> for Time {
+    fn from(ts: TimestampNanosecond) -> Self {
         Time::new(ts.0.time())
     }
 }
@@ -256,8 +339,10 @@ enum ErrorKind {
     ParseDate,
     #[error("Can't cast string to time (expected format is HH:MM:SS[.D+{{up to 6 digits}}][Z] or HH:MM)")]
     ParseTime,
-    #[error("Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 9 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
+    #[error("Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 6 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
     ParseTimestamp,
+    #[error("Can't cast string to timestampns (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 9 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
+    ParseTimestampNanosecond,
 }
 
 #[derive(Debug, Error)]
@@ -332,29 +417,6 @@ impl ToText for Time {
     }
 }
 
-impl ToText for Timestamp {
-    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        let (ce, year) = self.0.year_ce();
-        let suffix = if ce { "" } else { " BC" };
-        write!(
-            f,
-            "{:04}-{:02}-{:02} {}{}",
-            year,
-            self.0.month(),
-            self.0.day(),
-            self.0.time(),
-            suffix
-        )
-    }
-
-    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
-        match ty {
-            super::DataType::Timestamp => self.write(f),
-            _ => unreachable!(),
-        }
-    }
-}
-
 impl Date {
     pub fn with_days_since_ce(days: i32) -> Result<Self> {
         Ok(Date::new(
@@ -402,21 +464,7 @@ impl Date {
     }
 
     pub fn and_hms_uncheck(self, hour: u32, min: u32, sec: u32) -> Timestamp {
-        self.and_hms_micro_uncheck(hour, min, sec, 0)
-    }
-
-    pub fn and_hms_micro_uncheck(self, hour: u32, min: u32, sec: u32, micro: u32) -> Timestamp {
-        Timestamp::new(
-            self.0
-                .and_time(Time::from_hms_micro_uncheck(hour, min, sec, micro).0),
-        )
-    }
-
-    pub fn and_hms_nano_uncheck(self, hour: u32, min: u32, sec: u32, nano: u32) -> Timestamp {
-        Timestamp::new(
-            self.0
-                .and_time(Time::from_hms_nano_uncheck(hour, min, sec, nano).0),
-        )
+        Timestamp::new(self.0.and_time(Time::from_hms_uncheck(hour, min, sec).0))
     }
 }
 
@@ -481,312 +529,6 @@ impl Time {
     }
 }
 
-// The first 64 bits of protobuf encoding for `Timestamp` type has 2 possible meanings.
-// * When the highest 2 bits are `11` or `00` (i.e. values ranging from `0b1100...00` to `0b0011..11`),
-//   it is *microseconds* since 1970-01-01 midnight. 2^62 microseconds covers 146235 years.
-// * When the highest 2 bits are `10` or `01`, we flip the second bit to get values from `0b1100...00` to `0b0011..11` again.
-//   It is *seconds* since 1970-01-01 midnight. It is then followed by another 32 bits as nanoseconds within a second.
-// Since timestamp is negative when it is less than 1970-1-1, you need to take both cases into account(`11+00`` or `01+10``).
-enum FirstI64 {
-    V0 { usecs: i64 },
-    V1 { secs: i64 },
-}
-impl FirstI64 {
-    pub fn to_protobuf(&self) -> i64 {
-        match self {
-            FirstI64::V0 { usecs } => *usecs,
-            FirstI64::V1 { secs } => secs ^ (0b01 << 62),
-        }
-    }
-
-    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<FirstI64> {
-        let value = cur
-            .read_i64::<BigEndian>()
-            .context("failed to read i64 from Time buffer")?;
-        if Self::is_v1_format_state(value) {
-            let secs = value ^ (0b01 << 62);
-            Ok(FirstI64::V1 { secs })
-        } else {
-            Ok(FirstI64::V0 { usecs: value })
-        }
-    }
-
-    fn is_v1_format_state(value: i64) -> bool {
-        let state = (value >> 62) & 0b11;
-        state == 0b10 || state == 0b01
-    }
-}
-
-impl Timestamp {
-    pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> Result<Self> {
-        Ok(Timestamp::new({
-            DateTime::from_timestamp(secs, nsecs)
-                .map(|t| t.naive_utc())
-                .ok_or_else(|| InvalidParamsError::datetime(secs, nsecs))?
-        }))
-    }
-
-    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
-        match FirstI64::from_protobuf(cur)? {
-            FirstI64::V0 { usecs } => Ok(Timestamp::with_micros(usecs)?),
-            FirstI64::V1 { secs } => {
-                let nsecs = cur
-                    .read_u32::<BigEndian>()
-                    .context("failed to read u32 from Time buffer")?;
-                Ok(Timestamp::with_secs_nsecs(secs, nsecs)?)
-            }
-        }
-    }
-
-    // Since timestamp secs is much smaller than i64, we use the highest 2 bit to store the format information, which is compatible with the old format.
-    // New format: secs(i64) + nsecs(u32)
-    // Old format: micros(i64)
-    pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
-        let timestamp_size = output
-            .write(
-                &(FirstI64::V1 {
-                    secs: self.0.and_utc().timestamp(),
-                }
-                .to_protobuf())
-                .to_be_bytes(),
-            )
-            .map_err(Into::<ArrayError>::into)?;
-        let timestamp_subsec_nanos_size = output
-            .write(&(self.0.and_utc().timestamp_subsec_nanos()).to_be_bytes())
-            .map_err(Into::<ArrayError>::into)?;
-        Ok(timestamp_subsec_nanos_size + timestamp_size)
-    }
-
-    pub fn get_timestamp_nanos(&self) -> i64 {
-        self.0.and_utc().timestamp_nanos_opt().unwrap()
-    }
-
-    pub fn with_millis(timestamp_millis: i64) -> Result<Self> {
-        let secs = timestamp_millis.div_euclid(1_000);
-        let nsecs = timestamp_millis.rem_euclid(1_000) * 1_000_000;
-        Self::with_secs_nsecs(secs, nsecs as u32)
-    }
-
-    pub fn with_micros(timestamp_micros: i64) -> Result<Self> {
-        let secs = timestamp_micros.div_euclid(1_000_000);
-        let nsecs = timestamp_micros.rem_euclid(1_000_000) * 1000;
-        Self::with_secs_nsecs(secs, nsecs as u32)
-    }
-
-    pub fn from_timestamp_uncheck(secs: i64, nsecs: u32) -> Self {
-        Self::new(DateTime::from_timestamp(secs, nsecs).unwrap().naive_utc())
-    }
-
-    /// Truncate the timestamp to the precision of microseconds.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_micros().to_string(),
-    ///     "2001-05-16 20:38:40.123456"
-    /// );
-    /// ```
-    pub fn truncate_micros(self) -> Self {
-        Self::new(
-            self.0
-                .with_nanosecond(self.0.nanosecond() / 1000 * 1000)
-                .unwrap(),
-        )
-    }
-
-    /// Truncate the timestamp to the precision of milliseconds.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_millis().to_string(),
-    ///     "2001-05-16 20:38:40.123"
-    /// );
-    /// ```
-    pub fn truncate_millis(self) -> Self {
-        Self::new(
-            self.0
-                .with_nanosecond(self.0.nanosecond() / 1_000_000 * 1_000_000)
-                .unwrap(),
-        )
-    }
-
-    /// Truncate the timestamp to the precision of seconds.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_second().to_string(),
-    ///     "2001-05-16 20:38:40"
-    /// );
-    /// ```
-    pub fn truncate_second(self) -> Self {
-        Self::new(self.0.with_nanosecond(0).unwrap())
-    }
-
-    /// Truncate the timestamp to the precision of minutes.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_minute().to_string(),
-    ///     "2001-05-16 20:38:00"
-    /// );
-    /// ```
-    pub fn truncate_minute(self) -> Self {
-        Date::new(self.0.date()).and_hms_uncheck(self.0.hour(), self.0.minute(), 0)
-    }
-
-    /// Truncate the timestamp to the precision of hours.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_hour().to_string(),
-    ///     "2001-05-16 20:00:00"
-    /// );
-    /// ```
-    pub fn truncate_hour(self) -> Self {
-        Date::new(self.0.date()).and_hms_uncheck(self.0.hour(), 0, 0)
-    }
-
-    /// Truncate the timestamp to the precision of days.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_day().to_string(),
-    ///     "2001-05-16 00:00:00"
-    /// );
-    /// ```
-    pub fn truncate_day(self) -> Self {
-        Date::new(self.0.date()).into()
-    }
-
-    /// Truncate the timestamp to the precision of weeks.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_week().to_string(),
-    ///     "2001-05-14 00:00:00"
-    /// );
-    /// ```
-    pub fn truncate_week(self) -> Self {
-        Date::new(self.0.date().week(Weekday::Mon).first_day()).into()
-    }
-
-    /// Truncate the timestamp to the precision of months.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_month().to_string(),
-    ///     "2001-05-01 00:00:00"
-    /// );
-    /// ```
-    pub fn truncate_month(self) -> Self {
-        Date::new(self.0.date().with_day(1).unwrap()).into()
-    }
-
-    /// Truncate the timestamp to the precision of quarters.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_quarter().to_string(),
-    ///     "2001-04-01 00:00:00"
-    /// );
-    /// ```
-    pub fn truncate_quarter(self) -> Self {
-        Date::from_ymd_uncheck(self.0.year(), self.0.month0() / 3 * 3 + 1, 1).into()
-    }
-
-    /// Truncate the timestamp to the precision of years.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_year().to_string(),
-    ///     "2001-01-01 00:00:00"
-    /// );
-    /// ```
-    pub fn truncate_year(self) -> Self {
-        Date::from_ymd_uncheck(self.0.year(), 1, 1).into()
-    }
-
-    /// Truncate the timestamp to the precision of decades.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_decade().to_string(),
-    ///     "2000-01-01 00:00:00"
-    /// );
-    /// ```
-    pub fn truncate_decade(self) -> Self {
-        Date::from_ymd_uncheck(self.0.year() / 10 * 10, 1, 1).into()
-    }
-
-    /// Truncate the timestamp to the precision of centuries.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "3202-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_century().to_string(),
-    ///     "3201-01-01 00:00:00"
-    /// );
-    /// ```
-    pub fn truncate_century(self) -> Self {
-        Date::from_ymd_uncheck((self.0.year() - 1) / 100 * 100 + 1, 1, 1).into()
-    }
-
-    /// Truncate the timestamp to the precision of millenniums.
-    ///
-    /// # Example
-    /// ```
-    /// # use risingwave_common::types::Timestamp;
-    /// let ts = "3202-05-16T20:38:40.123456789".parse().unwrap();
-    /// assert_eq!(
-    ///     Timestamp::new(ts).truncate_millennium().to_string(),
-    ///     "3001-01-01 00:00:00"
-    /// );
-    /// ```
-    pub fn truncate_millennium(self) -> Self {
-        Date::from_ymd_uncheck((self.0.year() - 1) / 1000 * 1000 + 1, 1, 1).into()
-    }
-}
-
-impl From<Date> for Timestamp {
-    fn from(date: Date) -> Self {
-        date.and_hms_uncheck(0, 0, 0)
-    }
-}
-
 /// return the days of the `year-month`
 fn get_mouth_days(year: i32, month: usize) -> i32 {
     if is_leap_year(year) {
@@ -800,46 +542,381 @@ fn is_leap_year(year: i32) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
 
-impl CheckedAdd<Interval> for Timestamp {
-    type Output = Timestamp;
+macro_rules! impl_timestamp {
+    ($type:ty) => {
+        impl From<Date> for $type {
+            fn from(date: Date) -> Self {
+                Self::new(date.0.and_time(Time::from_hms_nano_uncheck(0, 0, 0, 0).0))
+            }
+        }
 
-    fn checked_add(self, rhs: Interval) -> Option<Timestamp> {
-        let mut date = self.0.date();
-        if rhs.months() != 0 {
-            // NaiveDate don't support add months. We need calculate manually
-            let mut day = date.day() as i32;
-            let mut month = date.month() as i32;
-            let mut year = date.year();
-            // Calculate the number of year in this interval
-            let interval_months = rhs.months();
-            let year_diff = interval_months / 12;
-            year += year_diff;
+        impl CheckedAdd<Interval> for $type {
+            type Output = $type;
 
-            // Calculate the number of month in this interval except the added year
-            // The range of month_diff is (-12, 12) (The month is negative when the interval is
-            // negative)
-            let month_diff = interval_months - year_diff * 12;
-            // The range of new month is (-12, 24) ( original month:[1, 12] + month_diff:(-12, 12) )
-            month += month_diff;
-            // Process the overflow months
-            if month > 12 {
-                year += 1;
-                month -= 12;
-            } else if month <= 0 {
-                year -= 1;
-                month += 12;
+            fn checked_add(self, rhs: Interval) -> Option<$type> {
+                let mut date = self.0.date();
+                if rhs.months() != 0 {
+                    // NaiveDate don't support add months. We need calculate manually
+                    let mut day = date.day() as i32;
+                    let mut month = date.month() as i32;
+                    let mut year = date.year();
+                    // Calculate the number of year in this interval
+                    let interval_months = rhs.months();
+                    let year_diff = interval_months / 12;
+                    year += year_diff;
+
+                    // Calculate the number of month in this interval except the added year
+                    // The range of month_diff is (-12, 12) (The month is negative when the interval is
+                    // negative)
+                    let month_diff = interval_months - year_diff * 12;
+                    // The range of new month is (-12, 24) ( original month:[1, 12] + month_diff:(-12, 12) )
+                    month += month_diff;
+                    // Process the overflow months
+                    if month > 12 {
+                        year += 1;
+                        month -= 12;
+                    } else if month <= 0 {
+                        year -= 1;
+                        month += 12;
+                    }
+
+                    // Fix the days after changing date.
+                    // For example, 1970.1.31 + 1 month = 1970.2.28
+                    day = day.min(get_mouth_days(year, month as usize));
+                    date = NaiveDate::from_ymd_opt(year, month as u32, day as u32)?;
+                }
+                let mut datetime = NaiveDateTime::new(date, self.0.time());
+                datetime = datetime.checked_add_signed(Duration::days(rhs.days().into()))?;
+                datetime = datetime.checked_add_signed(Duration::microseconds(rhs.usecs()))?;
+
+                Some(Self::new(datetime))
+            }
+        }
+
+        impl ToText for $type {
+            fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+                let (ce, year) = self.0.year_ce();
+                let suffix = if ce { "" } else { " BC" };
+                write!(
+                    f,
+                    "{:04}-{:02}-{:02} {}{}",
+                    year,
+                    self.0.month(),
+                    self.0.day(),
+                    self.0.time(),
+                    suffix
+                )
             }
 
-            // Fix the days after changing date.
-            // For example, 1970.1.31 + 1 month = 1970.2.28
-            day = day.min(get_mouth_days(year, month as usize));
-            date = NaiveDate::from_ymd_opt(year, month as u32, day as u32)?;
+            fn write_with_type<W: std::fmt::Write>(
+                &self,
+                ty: &DataType,
+                f: &mut W,
+            ) -> std::fmt::Result {
+                match ty {
+                    super::DataType::Timestamp => self.write(f),
+                    super::DataType::TimestampNanosecond => self.write(f),
+                    _ => unreachable!(),
+                }
+            }
         }
-        let mut datetime = NaiveDateTime::new(date, self.0.time());
-        datetime = datetime.checked_add_signed(Duration::days(rhs.days().into()))?;
-        datetime = datetime.checked_add_signed(Duration::microseconds(rhs.usecs()))?;
 
-        Some(Timestamp::new(datetime))
+        impl $type {
+            pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> Result<Self> {
+                Ok(Self::new({
+                    DateTime::from_timestamp(secs, nsecs)
+                        .map(|t| t.naive_utc())
+                        .ok_or_else(|| InvalidParamsError::datetime(secs, nsecs))?
+                }))
+            }
+
+            pub fn with_millis(timestamp_millis: i64) -> Result<Self> {
+                let secs = timestamp_millis.div_euclid(1_000);
+                let nsecs = timestamp_millis.rem_euclid(1_000) * 1_000_000;
+                Self::with_secs_nsecs(secs, nsecs as u32)
+            }
+
+            pub fn with_micros(timestamp_micros: i64) -> Result<Self> {
+                let secs = timestamp_micros.div_euclid(1_000_000);
+                let nsecs = timestamp_micros.rem_euclid(1_000_000) * 1000;
+                Self::with_secs_nsecs(secs, nsecs as u32)
+            }
+
+            pub fn from_timestamp_uncheck(secs: i64, nsecs: u32) -> Self {
+                Self::new(DateTime::from_timestamp(secs, nsecs).unwrap().naive_utc())
+            }
+
+            /// Truncate the timestamp to the precision of microseconds.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_micros().to_string(),
+            ///     "2001-05-16 20:38:40.123456"
+            /// );
+            /// ```
+            pub fn truncate_micros(self) -> Self {
+                Self::new(
+                    self.0
+                        .with_nanosecond(self.0.nanosecond() / 1000 * 1000)
+                        .unwrap(),
+                )
+            }
+
+            /// Truncate the timestamp to the precision of milliseconds.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_millis().to_string(),
+            ///     "2001-05-16 20:38:40.123"
+            /// );
+            /// ```
+            pub fn truncate_millis(self) -> Self {
+                Self::new(
+                    self.0
+                        .with_nanosecond(self.0.nanosecond() / 1_000_000 * 1_000_000)
+                        .unwrap(),
+                )
+            }
+
+            /// Truncate the timestamp to the precision of seconds.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_second().to_string(),
+            ///     "2001-05-16 20:38:40"
+            /// );
+            /// ```
+            pub fn truncate_second(self) -> Self {
+                Self::new(self.0.with_nanosecond(0).unwrap())
+            }
+
+            /// Truncate the timestamp to the precision of minutes.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_minute().to_string(),
+            ///     "2001-05-16 20:38:00"
+            /// );
+            /// ```
+            pub fn truncate_minute(self) -> Self {
+                Self::new(
+                    Date::new(self.0.date()).0.and_time(
+                        Time::from_hms_nano_uncheck(self.0.hour(), self.0.minute(), 0, 0).0,
+                    ),
+                )
+            }
+
+            /// Truncate the timestamp to the precision of hours.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_hour().to_string(),
+            ///     "2001-05-16 20:00:00"
+            /// );
+            /// ```
+            pub fn truncate_hour(self) -> Self {
+                Self::new(
+                    Date::new(self.0.date())
+                        .0
+                        .and_time(Time::from_hms_nano_uncheck(self.0.hour(), 0, 0, 0).0),
+                )
+            }
+
+            /// Truncate the timestamp to the precision of days.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_day().to_string(),
+            ///     "2001-05-16 00:00:00"
+            /// );
+            /// ```
+            pub fn truncate_day(self) -> Self {
+                Date::new(self.0.date()).into()
+            }
+
+            /// Truncate the timestamp to the precision of weeks.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_week().to_string(),
+            ///     "2001-05-14 00:00:00"
+            /// );
+            /// ```
+            pub fn truncate_week(self) -> Self {
+                Date::new(self.0.date().week(Weekday::Mon).first_day()).into()
+            }
+
+            /// Truncate the timestamp to the precision of months.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_month().to_string(),
+            ///     "2001-05-01 00:00:00"
+            /// );
+            /// ```
+            pub fn truncate_month(self) -> Self {
+                Date::new(self.0.date().with_day(1).unwrap()).into()
+            }
+
+            /// Truncate the timestamp to the precision of quarters.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_quarter().to_string(),
+            ///     "2001-04-01 00:00:00"
+            /// );
+            /// ```
+            pub fn truncate_quarter(self) -> Self {
+                Date::from_ymd_uncheck(self.0.year(), self.0.month0() / 3 * 3 + 1, 1).into()
+            }
+
+            /// Truncate the timestamp to the precision of years.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_year().to_string(),
+            ///     "2001-01-01 00:00:00"
+            /// );
+            /// ```
+            pub fn truncate_year(self) -> Self {
+                Date::from_ymd_uncheck(self.0.year(), 1, 1).into()
+            }
+
+            /// Truncate the timestamp to the precision of decades.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "2001-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_decade().to_string(),
+            ///     "2000-01-01 00:00:00"
+            /// );
+            /// ```
+            pub fn truncate_decade(self) -> Self {
+                Date::from_ymd_uncheck(self.0.year() / 10 * 10, 1, 1).into()
+            }
+
+            /// Truncate the timestamp to the precision of centuries.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "3202-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_century().to_string(),
+            ///     "3201-01-01 00:00:00"
+            /// );
+            /// ```
+            pub fn truncate_century(self) -> Self {
+                Date::from_ymd_uncheck((self.0.year() - 1) / 100 * 100 + 1, 1, 1).into()
+            }
+
+            /// Truncate the timestamp to the precision of millenniums.
+            ///
+            /// # Example
+            /// ```
+            /// # use risingwave_common::types::Timestamp;
+            /// let ts = "3202-05-16T20:38:40.123456789".parse().unwrap();
+            /// assert_eq!(
+            ///     Timestamp::new(ts).truncate_millennium().to_string(),
+            ///     "3001-01-01 00:00:00"
+            /// );
+            /// ```
+            pub fn truncate_millennium(self) -> Self {
+                Date::from_ymd_uncheck((self.0.year() - 1) / 1000 * 1000 + 1, 1, 1).into()
+            }
+        }
+    };
+}
+impl_timestamp!(Timestamp);
+impl_timestamp!(TimestampNanosecond);
+
+impl From<Timestamp> for TimestampNanosecond {
+    fn from(ts: Timestamp) -> Self {
+        TimestampNanosecond::new(ts.0)
+    }
+}
+
+impl From<TimestampNanosecond> for Timestamp {
+    fn from(ts: TimestampNanosecond) -> Self {
+        let ts = ts.truncate_micros();
+        Timestamp::new(ts.0)
+    }
+}
+
+impl TimestampNanosecond {
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<TimestampNanosecond> {
+        let secs = cur
+            .read_i64::<BigEndian>()
+            .context("failed to read i64 from TimestampNanosecond buffer")?;
+        let nsecs = cur
+            .read_u32::<BigEndian>()
+            .context("failed to read u32 from TimestampNanosecond buffer")?;
+        Ok(TimestampNanosecond::with_secs_nsecs(secs, nsecs)?)
+    }
+
+    pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        let timestamp_size = output
+            .write(&(self.0.and_utc().timestamp()).to_be_bytes())
+            .map_err(Into::<ArrayError>::into)?;
+        let timestamp_subsec_nanos_size = output
+            .write(&(self.0.and_utc().timestamp_subsec_nanos()).to_be_bytes())
+            .map_err(Into::<ArrayError>::into)?;
+        Ok(timestamp_subsec_nanos_size + timestamp_size)
+    }
+
+    pub fn get_timestamp_nanos(&self) -> i64 {
+        self.0.and_utc().timestamp_nanos_opt().unwrap()
+    }
+}
+
+impl Timestamp {
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
+        let micros = cur
+            .read_i64::<BigEndian>()
+            .context("failed to read i64 from Timestamp buffer")?;
+        Ok(Timestamp::with_micros(micros)?)
+    }
+
+    pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output
+            .write(&(self.0.and_utc().timestamp_micros()).to_be_bytes())
+            .map_err(Into::into)
+    }
+
+    pub fn get_timestamp_nanos(&self) -> i64 {
+        self.0.and_utc().timestamp_nanos_opt().unwrap()
     }
 }
 

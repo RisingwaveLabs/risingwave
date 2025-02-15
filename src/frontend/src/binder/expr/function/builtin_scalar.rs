@@ -223,6 +223,7 @@ impl Binder {
                 ("make_date", raw_call(ExprType::MakeDate)),
                 ("make_time", raw_call(ExprType::MakeTime)),
                 ("make_timestamp", raw_call(ExprType::MakeTimestamp)),
+                ("make_timestamp_ns", raw_call(ExprType::MakeTimestampNs)),
                 ("make_timestamptz", raw_call(ExprType::MakeTimestamptz)),
                 ("timezone", rewrite(ExprType::AtTimeZone, |mut inputs|{
                     if inputs.len() == 2 {
