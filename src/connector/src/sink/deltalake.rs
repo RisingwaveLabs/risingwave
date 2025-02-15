@@ -33,7 +33,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -260,10 +260,8 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
         DataType::Struct(rw_struct) => {
             if let DeltaLakeDataType::Struct(dl_struct) = dl_data_type {
                 let mut result = true;
-                for ((rw_name, rw_type), dl_field) in rw_struct
-                    .names()
-                    .zip_eq_fast(rw_struct.types())
-                    .zip_eq_debug(dl_struct.fields())
+                for ((rw_name, rw_type), dl_field) in
+                    rw_struct.iter().zip_eq_debug(dl_struct.fields())
                 {
                     result = check_field_type(rw_type, dl_field.data_type())?
                         && result

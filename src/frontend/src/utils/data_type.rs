@@ -41,8 +41,6 @@ impl DataType {
                 let fields = fields
                     .iter()
                     .map(|(name, ty)| StructField {
-                        // FIXME: If the name is empty, this will give unparsable results.
-                        //        We should probably follow Postgres and generate field names.
                         name: name.into(),
                         data_type: ty.to_ast(),
                     })

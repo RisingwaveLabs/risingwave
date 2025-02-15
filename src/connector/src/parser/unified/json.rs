@@ -25,7 +25,6 @@ use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
     ToOwnedDatum,
 };
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::utils::scaled_bigint_to_rust_decimal;
 use simd_json::base::ValueAsObject;
 use simd_json::prelude::{
@@ -532,10 +531,7 @@ impl JsonParseOptions {
                 // Collecting into a Result<Vec<_>> doesn't reserve the capacity in advance, so we `Vec::with_capacity` instead.
                 // https://github.com/rust-lang/rust/issues/48994
                 let mut fields = Vec::with_capacity(struct_type_info.len());
-                for (field_name, field_type) in struct_type_info
-                    .names()
-                    .zip_eq_fast(struct_type_info.types())
-                {
+                for (field_name, field_type) in struct_type_info.iter() {
                     let field_value = json_object_get_case_insensitive(value, field_name)
                             .unwrap_or_else(|| {
                                 let error = AccessError::Undefined {

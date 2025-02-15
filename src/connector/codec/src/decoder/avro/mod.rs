@@ -25,7 +25,6 @@ use risingwave_common::types::{
     DataType, Date, DatumCow, Interval, JsonbVal, MapValue, ScalarImpl, Time, Timestamp,
     Timestamptz, ToOwnedDatum,
 };
-use risingwave_common::util::iter_util::ZipEqFast;
 
 pub use self::schema::{avro_schema_to_column_descs, MapHandling, ResolvedAvroSchema};
 use super::utils::scaled_bigint_to_rust_decimal;
@@ -263,8 +262,7 @@ impl<'a> AvroParseOptionsInner<'a> {
                     return Err(create_error());
                 };
                 struct_type_info
-                    .names()
-                    .zip_eq_fast(struct_type_info.types())
+                    .iter()
                     .map(|(field_name, field_type)| {
                         if let Some(idx) = record_schema.lookup.get(field_name) {
                             let value = &descs[*idx].1;
