@@ -16,7 +16,7 @@ bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
 jsonwebtoken = "9"
-openssl = "0.10.66"
+openssl = "0.10.70"
 panic-message = "0.3"
 parking_lot = { workspace = true }
 peekable = { version = "0.2", features = ["tokio"] }
