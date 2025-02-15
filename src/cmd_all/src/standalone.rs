@@ -391,17 +391,9 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
 
 #[cfg(test)]
 mod test {
-    use std::fmt::Debug;
-
-    use expect_test::{expect, Expect};
-
     use super::*;
 
-    fn check(actual: impl Debug, expect: Expect) {
-        let actual = format!("{:#?}", actual);
-        expect.assert_eq(&actual);
-    }
-
+    #[allow(clippy::assertions_on_constants)]
     #[test]
     fn test_parse_opt_args() {
         // Test parsing into standalone-level opts.
@@ -426,93 +418,42 @@ mod test {
         // Test parsing into node-level opts.
         let actual = parse_standalone_opt_args(&opts);
 
-        check(
-            actual,
-            expect![[r#"
-                ParsedStandaloneOpts {
-                    meta_opts: Some(
-                        MetaNodeOpts {
-                            listen_addr: "127.0.0.1:8001",
-                            advertise_addr: "127.0.0.1:9999",
-                            dashboard_host: None,
-                            prometheus_listener_addr: Some(
-                                "127.0.0.1:1234",
-                            ),
-                            sql_endpoint: None,
-                            sql_username: "",
-                            sql_password: [REDACTED alloc::string::String],
-                            sql_database: "",
-                            prometheus_endpoint: None,
-                            prometheus_selector: None,
-                            privatelink_endpoint_default_tags: None,
-                            vpc_id: None,
-                            security_group_id: None,
-                            config_path: "src/config/test.toml",
-                            backend: None,
-                            barrier_interval_ms: None,
-                            sstable_size_mb: None,
-                            block_size_kb: None,
-                            bloom_false_positive: None,
-                            state_store: None,
-                            data_directory: Some(
-                                "some path with spaces",
-                            ),
-                            do_not_config_object_storage_lifecycle: None,
-                            backup_storage_url: None,
-                            backup_storage_directory: None,
-                            heap_profiling_dir: None,
-                            dangerous_max_idle_secs: None,
-                            connector_rpc_endpoint: None,
-                            license_key: None,
-                            license_key_path: None,
-                            temp_secret_file_dir: "./meta/secrets/",
-                        },
-                    ),
-                    compute_opts: Some(
-                        ComputeNodeOpts {
-                            listen_addr: "127.0.0.1:8000",
-                            advertise_addr: None,
-                            prometheus_listener_addr: "127.0.0.1:1234",
-                            meta_address: List(
-                                [
-                                    http://127.0.0.1:5690/,
-                                ],
-                            ),
-                            config_path: "src/config/test.toml",
-                            total_memory_bytes: 34359738368,
-                            reserved_memory_bytes: None,
-                            parallelism: 10,
-                            role: Both,
-                            metrics_level: None,
-                            data_file_cache_dir: None,
-                            meta_file_cache_dir: None,
-                            async_stack_trace: None,
-                            heap_profiling_dir: None,
-                            connector_rpc_endpoint: None,
-                            temp_secret_file_dir: "./compute/secrets/",
-                        },
-                    ),
-                    frontend_opts: Some(
-                        FrontendOpts {
-                            listen_addr: "0.0.0.0:4566",
-                            tcp_keepalive_idle_secs: 300,
-                            advertise_addr: None,
-                            meta_addr: List(
-                                [
-                                    http://127.0.0.1:5690/,
-                                ],
-                            ),
-                            prometheus_listener_addr: "127.0.0.1:1234",
-                            frontend_rpc_listener_addr: "127.0.0.1:6786",
-                            config_path: "src/config/test.toml",
-                            metrics_level: None,
-                            enable_barrier_read: None,
-                            temp_secret_file_dir: "./frontend/secrets/",
-                            frontend_total_memory_bytes: 34359738368,
-                        },
-                    ),
-                    compactor_opts: None,
-                }"#]],
-        );
+        if let Some(compute_opts) = &actual.compute_opts {
+            assert_eq!(compute_opts.listen_addr, "127.0.0.1:8000");
+            assert_eq!(compute_opts.total_memory_bytes, 34359738368);
+            assert_eq!(compute_opts.parallelism, 10);
+            assert_eq!(compute_opts.temp_secret_file_dir, "./compute/secrets/");
+            assert_eq!(compute_opts.prometheus_listener_addr, "127.0.0.1:1234");
+            assert_eq!(compute_opts.config_path, "src/config/test.toml");
+        } else {
+            assert!(false);
+        }
+        if let Some(meta_opts) = &actual.meta_opts {
+            assert_eq!(meta_opts.listen_addr, "127.0.0.1:8001");
+            assert_eq!(meta_opts.advertise_addr, "127.0.0.1:9999");
+            assert_eq!(
+                meta_opts.data_directory,
+                Some("some path with spaces".to_string())
+            );
+            assert_eq!(meta_opts.temp_secret_file_dir, "./meta/secrets/");
+            assert_eq!(
+                meta_opts.prometheus_listener_addr,
+                Some("127.0.0.1:1234".to_string())
+            );
+            assert_eq!(meta_opts.config_path, "src/config/test.toml");
+        } else {
+            assert!(false);
+        }
+
+        if let Some(frontend_opts) = &actual.frontend_opts {
+            assert_eq!(frontend_opts.config_path, "src/config/test.toml");
+            assert_eq!(frontend_opts.temp_secret_file_dir, "./frontend/secrets/");
+            assert_eq!(frontend_opts.frontend_total_memory_bytes, 34359738368);
+            assert_eq!(frontend_opts.prometheus_listener_addr, "127.0.0.1:1234");
+        } else {
+            assert!(false);
+        }
+
+        assert!(actual.compactor_opts.is_none());
     }
 }

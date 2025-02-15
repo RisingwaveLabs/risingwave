@@ -162,7 +162,7 @@ pub struct FrontendOpts {
     )]
     pub temp_secret_file_dir: String,
 
-    /// Total available memory for the frontend node in bytes. Used by both computing and storage.
+    /// Total available memory for the frontend node in bytes. Used for batch computing.
     #[clap(long, env = "RW_FRONTEND_TOTAL_MEMORY_BYTES", default_value_t = default_frontend_total_memory_bytes())]
     pub frontend_total_memory_bytes: usize,
 }

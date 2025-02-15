@@ -85,10 +85,10 @@ pub struct LruWatermarkController {
 
 impl LruWatermarkController {
     pub fn new(config: &MemoryManagerConfig) -> Self {
-        let threshold_stable = (config.total_memory as f64 * config.threshold_stable) as usize;
-        let threshold_graceful = (config.total_memory as f64 * config.threshold_graceful) as usize;
+        let threshold_stable = (config.target_memory as f64 * config.threshold_stable) as usize;
+        let threshold_graceful = (config.target_memory as f64 * config.threshold_graceful) as usize;
         let threshold_aggressive =
-            (config.total_memory as f64 * config.threshold_aggressive) as usize;
+            (config.target_memory as f64 * config.threshold_aggressive) as usize;
 
         Self {
             metrics: config.metrics.clone(),

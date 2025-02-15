@@ -21,22 +21,25 @@ services:
                     --prometheus-listener-addr 0.0.0.0:1250 \
                     --advertise-addr 0.0.0.0:5688 \
                     --async-stack-trace verbose \
-                    #--parallelism 4 \
-                    #--total-memory-bytes 8589934592 \
+                    --parallelism 8 \
+                    --total-memory-bytes 21474836480 \
                     --role both \
-                    --meta-address http://0.0.0.0:5690\" \
+                    --meta-address http://0.0.0.0:5690 \
+                    --memory-manager-target-bytes 22333829939 \" \
                  --frontend-opts=\" \
                    --config-path /risingwave.toml \
                    --listen-addr 0.0.0.0:4566 \
                    --advertise-addr 0.0.0.0:4566 \
                    --prometheus-listener-addr 0.0.0.0:1250 \
                    --health-check-listener-addr 0.0.0.0:6786 \
-                   --meta-addr http://0.0.0.0:5690\" \
+                   --meta-addr http://0.0.0.0:5690 \
+                   --frontend-total-memory-bytes=4294967296\" \
                  --compactor-opts=\" \
                    --listen-addr 0.0.0.0:6660 \
                    --prometheus-listener-addr 0.0.0.0:1250 \
                    --advertise-addr 0.0.0.0:6660 \
-                   --meta-address http://0.0.0.0:5690\""
+                   --meta-address http://0.0.0.0:5690 \
+                   --compactor-total-memory-bytes=4294967296\""
     expose:
       - "6660"
       - "4566"

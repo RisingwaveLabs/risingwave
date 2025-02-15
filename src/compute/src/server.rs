@@ -288,15 +288,14 @@ pub async fn compute_node_serve(
         batch_mem_limit(compute_memory_bytes, opts.role.for_serving()),
     ));
 
-    // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
-    // `total_compute_memory_bytes` for memory control. This is just a workaround for some
-    // memory control issues and should be modified as soon as we figure out a better solution.
-    //
-    // Related issues:
-    // - https://github.com/risingwavelabs/risingwave/issues/8696
-    // - https://github.com/risingwavelabs/risingwave/issues/8822
+    let target_memory = if let Some(v) = opts.memory_manager_target_bytes {
+        v
+    } else {
+        compute_memory_bytes + storage_memory_bytes
+    };
+
     let memory_mgr = MemoryManager::new(MemoryManagerConfig {
-        total_memory: compute_memory_bytes + storage_memory_bytes,
+        target_memory,
         threshold_aggressive: config
             .streaming
             .developer
@@ -546,8 +545,7 @@ fn print_memory_config(
     reserved_memory_bytes: usize,
 ) {
     let memory_config = format!(
-        "\n\
-        Memory outline:\n\
+        "Memory outline:\n\
         > total_memory: {}\n\
         >     storage_memory: {}\n\
         >         block_cache_capacity: {}\n\

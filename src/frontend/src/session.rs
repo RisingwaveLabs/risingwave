@@ -62,6 +62,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::cluster_limit;
 use risingwave_common::util::cluster_limit::ActorCountPerParallelism;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
@@ -450,9 +451,16 @@ impl FrontendEnv {
         // Run a background heap profiler
         heap_profiler.start();
 
-        let mem_context = risingwave_common::memory::MemoryContext::root(
+        let batch_memory_limit = total_memory_bytes as f64 * FRONTEND_BATCH_MEMORY_PROPORTION;
+        let mem_context = MemoryContext::root(
             frontend_metrics.batch_total_mem.clone(),
-            (total_memory_bytes as f64 * FRONTEND_BATCH_MEMORY_PROPORTION) as u64,
+            batch_memory_limit as u64,
+        );
+
+        info!(
+            "Frontend  total_memory: {} batch_memory: {}",
+            convert(total_memory_bytes as _),
+            convert(batch_memory_limit as _),
         );
 
         Ok((
