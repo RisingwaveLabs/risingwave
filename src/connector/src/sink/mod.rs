@@ -785,6 +785,8 @@ pub enum SinkError {
     ),
     #[error("Encode error: {0}")]
     Encode(String),
+    #[error("Avro error: {0}")]
+    Avro(#[from] apache_avro::Error),
     #[error("Iceberg error: {0}")]
     Iceberg(
         #[source]
