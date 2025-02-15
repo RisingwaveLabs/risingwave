@@ -84,6 +84,19 @@ impl<Src: OpendalSource> OpendalReader<Src> {
 
             let chunk_stream;
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
+                let actor_id = source_ctx.actor_id.to_string();
+                let fragment_id = source_ctx.fragment_id.to_string();
+                let source_id = source_ctx.source_id.to_string();
+                let source_name = source_ctx.source_name.clone();
+                let parquet_source_skip_row_count_metrics: risingwave_common::metrics::LabelGuardedMetric<prometheus::core::GenericCounter<prometheus::core::AtomicU64>, 5> = self.source_ctx.metrics
+                .parquet_source_skip_row_count
+                .with_guarded_label_values(&[
+                    &actor_id,
+                    &source_id,
+                    split.id().as_ref(),
+                    &source_name,
+                    &fragment_id,
+                ]);
                 chunk_stream = read_parquet_file(
                     self.connector.op.clone(),
                     object_name,
@@ -91,6 +104,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     Some(self.parser_config.common.rw_columns.clone()),
                     self.source_ctx.source_ctrl_opts.chunk_size,
                     split.offset,
+                    Some(parquet_source_skip_row_count_metrics),
                 )
                 .await?;
             } else {
@@ -158,7 +172,10 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         };
 
         let mut offset = start_offset;
-        let partition_input_bytes_metrics = source_ctx
+        let partition_input_bytes_metrics: risingwave_common::metrics::LabelGuardedMetric<
+            prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
+            5,
+        > = source_ctx
             .metrics
             .partition_input_bytes
             .with_guarded_label_values(&[

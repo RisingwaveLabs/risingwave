@@ -92,7 +92,7 @@ impl AzblobFileScanExecutor {
                 bucket.clone(),
             )?;
             let chunk_stream =
-                read_parquet_file(op, file_name, None, None, self.batch_size, 0).await?;
+                read_parquet_file(op, file_name, None, None, self.batch_size, 0, None).await?;
             #[for_await]
             for stream_chunk in chunk_stream {
                 let stream_chunk = stream_chunk?;

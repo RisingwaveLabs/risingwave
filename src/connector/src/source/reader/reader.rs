@@ -198,13 +198,12 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(
     loop {
         let matcher = lister.get_matcher();
         let mut object_metadata_iter = lister.list().await?;
-
         while let Some(list_res) = object_metadata_iter.next().await {
             match list_res {
                 Ok(res) => {
                     if matcher
                         .as_ref()
-                        .map(|m| m.matches(&res.name))
+                        .map(|m| m.matches(&res.name) || m.to_string() == res.name)
                         .unwrap_or(true)
                     {
                         yield res

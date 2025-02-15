@@ -70,10 +70,13 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     pub async fn list(&self) -> ConnectorResult<ObjectMetadataIter> {
         let prefix = self.prefix.as_deref().unwrap_or("/");
-
+        let list_prefix = match prefix.ends_with("/") {
+            true => prefix,
+            false => "/",
+        };
         let object_lister = self
             .op
-            .lister_with(prefix)
+            .lister_with(list_prefix)
             .recursive(true)
             .metakey(Metakey::ContentLength | Metakey::LastModified)
             .await?;

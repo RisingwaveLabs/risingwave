@@ -80,7 +80,7 @@ impl GcsFileScanExecutor {
             let (bucket, file_name) = extract_bucket_and_file_name(&file, &FileScanBackend::Gcs)?;
             let op = new_gcs_operator(self.gcs_credential.clone(), bucket.clone())?;
             let chunk_stream =
-                read_parquet_file(op, file_name, None, None, self.batch_size, 0).await?;
+                read_parquet_file(op, file_name, None, None, self.batch_size, 0, None).await?;
             #[for_await]
             for stream_chunk in chunk_stream {
                 let stream_chunk = stream_chunk?;

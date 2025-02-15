@@ -57,12 +57,21 @@ impl ParquetParser {
         record_batch_stream: parquet::arrow::async_reader::ParquetRecordBatchStream<
             tokio_util::compat::Compat<opendal::FuturesAsyncReader>,
         >,
+        parquet_source_skip_row_count_metrics: Option<
+            risingwave_common::metrics::LabelGuardedMetric<
+                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
+                5,
+            >,
+        >,
     ) {
         #[for_await]
         for record_batch in record_batch_stream {
             let record_batch: RecordBatch = record_batch?;
             // Convert each record batch into a stream chunk according to user defined schema.
-            let chunk: StreamChunk = self.convert_record_batch_to_stream_chunk(record_batch)?;
+            let chunk: StreamChunk = self.convert_record_batch_to_stream_chunk(
+                record_batch,
+                parquet_source_skip_row_count_metrics.clone(),
+            )?;
 
             yield chunk;
         }
@@ -95,10 +104,17 @@ impl ParquetParser {
     fn convert_record_batch_to_stream_chunk(
         &mut self,
         record_batch: RecordBatch,
+        parquet_source_skip_row_count_metrics: Option<
+            risingwave_common::metrics::LabelGuardedMetric<
+                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
+                5,
+            >,
+        >,
     ) -> Result<StreamChunk, crate::error::ConnectorError> {
         const MAX_HIDDEN_COLUMN_NUMS: usize = 3;
         let column_size = self.rw_columns.len();
         let mut chunk_columns = Vec::with_capacity(self.rw_columns.len() + MAX_HIDDEN_COLUMN_NUMS);
+
         for source_column in self.rw_columns.clone() {
             match source_column.column_type {
                 crate::source::SourceColumnType::Normal => {
@@ -125,6 +141,10 @@ impl ParquetParser {
                                 // For columns defined in the source schema but not present in the Parquet file, null values are filled in.
                                 let mut array_builder =
                                     ArrayBuilderImpl::with_type(column_size, rw_data_type.clone());
+                                if let Some(metrics) = parquet_source_skip_row_count_metrics.clone()
+                                {
+                                    metrics.inc_by(record_batch.num_rows() as u64);
+                                }
 
                                 array_builder.append_n_null(record_batch.num_rows());
                                 let res = array_builder.finish();
