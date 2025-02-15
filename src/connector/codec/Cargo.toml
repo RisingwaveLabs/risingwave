@@ -24,6 +24,7 @@ prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-reflect = { version = "0.14", features = ["serde"] }
 prost-types = "0.13"
 protox = "0.7"
+reqwest = { version = "0.12.2", features = ["json"] }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = "1"
@@ -32,6 +33,7 @@ thiserror = "1"
 thiserror-ext = { workspace = true }
 time = "0.3.30"
 tracing = "0.1"
+url = "2"
 
 [dev-dependencies]
 expect-test = "1"

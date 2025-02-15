@@ -1,0 +1,7 @@
+{
+    "definitions": {
+        "idType": {
+            "type": "string"
+        }
+    }
+}

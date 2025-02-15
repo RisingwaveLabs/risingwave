@@ -37,6 +37,7 @@
 //! Because the expected data type for data mapping comes from the schema mapping.
 
 mod avro;
+mod json;
 mod protobuf;
 
 pub mod utils;
