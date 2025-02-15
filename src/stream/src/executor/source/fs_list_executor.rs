@@ -44,7 +44,6 @@ pub struct FsListExecutor<S: StateStore> {
     system_params: SystemParamsReaderRef,
 
     /// Rate limit in rows/s.
-    #[expect(dead_code)]
     rate_limit_rps: Option<u32>,
 }
 
@@ -153,6 +152,19 @@ impl<S: StateStore> FsListExecutor<S> {
                                 match mutation {
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
+                                    Mutation::Throttle(actor_to_apply) => {
+                                        if let Some(new_rate_limit) =
+                                            actor_to_apply.get(&self.actor_ctx.id)
+                                            && *new_rate_limit != self.rate_limit_rps
+                                        {
+                                            tracing::info!(
+                                                "updating rate limit from {:?} to {:?}",
+                                                self.rate_limit_rps,
+                                                *new_rate_limit
+                                            );
+                                            self.rate_limit_rps = *new_rate_limit;
+                                        }
+                                    }
                                     _ => (),
                                 }
                             }
