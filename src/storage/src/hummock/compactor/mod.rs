@@ -17,11 +17,7 @@ mod compaction_filter;
 pub mod compaction_utils;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
 use risingwave_pb::compactor::{dispatch_compaction_task_request, DispatchCompactionTaskRequest};
-use risingwave_pb::hummock::report_compaction_task_request::{
-    Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
-    ReportTask as ReportSharedTask,
-};
-use risingwave_pb::hummock::PbCompactTask;
+use risingwave_pb::hummock::report_compaction_task_request::Event as ReportCompactionTaskEvent;
 use risingwave_rpc_client::GrpcCompactorProxyClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -642,7 +638,7 @@ pub fn start_shared_compactor(
                     let progress_list = get_task_progress(task_progress.clone());
                     let report_compaction_task_request = ReportCompactionTaskRequest{
                         event: Some(ReportCompactionTaskEvent::HeartBeat(
-                            SharedHeartBeat {
+                            HeartBeat {
                                 progress: progress_list
                             }
                         )),
@@ -703,8 +699,14 @@ pub fn start_shared_compactor(
                                     .await;
                                     shutdown.lock().unwrap().remove(&task_id);
                                     let report_compaction_task_request = ReportCompactionTaskRequest {
-                                        event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
-                                            compact_task: Some(PbCompactTask::from(&compact_task)),
+                                        event: Some(ReportCompactionTaskEvent::ReportTask(ReportTask {
+                                            task_id: compact_task.task_id,
+                                            task_status: compact_task.task_status.into(),
+                                            sorted_output_ssts: compact_task
+                                                .sorted_output_ssts
+                                                .iter()
+                                                .map(|sst| sst.into())
+                                                .collect(),
                                             table_stats_change: to_prost_table_stats_map(table_stats),
                                             object_timestamps,
                                         })),

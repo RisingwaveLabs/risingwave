@@ -460,7 +460,7 @@ message SubscribeCompactionEventRequest {
     uint32 pull_task_count = 4;
   }
 
-  // ReportTask provides the compact task to report to the meta.
+  // ReportTask provides the compact result to report to the meta.
   message ReportTask {
     reserved 2;
     reserved "compact_task";
@@ -513,19 +513,9 @@ message SubscribeCompactionEventResponse {
 }
 
 message ReportCompactionTaskRequest {
-  // ReportTask provides the compact task to report to the meta.
-  message ReportTask {
-    CompactTask compact_task = 2;
-    map<uint32, TableStats> table_stats_change = 3;
-    map<uint64, uint64> object_timestamps = 4;
-  }
-  // HeartBeat provides the progress status of all tasks on the Compactor.
-  message HeartBeat {
-    repeated CompactTaskProgress progress = 2;
-  }
   oneof event {
-    ReportTask report_task = 1;
-    HeartBeat heart_beat = 2;
+    SubscribeCompactionEventRequest.ReportTask report_task = 1;
+    SubscribeCompactionEventRequest.HeartBeat heart_beat = 2;
   }
 }
 
