@@ -35,7 +35,8 @@ impl Debug for StructType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, educe::Educe)]
+#[educe(PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct StructTypeInner {
     /// Details about a struct type. There are 2 cases for a struct:
     /// 1. `field_names.len() == field_types.len()`: it represents a struct with named fields,
@@ -44,6 +45,10 @@ struct StructTypeInner {
     ///     e.g. `ROW(1, 2)`.
     field_names: Box<[String]>,
     field_types: Box<[DataType]>,
+    #[educe(PartialEq(ignore))]
+    #[educe(Ord(ignore))]
+    #[educe(Hash(ignore))]
+    unqualified_name: Option<Box<str>>,
 }
 
 impl StructType {
@@ -59,6 +64,7 @@ impl StructType {
         Self(Arc::new(StructTypeInner {
             field_types: field_types.into(),
             field_names: field_names.into(),
+            unqualified_name: None,
         }))
     }
 
@@ -68,6 +74,7 @@ impl StructType {
         Self(Arc::new(StructTypeInner {
             field_types: Box::new([]),
             field_names: Box::new([]),
+            unqualified_name: None,
         }))
     }
 
@@ -76,6 +83,7 @@ impl StructType {
         Self(Arc::new(StructTypeInner {
             field_types: fields.into(),
             field_names: Box::new([]),
+            unqualified_name: None,
         }))
     }
 
@@ -164,6 +172,7 @@ impl FromStr for StructType {
         Ok(Self(Arc::new(StructTypeInner {
             field_types: field_types.into(),
             field_names: field_names.into(),
+            unqualified_name: None,
         })))
     }
 }

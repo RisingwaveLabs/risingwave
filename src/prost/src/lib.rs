@@ -452,6 +452,7 @@ impl std::fmt::Debug for data::DataType {
             type_name,
             // currently all data types are nullable
             is_nullable: _,
+            unqualified_name,
         } = self;
 
         let type_name = data::data_type::TypeName::try_from(*type_name)
@@ -459,6 +460,9 @@ impl std::fmt::Debug for data::DataType {
             .unwrap_or("Unknown");
 
         let mut s = f.debug_struct(type_name);
+        if let Some(unqualified_name) = unqualified_name {
+            s.field("unqualified_name", unqualified_name);
+        }
         if self.precision != 0 {
             s.field("precision", precision);
         }

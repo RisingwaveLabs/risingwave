@@ -69,6 +69,10 @@ message DataType {
   repeated DataType field_type = 6;
   // Name of the fields if it is a struct type. For other types it will be empty.
   repeated string field_names = 7;
+  // Optional name of custom type.
+  // Informative-only and populated at best effort.
+  // NOT to be used for comparison or lookup.
+  optional string unqualified_name = 8;
 }
 
 message StructArrayData {
