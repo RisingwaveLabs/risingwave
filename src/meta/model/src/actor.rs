@@ -57,6 +57,7 @@ pub struct Model {
     pub status: ActorStatus,
     pub splits: Option<ConnectorSplits>,
     pub worker_id: WorkerId,
+    #[deprecated]
     pub upstream_actor_ids: ActorUpstreamActors,
     pub vnode_bitmap: Option<VnodeBitmap>,
     pub expr_context: ExprContext,

@@ -124,7 +124,6 @@ pub struct StreamJobFragments {
 
     /// The table fragments.
     pub fragments: BTreeMap<FragmentId, Fragment>,
-    pub actor_upstreams: BTreeMap<FragmentId, FragmentActorUpstreams>,
 
     /// The status of actors
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
@@ -207,11 +206,9 @@ pub type StreamJobActorsToCreate =
 impl StreamJobFragments {
     /// Create a new `TableFragments` with state of `Initial`, with other fields empty.
     pub fn for_test(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
-        let actor_upstreams = BTreeMap::new();
         Self::new(
             table_id,
             fragments,
-            actor_upstreams,
             &BTreeMap::new(),
             StreamContext::default(),
             TableParallelism::Adaptive,
@@ -224,7 +221,6 @@ impl StreamJobFragments {
     pub fn new(
         stream_job_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        actor_upstreams: BTreeMap<FragmentId, FragmentActorUpstreams>,
         actor_locations: &BTreeMap<ActorId, WorkerSlotId>,
         ctx: StreamContext,
         table_parallelism: TableParallelism,
@@ -247,7 +243,6 @@ impl StreamJobFragments {
             stream_job_id,
             state: State::Initial,
             fragments,
-            actor_upstreams,
             actor_status,
             actor_splits: HashMap::default(),
             ctx,
@@ -464,7 +459,7 @@ impl StreamJobFragments {
 
     /// Find the table job's `Union` fragment.
     /// Panics if not found.
-    pub fn union_fragment_for_table(&mut self) -> (&mut Fragment, &mut FragmentActorUpstreams) {
+    pub fn union_fragment_for_table(&mut self) -> &mut Fragment {
         let mut union_fragment_id = None;
         for (fragment_id, fragment) in &self.fragments {
             {
@@ -489,10 +484,8 @@ impl StreamJobFragments {
             .fragments
             .get_mut(&union_fragment_id)
             .unwrap_or_else(|| panic!("fragment {} not found", union_fragment_id));
-        (
-            union_fragment,
-            self.actor_upstreams.entry(union_fragment_id).or_default(),
-        )
+
+        union_fragment
     }
 
     /// Resolve dependent table
@@ -545,56 +538,42 @@ impl StreamJobFragments {
     }
 
     /// Returns the status of actors group by worker id.
-    pub fn active_actors(&self) -> Vec<StreamActorWithUpstreams> {
+    pub fn active_actors(&self) -> Vec<StreamActor> {
         let mut actors = vec![];
         for fragment in self.fragments.values() {
             for actor in &fragment.actors {
                 if self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32 {
                     continue;
                 }
-                actors.push((
-                    actor.clone(),
-                    self.actor_upstreams
-                        .get(&fragment.fragment_id)
-                        .and_then(|actor_upstreams| actor_upstreams.get(&actor.actor_id))
-                        .cloned()
-                        .unwrap_or_default(),
-                ));
+                actors.push(actor.clone());
             }
         }
         actors
     }
 
-    pub fn actors_to_create(&self) -> StreamJobActorsToCreate {
-        let mut actor_map: HashMap<_, HashMap<_, (_, Vec<_>)>> = HashMap::new();
-        self.fragments
-            .values()
-            .flat_map(|fragment| {
-                let actor_upstreams = self.actor_upstreams.get(&fragment.fragment_id);
+    pub fn actors_to_create(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            FragmentId,
+            &StreamNode,
+            impl Iterator<Item = (&StreamActor, WorkerId)> + '_,
+        ),
+    > + '_ {
+        self.fragments.values().map(move |fragment| {
+            (
+                fragment.fragment_id,
+                fragment.nodes.as_ref().unwrap(),
                 fragment.actors.iter().map(move |actor| {
-                    (
-                        actor,
-                        actor_upstreams
-                            .and_then(|actor_upstreams| actor_upstreams.get(&actor.actor_id)),
-                        fragment,
-                    )
-                })
-            })
-            .for_each(|(actor, actor_upstream, fragment)| {
-                let worker_id = self
-                    .actor_status
-                    .get(&actor.actor_id)
-                    .expect("should exist")
-                    .worker_id() as WorkerId;
-                actor_map
-                    .entry(worker_id)
-                    .or_default()
-                    .entry(fragment.fragment_id)
-                    .or_insert_with(|| (fragment.nodes.clone().unwrap(), vec![]))
-                    .1
-                    .push((actor.clone(), actor_upstream.cloned().unwrap_or_default()));
-            });
-        actor_map
+                    let worker_id = self
+                        .actor_status
+                        .get(&actor.actor_id)
+                        .expect("should exist")
+                        .worker_id() as WorkerId;
+                    (actor, worker_id)
+                }),
+            )
+        })
     }
 
     pub fn mv_table_id(&self) -> Option<u32> {

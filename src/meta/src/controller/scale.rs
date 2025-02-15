@@ -27,7 +27,7 @@ use risingwave_meta_model::prelude::{
 };
 use risingwave_meta_model::{
     actor, actor_dispatcher, fragment, sink, source, streaming_job, table, ActorId, ActorMapping,
-    ActorUpstreamActors, ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap,
+    ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap,
 };
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
@@ -496,7 +496,6 @@ impl CatalogController {
             pub fragment_id: FragmentId,
             pub status: ActorStatus,
             pub splits: Option<ConnectorSplits>,
-            pub upstream_actor_ids: ActorUpstreamActors,
             pub vnode_bitmap: Option<VnodeBitmap>,
         }
 
@@ -531,7 +530,6 @@ impl CatalogController {
             .await?;
 
         let mut discovered_upstream_fragments = HashMap::new();
-        let mut discovered_upstream_actors = HashMap::new();
 
         for (fragment_id, actor_ids) in &fragment_actors {
             crit_check_in_loop!(
@@ -706,21 +704,6 @@ impl CatalogController {
                         "ActorDispatcher {id} has downstream_actor_id {dispatcher_downstream_actor_id} which does not exist",
                     )
                 );
-
-                let actor_fragment_id = actor.fragment_id;
-
-                crit_check_in_loop!(
-                    flag,
-                    actor_map[dispatcher_downstream_actor_id].upstream_actor_ids.inner_ref().contains_key(&actor.fragment_id),
-                    format!(
-                        "ActorDispatcher {id} has downstream_actor_id {dispatcher_downstream_actor_id} which does not have fragment_id {actor_fragment_id} in upstream_actor_id",
-                    )
-                );
-
-                discovered_upstream_actors
-                    .entry(*dispatcher_downstream_actor_id)
-                    .or_insert(HashSet::new())
-                    .insert(actor.actor_id);
             }
 
             match dispatcher_type {
@@ -886,10 +869,7 @@ impl CatalogController {
         }
 
         for PartialActor {
-            actor_id,
-            status,
-            upstream_actor_ids,
-            ..
+            actor_id, status, ..
         } in actor_map.values()
         {
             crit_check_in_loop!(
@@ -897,25 +877,6 @@ impl CatalogController {
                 *status == ActorStatus::Running,
                 format!("Actor {actor_id} has status {status:?} which is not Running",)
             );
-
-            let discovered_upstream_actor_ids = discovered_upstream_actors
-                .get(actor_id)
-                .cloned()
-                .unwrap_or_default();
-
-            let upstream_actor_ids: HashSet<_> = upstream_actor_ids
-                .inner_ref()
-                .iter()
-                .flat_map(|(_, v)| v.iter().copied())
-                .collect();
-
-            crit_check_in_loop!(
-                flag,
-                discovered_upstream_actor_ids == upstream_actor_ids,
-                format!(
-                    "Actor {actor_id} has different upstream_actor_ids from discovered: {discovered_upstream_actor_ids:?} != actor upstream actor ids: {upstream_actor_ids:?}",
-                )
-            )
         }
 
         if flag {

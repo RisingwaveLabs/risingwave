@@ -37,11 +37,11 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    actor, connection, database, fragment, function, index, object, object_dependency, schema,
-    secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
-    ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
-    I32Array, IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkId, SourceId,
-    StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
+    connection, database, fragment, function, index, object, object_dependency, schema, secret,
+    sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
+    ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array, IndexId,
+    JobStatus, ObjectId, Property, SchemaId, SecretId, SinkId, SourceId, StreamNode,
+    StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;

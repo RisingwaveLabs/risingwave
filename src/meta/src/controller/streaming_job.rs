@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use anyhow::anyhow;
@@ -31,12 +31,7 @@ use risingwave_meta_model::prelude::{
     Source, StreamingJob as StreamingJobModel, Table,
 };
 use risingwave_meta_model::table::TableType;
-use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, fragment_relation, index, object, object_dependency, sink,
-    source, streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType,
-    DatabaseId, ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId,
-    SinkId, SourceId, StreamNode, StreamingParallelism, UserId,
-};
+use risingwave_meta_model::*;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbCreateType, PbTable};
@@ -1184,43 +1179,7 @@ impl CatalogController {
             .await?;
 
         // 2. update merges.
-        // 2.1 update downstream actor's upstream_actor_ids
-        for merge_update in merge_updates.values().flatten() {
-            assert!(merge_update.removed_upstream_actor_id.is_empty());
-            assert!(merge_update.new_upstream_fragment_id.is_some());
-            let (actor_id, mut upstream_actors) =
-                Actor::find_by_id(merge_update.actor_id as ActorId)
-                    .select_only()
-                    .columns([actor::Column::ActorId, actor::Column::UpstreamActorIds])
-                    .into_tuple::<(ActorId, ActorUpstreamActors)>()
-                    .one(txn)
-                    .await?
-                    .ok_or_else(|| {
-                        MetaError::catalog_id_not_found("actor", merge_update.actor_id)
-                    })?;
-
-            assert!(upstream_actors
-                .0
-                .remove(&(merge_update.upstream_fragment_id as FragmentId))
-                .is_some());
-            upstream_actors.0.insert(
-                merge_update.new_upstream_fragment_id.unwrap() as _,
-                merge_update
-                    .added_upstream_actor_id
-                    .iter()
-                    .map(|id| *id as _)
-                    .collect(),
-            );
-            actor::ActiveModel {
-                actor_id: Set(actor_id),
-                upstream_actor_ids: Set(upstream_actors),
-                ..Default::default()
-            }
-            .update(txn)
-            .await?;
-        }
-
-        // 2.2 update downstream fragment's Merge node, and upstream_fragment_id
+        // update downstream fragment's Merge node, and upstream_fragment_id
         for (fragment_id, merge_updates) in merge_updates {
             let (fragment_id, mut stream_node, mut upstream_fragment_id) =
                 Fragment::find_by_id(fragment_id as FragmentId)
@@ -1677,7 +1636,7 @@ impl CatalogController {
                 newly_created_actors,
                 upstream_fragment_dispatcher_ids,
                 upstream_dispatcher_mapping,
-                downstream_fragment_ids,
+                ..
             },
         ) in reschedules
         {
@@ -1692,36 +1651,18 @@ impl CatalogController {
 
             // add new actors
             for (
-                (
-                    PbStreamActor {
-                        actor_id,
-                        fragment_id,
-                        dispatcher,
-                        vnode_bitmap,
-                        expr_context,
-                        ..
-                    },
-                    node_actor_upstreams,
-                ),
+                PbStreamActor {
+                    actor_id,
+                    fragment_id,
+                    dispatcher,
+                    vnode_bitmap,
+                    expr_context,
+                    ..
+                },
                 actor_status,
             ) in newly_created_actors
             {
-                let mut actor_upstreams = BTreeMap::<FragmentId, BTreeSet<ActorId>>::new();
                 let mut new_actor_dispatchers = vec![];
-
-                for (fragment_id, upstream_actor_ids) in node_actor_upstreams {
-                    actor_upstreams
-                        .entry(fragment_id as FragmentId)
-                        .or_default()
-                        .extend(upstream_actor_ids.iter().map(|id| *id as ActorId));
-                }
-
-                let actor_upstreams: BTreeMap<FragmentId, Vec<ActorId>> = actor_upstreams
-                    .into_iter()
-                    .map(|(k, v)| (k, v.into_iter().collect()))
-                    .collect();
-
-                let actor_upstreams = ActorUpstreamActors(actor_upstreams);
 
                 let splits = actor_splits
                     .get(&actor_id)
@@ -1733,7 +1674,7 @@ impl CatalogController {
                     status: Set(ActorStatus::Running),
                     splits: Set(splits.map(|splits| (&PbConnectorSplits { splits }).into())),
                     worker_id: Set(actor_status.worker_id() as _),
-                    upstream_actor_ids: Set(actor_upstreams),
+                    upstream_actor_ids: Set(Default::default()),
                     vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
                     expr_context: Set(expr_context.as_ref().unwrap().into()),
                 })
@@ -1875,35 +1816,6 @@ impl CatalogController {
 
                     dispatcher.downstream_actor_ids = Set(new_downstream_actor_ids.into());
                     dispatcher.update(&txn).await?;
-                }
-            }
-
-            // second step, downstream fragment
-            for downstream_fragment_id in downstream_fragment_ids {
-                let actors = Actor::find()
-                    .filter(actor::Column::FragmentId.eq(downstream_fragment_id as FragmentId))
-                    .all(&txn)
-                    .await?;
-
-                for actor in actors {
-                    if new_created_actors.contains(&actor.actor_id) {
-                        continue;
-                    }
-
-                    let mut actor = actor.into_active_model();
-
-                    let mut new_upstream_actor_ids =
-                        actor.upstream_actor_ids.as_ref().inner_ref().clone();
-
-                    update_actors(
-                        new_upstream_actor_ids.get_mut(&fragment_id).unwrap(),
-                        &removed_actor_ids,
-                        &added_actor_ids,
-                    );
-
-                    actor.upstream_actor_ids = Set(new_upstream_actor_ids.into());
-
-                    actor.update(&txn).await?;
                 }
             }
         }

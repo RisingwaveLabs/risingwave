@@ -452,44 +452,6 @@ impl CatalogController {
                         .filter(fragment::Column::FragmentId.eq(fragment_id))
                         .exec(txn)
                         .await?;
-
-                    let actors: Vec<(ActorId, ActorUpstreamActors)> = Actor::find()
-                        .select_only()
-                        .columns(vec![
-                            actor::Column::ActorId,
-                            actor::Column::UpstreamActorIds,
-                        ])
-                        .filter(actor::Column::FragmentId.eq(fragment_id))
-                        .into_tuple()
-                        .all(txn)
-                        .await?;
-
-                    for (actor_id, upstream_actor_ids) in actors {
-                        let mut upstream_actor_ids = upstream_actor_ids.into_inner();
-
-                        let dirty_actor_upstreams = upstream_actor_ids
-                            .extract_if(|id, _| !all_fragment_ids.contains(id))
-                            .map(|(id, _)| id)
-                            .collect_vec();
-
-                        if !dirty_actor_upstreams.is_empty() {
-                            tracing::debug!(
-                                "cleaning dirty table sink fragment {:?} from downstream fragment {} actor {}",
-                                dirty_actor_upstreams,
-                                fragment_id,
-                                actor_id,
-                            );
-
-                            Actor::update_many()
-                                .col_expr(
-                                    actor::Column::UpstreamActorIds,
-                                    ActorUpstreamActors::from(upstream_actor_ids).into(),
-                                )
-                                .filter(actor::Column::ActorId.eq(actor_id))
-                                .exec(txn)
-                                .await?;
-                        }
-                    }
                 }
             }
         }

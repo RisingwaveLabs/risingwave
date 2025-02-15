@@ -50,7 +50,7 @@ use risingwave_pb::ddl_service::{
     TableJobType, WaitVersion,
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::PbFragment;
+use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
@@ -71,7 +71,7 @@ use crate::manager::{
     LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
     StreamingJobType, IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{FragmentActorUpstreams, StreamContext, StreamJobFragments, TableParallelism};
+use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
     create_source_worker, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
@@ -750,17 +750,31 @@ impl DdlController {
                 for actor in &fragment.actors {
                     visit_stream_node(node, |node| {
                         if let NodeBody::Merge(merge_node) = node {
-                            let fragment_actor_upstreams = stream_job_fragments
-                                .actor_upstreams
-                                .get(&fragment.fragment_id)
-                                .expect("should exist");
-                            let actor_upstreams = fragment_actor_upstreams
-                                .get(&actor.actor_id)
-                                .expect("should exist");
-                            let upstreams = actor_upstreams
-                                .get(&merge_node.upstream_fragment_id)
-                                .expect("should exist");
-                            assert!(!upstreams.is_empty(), "All the mergers for the union should have been fully assigned beforehand.");
+                            let upstream_fragment_id = merge_node.upstream_fragment_id;
+                            if let Some(external_upstream_fragment_dispatchers) =
+                                replace_table_ctx.dispatchers.get(&upstream_fragment_id)
+                            {
+                                let mut upstream_dispatchers_to_actor =
+                                    external_upstream_fragment_dispatchers
+                                        .values()
+                                        .flatten()
+                                        .filter(|dispatcher| {
+                                            dispatcher.downstream_actor_id.contains(&actor.actor_id)
+                                        });
+                                assert!(upstream_dispatchers_to_actor.next().is_some(), "All the mergers for the union should have been fully assigned beforehand.");
+                            } else {
+                                let mut upstream_dispatchers_to_actor = stream_job_fragments
+                                    .fragments
+                                    .get(&upstream_fragment_id)
+                                    .expect("should exist")
+                                    .actors
+                                    .iter()
+                                    .flat_map(|actor| actor.dispatcher.iter())
+                                    .filter(|dispatcher| {
+                                        dispatcher.downstream_actor_id.contains(&actor.actor_id)
+                                    });
+                                assert!(upstream_dispatchers_to_actor.next().is_some(), "All the mergers for the union should have been fully assigned beforehand.");
+                            }
                         }
                     });
                 }
@@ -775,18 +789,9 @@ impl DdlController {
         sink_fragment: &PbFragment,
         table: &Table,
         replace_table_ctx: &mut ReplaceStreamJobContext,
-        (union_fragment, union_fragment_actor_upstreams): (
-            &mut PbFragment,
-            &mut FragmentActorUpstreams,
-        ),
+        union_fragment: &mut Fragment,
         unique_identity: Option<&str>,
     ) {
-        let sink_actor_ids = sink_fragment
-            .actors
-            .iter()
-            .map(|a| a.actor_id)
-            .collect_vec();
-
         let downstream_actor_ids = union_fragment
             .actors
             .iter()
@@ -867,22 +872,6 @@ impl DdlController {
                                 if let Some(NodeBody::Merge(merge_node)) =
                                     &mut merge_stream_node.node_body
                                 {
-                                    assert!(union_fragment.actors.iter().all(|actor| {
-                                        union_fragment_actor_upstreams
-                                            .get(&actor.actor_id)
-                                            .and_then(|actor_upstream| {
-                                                actor_upstream.get(&merge_node.upstream_fragment_id)
-                                            })
-                                            .map(|upstream_actor_ids| {
-                                                upstream_actor_ids.is_empty()
-                                            })
-                                            .unwrap_or(true)
-                                    }),
-                                            "replace table plan for sink has set upstream. upstreams: {:?} actors: {:?}",
-                                            union_fragment_actor_upstreams,
-                                            union_fragment.actors
-                                    );
-
                                     {
                                         merge_stream_node.identity =
                                             format!("MergeExecutor(from sink {})", sink_id);
@@ -900,17 +889,6 @@ impl DdlController {
                                             fields: sink_fields.to_vec(),
                                         }
                                     };
-
-                                    for actor in &union_fragment.actors {
-                                        union_fragment_actor_upstreams
-                                            .entry(actor.actor_id)
-                                            .or_default()
-                                            .try_insert(
-                                                upstream_fragment_id,
-                                                HashSet::from_iter(sink_actor_ids.iter().cloned()),
-                                            )
-                                            .expect("checked non-exist");
-                                    }
 
                                     merge_stream_node.fields = sink_fields.to_vec();
 
@@ -1672,11 +1650,11 @@ impl DdlController {
 
         let ActorGraphBuildResult {
             graph,
-            actor_upstreams,
             building_locations,
             existing_locations,
             dispatchers,
             merge_updates,
+            ..
         } = actor_graph_builder.generate_graph(&self.env, &stream_job, expr_context)?;
         assert!(merge_updates.is_empty());
 
@@ -1694,7 +1672,6 @@ impl DdlController {
         let stream_job_fragments = StreamJobFragments::new(
             id.into(),
             graph,
-            actor_upstreams,
             &building_locations.actor_locations,
             stream_ctx.clone(),
             table_parallelism,
@@ -1888,11 +1865,11 @@ impl DdlController {
 
         let ActorGraphBuildResult {
             graph,
-            actor_upstreams,
             building_locations,
             existing_locations,
             dispatchers,
             merge_updates,
+            ..
         } = actor_graph_builder.generate_graph(&self.env, stream_job, expr_context)?;
 
         // general table & source does not have upstream job, so the dispatchers should be empty
@@ -1909,7 +1886,6 @@ impl DdlController {
         let stream_job_fragments = StreamJobFragments::new(
             (tmp_job_id as u32).into(),
             graph,
-            actor_upstreams,
             &building_locations.actor_locations,
             stream_ctx,
             old_fragments.assigned_parallelism,

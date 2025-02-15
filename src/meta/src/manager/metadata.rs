@@ -26,7 +26,7 @@ use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
-use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamScanType};
+use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamScanType, StreamActor};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Instant};
@@ -37,9 +37,7 @@ use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
-use crate::model::{
-    ActorId, ClusterId, FragmentId, StreamActorWithUpstreams, StreamJobFragments, SubscriptionId,
-};
+use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
@@ -561,11 +559,15 @@ impl MetadataManager {
 
     pub async fn get_running_actors_for_source_backfill(
         &self,
-        id: FragmentId,
+        source_backfill_fragment_id: FragmentId,
+        source_fragment_id: FragmentId,
     ) -> MetaResult<HashSet<(ActorId, ActorId)>> {
         let actor_ids = self
             .catalog_controller
-            .get_running_actors_for_source_backfill(id as _)
+            .get_running_actors_for_source_backfill(
+                source_backfill_fragment_id as _,
+                source_fragment_id as _,
+            )
             .await?;
         Ok(actor_ids
             .into_iter()
@@ -588,15 +590,13 @@ impl MetadataManager {
         Ok(table_fragments)
     }
 
-    pub async fn all_active_actors(
-        &self,
-    ) -> MetaResult<HashMap<ActorId, StreamActorWithUpstreams>> {
+    pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
         for (_, tf) in table_fragments {
             for actor in tf.active_actors() {
                 actor_maps
-                    .try_insert(actor.0.actor_id, actor)
+                    .try_insert(actor.actor_id, actor)
                     .expect("non duplicate");
             }
         }
