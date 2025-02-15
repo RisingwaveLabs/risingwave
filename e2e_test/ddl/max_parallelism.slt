@@ -1,5 +1,5 @@
 statement ok
-create view table_parallelism as select t.name, tf.parallelism, tf.max_parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;
+create view table_parallelism as select t.name, job.parallelism, job.max_parallelism from rw_tables t, rw_streaming_jobs job where t.id = job.id;
 
 #### BEGIN
 

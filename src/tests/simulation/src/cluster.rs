@@ -205,8 +205,8 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 2,
             per_session_queries: vec![
-                "create view if not exists table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;".into(),
-                "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
+                "create view if not exists table_parallelism as select t.name, job.parallelism from rw_tables t, rw_streaming_jobs job where t.id = job.id;".into(),
+                "create view if not exists mview_parallelism as select m.name, job.parallelism from rw_materialized_views m, rw_streaming_jobs job where m.id = job.id;".into(),
             ]
                 .into(),
             ..Default::default()
