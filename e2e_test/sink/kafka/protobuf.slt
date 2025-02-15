@@ -71,12 +71,13 @@ create table into_kafka (
   nested_message_field struct<id int, name varchar>,
   repeated_int_field int[],
   timestamp_field timestamptz,
+  enum_field varchar,
   oneof_int32 int);
 
 statement ok
 insert into into_kafka values
-  (true, 'Rising', 'a0', 3.5, 4.25, 22, 23, 24, null, 26, 27, row(1, ''), array[4, 0, 4], '2006-01-02 15:04:05-07:00', 42),
-  (false, 'Wave', 'ZDF', 1.5, null, 11, 12, 13, 14, 15, 16, row(4, 'foo'), null, null, null);
+  (true, 'Rising', 'a0', 3.5, 4.25, 22, 23, 24, null, 26, 27, row(1, ''), array[4, 0, 4], '2006-01-02 15:04:05-07:00', null, 42),
+  (false, 'Wave', 'ZDF', 1.5, null, 11, 12, 13, 14, 15, 16, row(4, 'foo'), null, null, 'OPTION2', null);
 
 statement ok
 flush;
@@ -163,10 +164,11 @@ select
   nested_message_field,
   repeated_int_field,
   timestamp_field,
+  enum_field,
   oneof_int32 from from_kafka order by string_field;
 ----
-t Rising \x6130   3.5 4.25 22 23 24  0 26 27 (1,"")  {4,0,4} (1136239445,0) 42
-f Wave   \x5a4446 1.5 0    11 12 13 14 15 16 (4,foo) {}               (0,0)  0
+t Rising \x6130   3.5 4.25 22 23 24  0 26 27 (1,"")  {4,0,4} (1136239445,0) DEFAULT 42
+f Wave   \x5a4446 1.5 0    11 12 13 14 15 16 (4,foo) {}               (0,0) OPTION2  0
 
 query T
 select field_a from from_kafka_csr_trivial order by 1;
