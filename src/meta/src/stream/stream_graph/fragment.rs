@@ -859,6 +859,18 @@ impl CompleteStreamFragmentGraph {
         downstream_ctx: Option<FragmentGraphDownstreamContext>,
         job_type: StreamingJobType,
     ) -> MetaResult<Self> {
+        for (from, h) in &graph.upstreams {
+            for (to, edge) in h {
+                println!("ups from {} to {} {:?}", from.as_global_id(), to.as_global_id(), edge);
+            }
+        }
+
+        for (from, h) in &graph.downstreams {
+            for (to, edge) in h {
+                println!("downs from {} to {} {:?}", from.as_global_id(), to.as_global_id(), edge);
+            }
+        }
+
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
         let mut existing_fragments = HashMap::new();

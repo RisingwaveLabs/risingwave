@@ -13,34 +13,40 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use futures::future::join_all;
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_meta_model::ObjectId;
+use risingwave_common::{bail, bail_not_implemented};
+use risingwave_meta_model::prelude::{Actor, Fragment};
+use risingwave_meta_model::{fragment, ObjectId};
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
-use risingwave_pb::stream_plan::Dispatcher;
+use risingwave_pb::stream_plan::{Dispatcher, PbStreamContext, PbStreamFragmentGraph};
+use sea_orm::{EntityTrait, TransactionTrait};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, Mutex};
 use tracing::Instrument;
 
 use super::{
-    JobParallelismTarget, JobReschedulePolicy, JobReschedulePostUpdates, JobRescheduleTarget,
-    JobResourceGroupTarget, Locations, RescheduleOptions, ScaleControllerRef,
+    ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, JobParallelismTarget,
+    JobReschedulePolicy, JobReschedulePostUpdates, JobRescheduleTarget, JobResourceGroupTarget,
+    Locations, RescheduleOptions, ScaleControllerRef, StreamFragmentGraph,
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
+use crate::controller::utils::get_actor_dispatchers;
 use crate::error::bail_invalid_parameter;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
-use crate::model::{ActorId, FragmentId, StreamJobFragments, TableParallelism};
+use crate::model::{ActorId, FragmentId, StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -275,7 +281,7 @@ impl GlobalStreamManager {
                 }
             }
         }
-        .in_current_span();
+            .in_current_span();
         tokio::spawn(fut);
 
         while let Some(state) = receiver.recv().await {
@@ -780,5 +786,191 @@ impl GlobalStreamManager {
             .inspect_err(|err| {
                 tracing::error!(error = ?err.as_report(), "failed to run drop command");
             });
+    }
+
+    pub async fn test(&self, table_id: u32, target: JobRescheduleTarget) -> MetaResult<()> {
+        let (fragments, relations) = self
+            .metadata_manager
+            .catalog_controller
+            .get_job_skeleton_by_id(table_id as _)
+            .await?;
+
+        self.metadata_manager.
+
+        //         env: &MetaSrvEnv,
+        //         proto: StreamFragmentGraphProto,
+        //         job: &StreamingJob,
+        let fragment_graph = StreamFragmentGraph::new(
+            &self.env,
+            PbStreamFragmentGraph {
+                fragments: Default::default(),
+                edges: vec![],
+                dependent_table_ids: vec![],
+                table_ids_cnt: 0,
+                ctx: None,
+                parallelism: None,
+                max_parallelism: 0,
+            },
+            &StreamingJob::Table(None),
+        );
+
+        let id = table_id;
+
+        // let expr_context = stream_ctx.to_expr_context();
+        //
+        let old_fragments = self
+            .metadata_manager
+            .get_job_fragments_by_id(&id.into())
+            .await?;
+        // let old_internal_table_ids = old_fragments.internal_table_ids();
+        // let old_internal_tables = self
+        //     .metadata_manager
+        //     .get_table_catalog_by_ids(old_internal_table_ids)
+        //     .await?;
+        //
+        // fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+
+        // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
+        // graph that contains all information needed for building the actor graph.
+        let original_root_fragment = old_fragments
+            .root_fragment()
+            .expect("root fragment not found");
+
+        // let job_type = StreamingJobType::from(stream_job);
+
+        // Map the column indices in the dispatchers with the given mapping.
+        let (mut downstream_fragments, downstream_actor_location) =
+            self.metadata_manager.get_downstream_fragments(id).await?;
+        // if let Some(mapping) = &col_index_mapping {
+        //     for (d, _f) in &mut downstream_fragments {
+        //         *d = mapping.rewrite_dispatch_strategy(d).ok_or_else(|| {
+        //             // The `rewrite` only fails if some column is dropped.
+        //             MetaError::invalid_parameter(
+        //                 "unable to drop the column due to being referenced by downstream materialized views or sinks",
+        //             )
+        //         })?;
+        //     }
+        // }
+
+        let (upstream_root_fragments, upstream_actor_location) = self
+            .metadata_manager
+            .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
+            .await?;
+
+        // build complete graph based on the table job type
+        let complete_graph = CompleteStreamFragmentGraph::with_upstreams_and_downstreams(
+            fragment_graph,
+            upstream_root_fragments,
+            upstream_actor_location,
+            original_root_fragment.fragment_id,
+            downstream_fragments,
+            downstream_actor_location,
+            StreamingJobType::Table(TableJobType::General),
+        )?;
+
+        // 2. Build the actor graph.
+        let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
+
+        // XXX: what is this parallelism?
+        // Is it "assigned parallelism"?
+        // let parallelism = NonZeroUsize::new(original_root_fragment.get_actors().len())
+        //     .expect("The number of actors in the original table fragment should be greater than 0");
+
+        let actor_graph_builder = ActorGraphBuilder::new(
+            id,
+            "default".to_string(),
+            complete_graph,
+            cluster_info,
+            NonZeroUsize::new(2),
+        )?;
+
+        let ActorGraphBuildResult {
+            graph,
+            actor_upstreams,
+            building_locations,
+            existing_locations,
+            dispatchers,
+            merge_updates,
+        } = actor_graph_builder.generate_graph(&self.env, stream_job, expr_context)?;
+
+        // // general table & source does not have upstream job, so the dispatchers should be empty
+        // if matches!(
+        //     job_type,
+        //     StreamingJobType::Source | StreamingJobType::Table(TableJobType::General)
+        // ) {
+        //     assert!(dispatchers.is_empty());
+        // }
+
+        // 3. Build the table fragments structure that will be persisted in the stream manager, and
+        // the context that contains all information needed for building the actors on the compute
+        // nodes.
+        let stream_job_fragments = StreamJobFragments::new(
+            (table_id as u32).into(),
+            graph,
+            actor_upstreams,
+            &building_locations.actor_locations,
+            StreamContext { timezone: None },
+            old_fragments.assigned_parallelism,
+            old_fragments.max_parallelism,
+        );
+
+        // Note: no need to set `vnode_count` as it's already set by the frontend.
+        // See `get_replace_table_plan`.
+
+        // let ctx = ReplaceStreamJobContext {
+        //     old_fragments,
+        //     merge_updates,
+        //     dispatchers,
+        //     building_locations,
+        //     existing_locations,
+        //     streaming_job: stream_job.clone(),
+        //     tmp_id: tmp_job_id as _,
+        // };
+
+        Ok((ctx, stream_job_fragments))
+
+        // let mut actor_dispatchers = get_actor_dispatchers(
+        //     &inner.db,
+        //     fragment_actors
+        //         .iter()
+        //         .flat_map(|(_, actors)| actors.iter().map(|actor| actor.actor_id))
+        //         .collect(),
+        // )
+        // //     .await?;
+        // let job_info = risingwave_meta_model::prelude::StreamingJob::find_by_id(job_id)
+        //     .one(&inner.db)
+        //     .await?
+        //     .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
+        //
+        // let mut fragment_info = vec![];
+        // for (fragment, actors) in fragment_actors {
+        //     let mut dispatcher_info = HashMap::new();
+        //     for actor in &actors {
+        //         if let Some(dispatchers) = actor_dispatchers.remove(&actor.actor_id) {
+        //             dispatcher_info.insert(actor.actor_id, dispatchers);
+        //         }
+        //     }
+        //     fragment_info.push((fragment, actors, dispatcher_info));
+        // }
+        //
+        // Self::compose_table_fragments(
+        //     job_id as _,
+        //     job_info.job_status.into(),
+        //     job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
+        //     fragment_info,
+        //     job_info.parallelism.clone(),
+        //     job_info.max_parallelism as _,
+        // )
+
+        // todo!()
+
+        // let policy = JobReschedulePolicy {
+        //     targets: HashMap::from([(
+        //         table_id.table_id,
+        //         JobRescheduleTarget {
+        //             parallelism: parallelism_change,
+        //             resource_group: resource_group_change,
+        //         },
+        //     )]
     }
 }

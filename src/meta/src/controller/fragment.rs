@@ -26,12 +26,12 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
-use risingwave_meta_model::prelude::{Actor, Fragment, Sink, StreamingJob};
+use risingwave_meta_model::prelude::{Actor, Fragment, FragmentRelation, Sink, StreamingJob};
 use risingwave_meta_model::{
-    actor, actor_dispatcher, database, fragment, object, sink, source, streaming_job, table,
-    ActorId, ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array,
-    JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
-    VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, database, fragment, fragment_relation, object, sink, source,
+    streaming_job, table, ActorId, ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext,
+    FragmentId, I32Array, JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode,
+    StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
@@ -732,6 +732,18 @@ impl CatalogController {
             job_info.parallelism.clone(),
             job_info.max_parallelism as _,
         )
+    }
+
+    pub async fn get_job_skeleton_by_id(
+        &self,
+        _job_id: ObjectId,
+    ) -> MetaResult<(Vec<fragment::Model>, Vec<fragment_relation::Model>)> {
+        let inner = self.inner.read().await;
+        let fragments = Fragment::find().all(&inner.db).await?;
+
+        let fragment_relations = FragmentRelation::find().all(&inner.db).await?;
+
+        Ok((fragments, fragment_relations))
     }
 
     pub async fn get_job_fragment_backfill_scan_type(
