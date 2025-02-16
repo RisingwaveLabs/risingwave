@@ -28,11 +28,12 @@ use prometheus::{
     register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
     register_int_gauge_with_registry, Histogram, HistogramVec, IntGauge, Registry,
 };
+use risingwave_common::config::RefillTarget;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use thiserror_ext::AsReport;
-use tokio::sync::Semaphore;
+use tokio::sync::{oneshot, Semaphore};
 use tokio::task::JoinHandle;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -186,13 +187,16 @@ pub struct CacheRefillConfig {
     /// Data file cache refill levels.
     pub data_refill_levels: HashSet<u32>,
 
+    /// Data block refill target.
+    pub data_refill_target: RefillTarget,
+
     /// Data file cache refill concurrency.
     pub concurrency: usize,
 
     /// Data file cache refill unit (blocks).
     pub unit: usize,
 
-    /// Data file cache reill unit threshold.
+    /// Data file cache refill unit threshold.
     ///
     /// Only units whose admit rate > threshold will be refilled.
     pub threshold: f64,
@@ -207,6 +211,7 @@ impl CacheRefillConfig {
                 .iter()
                 .copied()
                 .collect(),
+            data_refill_target: options.cache_refill_data_refill_target,
             concurrency: options.cache_refill_concurrency,
             unit: options.cache_refill_unit,
             threshold: options.cache_refill_threshold,
@@ -490,7 +495,7 @@ impl CacheRefillTask {
         if delta.insert_sst_level == 0 {
             Self::data_file_cache_refill_l0_impl(context, delta, holders).await;
         } else {
-            Self::data_file_cache_impl(context, delta, holders).await;
+            Self::data_file_cache_refill_impl(context, delta, holders).await;
         }
     }
 
@@ -510,15 +515,23 @@ impl CacheRefillTask {
                     sst_obj_id: sst.id,
                     blks: blk_start..blk_end,
                 };
-                futures.push(
-                    async move { Self::data_file_cache_refill_unit(context, sst, unit).await },
-                );
+                let future = match context.config.data_refill_target {
+                    RefillTarget::Memory => {
+                        async move { Self::data_cache_refill_unit(context, sst, unit).await }
+                            .left_future()
+                    }
+                    RefillTarget::Disk => {
+                        async move { Self::data_file_cache_refill_unit(context, sst, unit).await }
+                            .right_future()
+                    }
+                };
+                futures.push(future);
             }
         }
         join_all(futures).await;
     }
 
-    async fn data_file_cache_impl(
+    async fn data_file_cache_refill_impl(
         context: &CacheRefillContext,
         delta: &SstDeltaInfo,
         holders: Vec<TableHolder>,
@@ -554,8 +567,18 @@ impl CacheRefillTask {
             let ssts = &ssts;
             async move {
                 let sst = ssts.get(&unit.sst_obj_id).unwrap();
-                if let Err(e) = Self::data_file_cache_refill_unit(context, sst, unit).await {
-                    tracing::error!(error = %e.as_report(), "data file cache unit refill error");
+                let future = match context.config.data_refill_target {
+                    RefillTarget::Memory => {
+                        async move { Self::data_cache_refill_unit(context, sst, unit).await }
+                            .left_future()
+                    }
+                    RefillTarget::Disk => {
+                        async move { Self::data_file_cache_refill_unit(context, sst, unit).await }
+                            .right_future()
+                    }
+                };
+                if let Err(e) = future.await {
+                    tracing::error!(error = %e.as_report(), "data refill error");
                 }
             }
         });
@@ -654,6 +677,102 @@ impl CacheRefillTask {
         }
 
         try_join_all(tasks).await?;
+
+        Ok(())
+    }
+
+    async fn data_cache_refill_unit(
+        context: &CacheRefillContext,
+        sst: &Sstable,
+        unit: SstableUnit,
+    ) -> HummockResult<()> {
+        let sstable_store = context.sstable_store.clone();
+        let sst = sst.clone();
+
+        // update filter for sst id only
+        if let Some(filter) = sstable_store.data_recent_filter() {
+            filter.insert((sst.id, usize::MAX));
+        }
+
+        let blocks = unit.blks.size().unwrap();
+
+        let mut contexts = Vec::with_capacity(blocks);
+        let mut fetches = Vec::with_capacity(blocks);
+
+        let (range_first, _) = sst.calculate_block_info(unit.blks.start);
+        let (range_last, _) = sst.calculate_block_info(unit.blks.end - 1);
+        let range = range_first.start..range_last.end;
+
+        GLOBAL_CACHE_REFILL_METRICS
+            .data_refill_ideal_bytes
+            .inc_by(range.size().unwrap() as u64);
+
+        for blk in unit.blks {
+            let (range, uncompressed_capacity) = sst.calculate_block_info(blk);
+            let key = SstableBlockIndex {
+                sst_id: sst.id,
+                block_idx: blk as u64,
+            };
+
+            let (tx, rx) = oneshot::channel();
+
+            contexts.push((tx, range, uncompressed_capacity));
+            let block_cache = sstable_store.block_cache().clone();
+            fetches.push(
+                block_cache.fetch(key, || async move { rx.await.map_err(anyhow::Error::from) }),
+            );
+        }
+
+        let concurrency = context.concurrency.clone();
+        let task = async move {
+            GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
+
+            let permit = concurrency.acquire().await.unwrap();
+
+            GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
+
+            let timer = GLOBAL_CACHE_REFILL_METRICS
+                .data_refill_success_duration
+                .start_timer();
+
+            let data = sstable_store
+                .store()
+                .read(&sstable_store.get_sst_data_path(sst.id), range.clone())
+                .await?;
+            let mut futures = vec![];
+            for (tx, r, uc) in contexts {
+                let offset = r.start - range.start;
+                let len = r.end - r.start;
+                let bytes = data.slice(offset..offset + len);
+                let future = async move {
+                    let value = Box::new(Block::decode(bytes, uc)?);
+                    if tx.send(value).is_ok() {
+                        GLOBAL_CACHE_REFILL_METRICS
+                            .data_refill_success_bytes
+                            .inc_by(len as u64);
+                        GLOBAL_CACHE_REFILL_METRICS
+                            .data_refill_block_success_total
+                            .inc();
+                    }
+
+                    Ok::<_, HummockError>(())
+                };
+                futures.push(future);
+            }
+            try_join_all(futures)
+                .await
+                .map_err(HummockError::file_cache)?;
+
+            drop(permit);
+            drop(timer);
+
+            Ok::<_, HummockError>(())
+        };
+        tokio::spawn(task);
+
+        if let Err(e) = try_join_all(fetches).await {
+            tracing::error!(error = %e.as_report(), "data refill fetches error");
+        }
 
         Ok(())
     }

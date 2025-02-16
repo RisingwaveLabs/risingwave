@@ -906,11 +906,20 @@ pub struct StorageConfig {
     pub time_travel_version_cache_capacity: u64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum RefillTarget {
+    Memory,
+    Disk,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheRefillConfig {
     /// `SSTable` levels to refill.
     #[serde(default = "default::cache_refill::data_refill_levels")]
     pub data_refill_levels: Vec<u32>,
+
+    #[serde(default = "default::cache_refill::data_refill_target")]
+    pub data_refill_target: RefillTarget,
 
     /// Cache refill maximum timeout to apply version delta.
     #[serde(default = "default::cache_refill::timeout_ms")]
@@ -1929,8 +1938,14 @@ pub mod default {
     }
 
     pub mod cache_refill {
+        use crate::config::RefillTarget;
+
         pub fn data_refill_levels() -> Vec<u32> {
             vec![]
+        }
+
+        pub fn data_refill_target() -> RefillTarget {
+            RefillTarget::Disk
         }
 
         pub fn timeout_ms() -> u64 {

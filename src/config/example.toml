@@ -236,6 +236,7 @@ max_blocking_threads = 0
 
 [storage.cache_refill]
 data_refill_levels = []
+data_refill_target = "Disk"
 timeout_ms = 6000
 concurrency = 10
 unit = 64

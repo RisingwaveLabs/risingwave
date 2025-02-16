@@ -711,7 +711,7 @@ impl StateStoreImpl {
             builder.build().await.map_err(HummockError::foyer_error)?
         };
 
-        let recent_filter = if opts.data_file_cache_dir.is_empty() {
+        let recent_filter = if opts.cache_refill_data_refill_levels.is_empty() {
             None
         } else {
             Some(Arc::new(RecentFilter::new(
