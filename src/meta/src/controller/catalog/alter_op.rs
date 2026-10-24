@@ -947,11 +947,13 @@ impl CatalogController {
         entries_to_add: HashMap<String, String>,
         keys_to_remove: Vec<String>,
     ) -> MetaResult<NotificationVersion> {
-        let updates_cache_refill_policy = entries_to_add
-            .contains_key(STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH)
-            || keys_to_remove
-                .iter()
-                .any(|key| key == STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH);
+        let updates_table_cache_refill_config = entries_to_add.keys().any(|key| {
+            key == STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH
+                || key == STREAMING_PIN_CACHE_TABLE_ID_CONFIG_PATH
+        }) || keys_to_remove.iter().any(|key| {
+            key == STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH
+                || key == STREAMING_PIN_CACHE_TABLE_ID_CONFIG_PATH
+        });
 
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -998,6 +1000,28 @@ impl CatalogController {
             if !unrecognized_keys.is_empty() {
                 bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
             }
+
+            if let Some(raw_table_id) = merged.developer.pin_cache_table_id {
+                let table_id = pin_cache_table_id(raw_table_id)?;
+                let table = Table::find_by_id(table_id)
+                    .select_only()
+                    .column(table::Column::TableType)
+                    .column(table::Column::BelongsToJobId)
+                    .into_tuple::<(TableType, Option<JobId>)>()
+                    .one(&txn)
+                    .await?;
+                let belongs_to_job = table.is_some_and(|(table_type, belongs_to_job_id)| {
+                    table_id == job_id.as_mv_table_id()
+                        || (table_type == TableType::Internal && belongs_to_job_id == Some(job_id))
+                });
+                if !belongs_to_job {
+                    bail_invalid_parameter!(
+                        "pin cache table {} does not belong to streaming job {}",
+                        raw_table_id,
+                        job_id.as_raw_id()
+                    );
+                }
+            }
         }
 
         StreamingJob::update(streaming_job::ActiveModel {
@@ -1011,7 +1035,7 @@ impl CatalogController {
         txn.commit().await?;
         drop(inner);
 
-        if updates_cache_refill_policy {
+        if updates_table_cache_refill_config {
             let policies = self.table_cache_refill_policies_snapshot().await?;
             self.env.notification_manager().notify_hummock(
                 NotificationOperation::Update,

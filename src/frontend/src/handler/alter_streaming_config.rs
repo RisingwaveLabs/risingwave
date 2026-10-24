@@ -28,13 +28,15 @@ use crate::handler::{HandlerArgs, RwPgResponse};
 type TomlMapDiff = TomlMap<String, Option<TomlValue>>;
 
 const STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH: &str = "streaming.developer.cache_refill_policy";
+const STREAMING_PIN_CACHE_TABLE_ID_CONFIG_PATH: &str = "streaming.developer.pin_cache_table_id";
 const ALTER_CONFIG_RECOVER_NOTICE: &str =
     "ALTER CONFIG requires a RECOVER on the specified streaming job to take effect.";
 
 fn alter_config_requires_recover(map_diff: &TomlMapDiff) -> bool {
-    map_diff
-        .keys()
-        .any(|key| key != STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH)
+    map_diff.keys().any(|key| {
+        key != STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH
+            && key != STREAMING_PIN_CACHE_TABLE_ID_CONFIG_PATH
+    })
 }
 
 fn collect_options(entries: Vec<SqlOption>) -> Result<TomlMapDiff> {
@@ -131,11 +133,12 @@ mod tests {
     use toml::Value as TomlValue;
 
     use super::{
-        STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH, TomlMapDiff, alter_config_requires_recover,
+        STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH, STREAMING_PIN_CACHE_TABLE_ID_CONFIG_PATH,
+        TomlMapDiff, alter_config_requires_recover,
     };
 
     #[test]
-    fn test_cache_refill_policy_config_does_not_require_recover() {
+    fn test_cache_refill_runtime_config_does_not_require_recover() {
         let mut map_diff = TomlMapDiff::new();
         map_diff.insert(
             STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned(),
@@ -144,6 +147,15 @@ mod tests {
         assert!(!alter_config_requires_recover(&map_diff));
 
         map_diff.insert(STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned(), None);
+        assert!(!alter_config_requires_recover(&map_diff));
+
+        map_diff.insert(
+            STREAMING_PIN_CACHE_TABLE_ID_CONFIG_PATH.to_owned(),
+            Some(TomlValue::Integer(233)),
+        );
+        assert!(!alter_config_requires_recover(&map_diff));
+
+        map_diff.insert(STREAMING_PIN_CACHE_TABLE_ID_CONFIG_PATH.to_owned(), None);
         assert!(!alter_config_requires_recover(&map_diff));
     }
 

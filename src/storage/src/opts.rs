@@ -107,6 +107,9 @@ pub struct StorageOpts {
     pub data_file_cache_runtime_config: FileCacheRuntimeConfig,
     pub data_file_cache_throttle: foyer::Throttle,
 
+    pub pin_cache_dir: String,
+    pub pin_cache_capacity_mb: usize,
+
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
     pub cache_refill_pin_cache_max_batch_size: usize,
@@ -280,6 +283,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_blob_index_size_kb: c.storage.data_file_cache.blob_index_size_kb,
             data_file_cache_runtime_config: c.storage.data_file_cache.runtime_config.clone(),
             data_file_cache_throttle,
+            pin_cache_dir: c.storage.pin_cache_dir.clone(),
+            pin_cache_capacity_mb: c.storage.pin_cache_capacity_mb,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_direct_io: c.storage.meta_file_cache.direct_io,
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,

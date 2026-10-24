@@ -181,6 +181,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         state_store_metrics,
         compactor_metrics,
         None,
+        None,
     )
     .await
     .expect("failed to create a HummockStorage object");

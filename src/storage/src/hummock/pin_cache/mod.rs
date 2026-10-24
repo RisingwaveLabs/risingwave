@@ -36,6 +36,10 @@ use parking_lot::{Mutex, RwLock};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectResult, ObjectStoreRef};
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "GC scheduling is not wired yet")
+)]
 mod gc;
 pub(crate) mod membership;
 mod read;

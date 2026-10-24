@@ -12,17 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use opendal::Operator;
-use opendal::layers::LoggingLayer;
+use opendal::layers::{LoggingLayer, PrometheusLayer};
 use opendal::services::Fs;
 use risingwave_common::config::ObjectStoreConfig;
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 use super::{MediaType, OpendalObjectStore, new_operator};
 use crate::object::ObjectResult;
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
+
+fn prometheus_layer() -> &'static PrometheusLayer {
+    static LAYER: OnceLock<PrometheusLayer> = OnceLock::new();
+    LAYER.get_or_init(|| {
+        PrometheusLayer::builder()
+            .register(&GLOBAL_METRICS_REGISTRY)
+            .expect("OpenDAL Prometheus metrics must be registered once")
+    })
+}
 
 impl OpendalObjectStore {
     /// create opendal fs engine.
@@ -40,7 +50,9 @@ impl OpendalObjectStore {
 
         let op = new_operator(
             &config,
-            Operator::new(builder)?.layer(LoggingLayer::default()),
+            Operator::new(builder)?
+                .layer(prometheus_layer().clone())
+                .layer(LoggingLayer::default()),
         );
 
         Ok(Self {

@@ -738,6 +738,9 @@ message TableCacheRefillPolicies {
   repeated TableCacheRefillPolicy table_policies = 1;
   // Contains explicit internal-table overrides only.
   repeated TableCacheRefillPolicy internal_table_policies = 2;
+  // Complete set of physical table IDs pinned by a streaming-job override.
+  // Empty in a present snapshot clears pin intent; absent outer message means no update.
+  repeated uint32 pinned_table_ids = 3;
 
   message TableCacheRefillPolicy {
     uint32 table_id = 1;

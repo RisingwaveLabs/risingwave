@@ -43,6 +43,10 @@ impl PinCacheStorageState {
     }
 
     /// Forget a confirmed absent file and release its accounted bytes at most once.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "GC scheduling is not wired yet")
+    )]
     pub(super) fn remove_file(&mut self, path: &str) {
         if let Some(file) = self.files.remove(path) {
             self.pending_deletes.remove(path);

@@ -263,7 +263,6 @@ impl SstableStore {
 
     /// Attaches a recovered backend while constructing the store, before sharing it.
     #[must_use]
-    #[allow(dead_code)] // Wired to production storage in the final stack layer.
     pub(crate) fn with_pin_cache(mut self, pin_cache: Arc<PinCache>) -> Self {
         self.pin_cache = Some(pin_cache);
         self

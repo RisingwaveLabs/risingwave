@@ -263,6 +263,7 @@ mod tests {
                     table_id: table_id + 1,
                     policy: PbCacheRefillPolicy::Both as i32,
                 }],
+                pinned_table_ids: vec![],
             }),
             serving_table_vnode_mappings: Some(PbServingTableVnodeMappings {
                 mappings: vec![PbServingTableVnodeMapping {

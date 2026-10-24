@@ -1,3 +1,5 @@
+control substitution on
+
 statement ok
 create table cf (v int);
 
@@ -150,6 +152,47 @@ Caused by these errors (recent errors listed first):
 in `developer`
 
 
+
+statement ok
+create materialized view cf_pin_mv as
+select v, count(*) from cf group by v;
+
+let pin_cache_table_id
+select id
+from rw_catalog.rw_internal_table_info
+where job_name = 'cf_pin_mv'
+order by id
+limit 1
+
+statement ok
+alter materialized view cf_pin_mv set config (
+    streaming.developer.pin_cache_table_id = ${pin_cache_table_id}
+);
+
+query I
+select count(*)
+from rw_streaming_job_config
+where name = 'cf_pin_mv'
+  and key = 'streaming.developer.pin_cache_table_id'
+  and value = '${pin_cache_table_id}';
+----
+1
+
+statement ok
+alter materialized view cf_pin_mv reset config (
+    streaming.developer.pin_cache_table_id
+);
+
+query I
+select count(*)
+from rw_streaming_job_config
+where name = 'cf_pin_mv'
+  and key = 'streaming.developer.pin_cache_table_id';
+----
+0
+
+statement ok
+drop materialized view cf_pin_mv;
 
 statement ok
 drop table cf;

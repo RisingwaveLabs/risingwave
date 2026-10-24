@@ -29,6 +29,8 @@ pub struct ComputeNodeConfig {
     pub exporter_port: u16,
     pub async_stack_trace: String,
     pub enable_tiered_cache: bool,
+    #[serde(default)]
+    pub enable_pin_cache: bool,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,

@@ -1534,6 +1534,9 @@ template:
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
 
+    # Set a per-CN pin-cache directory; false leaves the TOML/environment setting unchanged.
+    enable-pin-cache: false
+
     # Minio instances used by this compute node
     provide-minio: "minio*"
 

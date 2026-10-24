@@ -7962,7 +7962,7 @@ dependencies = [
  "iceberg",
  "once_cell",
  "opendal 0.59.3",
- "opendal-layer-prometheus",
+ "opendal-layer-prometheus 0.59.3",
  "prometheus",
  "reqsign-aws-v4",
  "reqsign-azure-storage",
@@ -10892,6 +10892,7 @@ dependencies = [
  "opendal-http-transport-reqwest 0.58.1",
  "opendal-layer-concurrent-limit 0.58.1",
  "opendal-layer-logging 0.58.1",
+ "opendal-layer-prometheus 0.58.1",
  "opendal-layer-retry 0.58.1",
  "opendal-layer-timeout 0.58.1",
  "opendal-service-azblob 0.58.1",
@@ -11050,6 +11051,17 @@ dependencies = [
 
 [[package]]
 name = "opendal-layer-observe-metrics-common"
+version = "0.58.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12dbc31b27ee8e5f658ae6c8514b8276059e5235e2f85138a42e6ed172324876"
+dependencies = [
+ "futures",
+ "http 1.5.0",
+ "opendal-core 0.58.1",
+]
+
+[[package]]
+name = "opendal-layer-observe-metrics-common"
 version = "0.59.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ed35771acdb8012d117d1e0dd3911d21fcb11b0873fcfa6ada9dc4e6c436430"
@@ -11061,12 +11073,23 @@ dependencies = [
 
 [[package]]
 name = "opendal-layer-prometheus"
+version = "0.58.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c14e6cb0b3ea8d83bef751613b8bf4512678afe8b49c2c96a633515bc0b34d79"
+dependencies = [
+ "opendal-core 0.58.1",
+ "opendal-layer-observe-metrics-common 0.58.1",
+ "prometheus",
+]
+
+[[package]]
+name = "opendal-layer-prometheus"
 version = "0.59.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0e86d324426d26be01986b63d17b009eedbb206dcb864cb8861adec1813accf"
 dependencies = [
  "opendal-core 0.59.3",
- "opendal-layer-observe-metrics-common",
+ "opendal-layer-observe-metrics-common 0.59.3",
  "prometheus",
 ]
 

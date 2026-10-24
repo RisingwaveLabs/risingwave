@@ -106,6 +106,15 @@ impl Task for ComputeNodeService {
             );
         }
 
+        if self.config.enable_pin_cache {
+            let prefix_data = env::var("PREFIX_DATA")?;
+            cmd.arg("--pin-cache-dir").arg(
+                PathBuf::from(&prefix_data)
+                    .join("pin-cache")
+                    .join(self.config.port.to_string()),
+            );
+        }
+
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;
             ctx.pb.set_message("started");

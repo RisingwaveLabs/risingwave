@@ -104,6 +104,7 @@ mod tests {
                 table_id: internal_table_id.as_raw_id(),
                 policy: PbCacheRefillPolicy::Streaming as i32,
             }],
+            pinned_table_ids: vec![],
         };
         let config = build_hummock_table_refill_runtime_config(
             &serving_vnode_mapping,

@@ -277,6 +277,7 @@ enable_state_table_vnode_stats_pruning = false
 enable_locality_sort_buffer = true
 locality_sort_buffer_activate_threshold = 65536
 cache_refill_policy = "enabled"
+pin_cache_table_id = ""
 enable_vnode_key_stats_for_materialize = false
 max_concurrent_kv_log_store_historical_read = 0
 
@@ -305,6 +306,8 @@ compactor_max_task_multiplier = 3.0
 compactor_memory_available_proportion = 0.8
 sstable_id_remote_fetch_number = 10
 min_sstable_size_mb = 32
+pin_cache_dir = ""
+pin_cache_capacity_mb = 1024
 sst_skip_bloom_filter_in_serde = false
 min_sst_size_for_streaming_upload = 33554432
 max_concurrent_compaction_task_number = 16

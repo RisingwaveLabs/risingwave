@@ -33,13 +33,32 @@ mod tests {
 
     use crate::barrier::Command;
     use crate::controller::catalog::*;
-    use crate::manager::{LocalNotification, MetaOpts, WorkerKey};
+    use crate::manager::{LocalNotification, MetaOpts, Notification, WorkerKey};
     use crate::model::{Fragment, FragmentDownstreamRelation};
     use crate::serving::ServingVnodeMapping;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
     const TEST_SCHEMA_ID: SchemaId = SchemaId::new(2);
     const TEST_OWNER_ID: UserId = UserId::new(1);
+
+    async fn recv_table_refill_policies(
+        rx: &mut mpsc::UnboundedReceiver<Notification>,
+    ) -> PbTableCacheRefillPolicies {
+        let response = rx
+            .recv()
+            .await
+            .expect("should receive hummock notification")
+            .expect("notification should be ok");
+        assert_eq!(response.operation(), NotificationOperation::Update);
+        let info = response.info;
+        let Some(NotificationInfo::TableRefillRuntimeConfig(config)) = info else {
+            panic!("unexpected notification: {:?}", info);
+        };
+        assert!(config.serving_table_vnode_mappings.is_none());
+        config
+            .table_cache_refill_policies
+            .expect("policy snapshot should be present")
+    }
 
     async fn insert_test_table(
         txn: &DatabaseTransaction,
@@ -1062,7 +1081,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_alter_streaming_job_cache_refill_policy_notifies_hummock() -> MetaResult<()> {
+    async fn test_alter_streaming_job_cache_refill_config_notifies_hummock() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let (tx, mut rx) = mpsc::unbounded_channel();
         env.notification_manager().insert_sender(
@@ -1092,6 +1111,32 @@ mod tests {
         txn.commit().await?;
         drop(inner);
 
+        let pin_key = STREAMING_PIN_CACHE_TABLE_ID_CONFIG_PATH.to_owned();
+        mgr.alter_streaming_job_config(
+            result_table_id.as_job_id(),
+            HashMap::from([(pin_key.clone(), internal_table_id.as_raw_id().to_string())]),
+            vec![],
+        )
+        .await?;
+        let policies = recv_table_refill_policies(&mut rx).await;
+        assert!(policies.table_policies.is_empty());
+        assert!(policies.internal_table_policies.is_empty());
+        assert_eq!(
+            policies.pinned_table_ids,
+            vec![internal_table_id.as_raw_id()]
+        );
+
+        mgr.alter_streaming_job_config(
+            result_table_id.as_job_id(),
+            HashMap::new(),
+            vec![pin_key.clone()],
+        )
+        .await?;
+        let policies = recv_table_refill_policies(&mut rx).await;
+        assert!(policies.table_policies.is_empty());
+        assert!(policies.internal_table_policies.is_empty());
+        assert!(policies.pinned_table_ids.is_empty());
+
         mgr.alter_streaming_job_config(
             result_table_id.as_job_id(),
             HashMap::from([(
@@ -1102,20 +1147,8 @@ mod tests {
         )
         .await?;
 
-        let response = rx
-            .recv()
-            .await
-            .expect("should receive hummock notification")
-            .expect("notification should be ok");
-        assert_eq!(response.operation(), NotificationOperation::Update);
-        let info = response.info;
-        let Some(NotificationInfo::TableRefillRuntimeConfig(config)) = info else {
-            panic!("unexpected notification: {:?}", info);
-        };
-        assert!(config.serving_table_vnode_mappings.is_none());
-        let policies = config
-            .table_cache_refill_policies
-            .expect("policy snapshot should be present");
+        let policies = recv_table_refill_policies(&mut rx).await;
+        assert!(policies.pinned_table_ids.is_empty());
         assert_eq!(
             policies
                 .table_policies
@@ -1138,6 +1171,78 @@ mod tests {
                 CacheRefillPolicy::Both.to_protobuf() as i32,
             )])
         );
+
+        mgr.alter_streaming_job_config(
+            result_table_id.as_job_id(),
+            HashMap::from([(pin_key.clone(), internal_table_id.as_raw_id().to_string())]),
+            vec![],
+        )
+        .await?;
+
+        let policies = recv_table_refill_policies(&mut rx).await;
+        assert_eq!(
+            policies.pinned_table_ids,
+            vec![internal_table_id.as_raw_id()]
+        );
+        assert_eq!(
+            policies
+                .table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(
+                result_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+        assert_eq!(
+            policies
+                .internal_table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(
+                internal_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+
+        mgr.alter_streaming_job_config(
+            result_table_id.as_job_id(),
+            HashMap::new(),
+            vec![pin_key.clone()],
+        )
+        .await?;
+        let policies = recv_table_refill_policies(&mut rx).await;
+        assert!(policies.pinned_table_ids.is_empty());
+        assert_eq!(
+            policies.internal_table_policies[0].policy,
+            CacheRefillPolicy::Both.to_protobuf() as i32
+        );
+
+        let error = mgr
+            .alter_streaming_job_config(
+                result_table_id.as_job_id(),
+                HashMap::from([(pin_key.clone(), 1_000_000_u32.to_string())]),
+                vec![],
+            )
+            .await
+            .expect_err("unknown table must not be pinned");
+        assert!(
+            error
+                .to_string()
+                .contains("does not belong to streaming job")
+        );
+
+        let error = mgr
+            .alter_streaming_job_config(
+                result_table_id.as_job_id(),
+                HashMap::from([(pin_key, u32::MAX.to_string())]),
+                vec![],
+            )
+            .await
+            .expect_err("out-of-range table id must not be pinned");
+        assert!(error.to_string().contains("is out of range"));
 
         Ok(())
     }

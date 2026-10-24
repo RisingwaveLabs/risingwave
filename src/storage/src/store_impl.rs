@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 use std::fmt::Debug;
+use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -968,6 +969,30 @@ impl StateStoreImpl {
                     vector_meta_cache,
                     vector_block_cache,
                 }));
+                let pin_cache_store = if !opts.pin_cache_dir.is_empty() {
+                    let pin_cache_root = Path::new(&opts.pin_cache_dir).join("pinned_ssts");
+                    tokio::fs::create_dir_all(&pin_cache_root)
+                        .await
+                        .map_err(|error| {
+                            HummockError::other(format!(
+                                "failed to create pin cache directory {}: {error}",
+                                pin_cache_root.display()
+                            ))
+                        })?;
+                    let pin_cache_url = format!("fs://{}", pin_cache_root.display());
+                    let mut pin_cache_object_store_config = opts.object_store_config.clone();
+                    pin_cache_object_store_config.set_atomic_write_dir();
+                    let pin_cache_store = build_remote_object_store(
+                        &pin_cache_url,
+                        object_store_metrics.clone(),
+                        "Hummock Pin Cache",
+                        Arc::new(pin_cache_object_store_config),
+                    )
+                    .await;
+                    Some(Arc::new(pin_cache_store))
+                } else {
+                    None
+                };
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
                 let compaction_catalog_manager_ref =
@@ -984,6 +1009,7 @@ impl StateStoreImpl {
                     compaction_catalog_manager_ref,
                     state_store_metrics.clone(),
                     compactor_metrics.clone(),
+                    pin_cache_store,
                     await_tree_config,
                 )
                 .await?;

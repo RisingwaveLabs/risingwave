@@ -34,6 +34,10 @@ pub(crate) struct PinCacheMetrics {
     pub published_bytes: IntGauge,
     pub recovery_ready: IntGauge,
     pub recovery_failures: IntCounter,
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "GC scheduling is not wired yet")
+    )]
     pub gc_failures: IntCounter,
 }
 
